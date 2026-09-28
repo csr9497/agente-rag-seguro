@@ -26,12 +26,18 @@ class Settings(BaseSettings):
     # Modo embebido (sin servidor ni Docker): si se define, tiene prioridad sobre qdrant_url.
     # Solo admite un proceso a la vez (la ingesta y la app no pueden abrirlo simultáneamente).
     qdrant_path: str | None = None
+    qdrant_api_key: SecretStr | None = None  # Qdrant Cloud
     qdrant_collection: str = "documentos"
     azure_search_endpoint: str = ""
     azure_search_index: str = "documentos"
+    # Solo si el servicio usa claves (search_auth=api_key); si no, Managed Identity.
+    azure_search_api_key: SecretStr | None = None
 
     azure_storage_account_url: str = ""
     azure_storage_container: str = "documentos"
+    # Originales de los documentos subidos: carpeta local o Azure Blob (roles en metadatos).
+    almacen_documentos: Literal["local", "blob"] = "local"
+    almacen_local_dir: str = "data/documentos"
 
     # Roles, registro de documentos y conversaciones. PostgreSQL en Azure (misma interfaz).
     database_url: str = "sqlite:///data/app.db"

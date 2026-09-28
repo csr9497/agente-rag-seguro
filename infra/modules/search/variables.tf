@@ -3,7 +3,13 @@ variable "location" { type = string }
 variable "resource_group_name" { type = string }
 variable "sku" {
   type    = string
-  default = "basic"
+  default = "free"
+}
+
+variable "auth" {
+  type        = string
+  description = "rbac | api_key"
+  default     = "rbac"
 }
 variable "replica_count" {
   type    = number

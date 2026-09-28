@@ -1,6 +1,8 @@
-# Identidades de mínimo privilegio: el backend solo lee; la ingesta escribe el índice.
+# Identidades de mínimo privilegio (solo alcance=completo): el backend solo lee; la ingesta
+# escribe el índice; la web solo descarga su imagen.
 
 resource "azurerm_user_assigned_identity" "backend" {
+  count               = local.completo ? 1 : 0
   name                = "id-backend-${local.name}"
   location            = var.location
   resource_group_name = azurerm_resource_group.this.name
@@ -8,6 +10,7 @@ resource "azurerm_user_assigned_identity" "backend" {
 }
 
 resource "azurerm_user_assigned_identity" "web" {
+  count               = local.completo ? 1 : 0
   name                = "id-web-${local.name}"
   location            = var.location
   resource_group_name = azurerm_resource_group.this.name
@@ -15,6 +18,7 @@ resource "azurerm_user_assigned_identity" "web" {
 }
 
 resource "azurerm_user_assigned_identity" "ingest" {
+  count               = local.completo ? 1 : 0
   name                = "id-ingest-${local.name}"
   location            = var.location
   resource_group_name = azurerm_resource_group.this.name
@@ -22,33 +26,54 @@ resource "azurerm_user_assigned_identity" "ingest" {
 }
 
 locals {
-  role_assignments = {
-    backend_acr    = { scope = module.registry.id, role = "AcrPull", principal = azurerm_user_assigned_identity.backend.principal_id }
-    backend_openai = { scope = module.openai.id, role = "Cognitive Services OpenAI User", principal = azurerm_user_assigned_identity.backend.principal_id }
-    backend_search = { scope = module.search.id, role = "Search Index Data Reader", principal = azurerm_user_assigned_identity.backend.principal_id }
+  backend = local.completo ? azurerm_user_assigned_identity.backend[0].principal_id : null
+  web     = local.completo ? azurerm_user_assigned_identity.web[0].principal_id : null
+  ingest  = local.completo ? azurerm_user_assigned_identity.ingest[0].principal_id : null
 
-    web_acr = { scope = module.registry.id, role = "AcrPull", principal = azurerm_user_assigned_identity.web.principal_id }
+  roles_completo = local.completo ? merge(
+    {
+      backend_acr    = { scope = module.registry[0].id, role = "AcrPull", principal = local.backend }
+      backend_openai = { scope = module.openai.id, role = "Cognitive Services OpenAI User", principal = local.backend }
+      backend_kv     = { scope = module.keyvault.id, role = "Key Vault Secrets User", principal = local.backend }
+      # El backend también indexa (subida desde la UI): escribe blobs e índice.
+      backend_blob  = { scope = module.storage.id, role = "Storage Blob Data Contributor", principal = local.backend }
+      web_acr       = { scope = module.registry[0].id, role = "AcrPull", principal = local.web }
+      ingest_acr    = { scope = module.registry[0].id, role = "AcrPull", principal = local.ingest }
+      ingest_openai = { scope = module.openai.id, role = "Cognitive Services OpenAI User", principal = local.ingest }
+      ingest_blob   = { scope = module.storage.id, role = "Storage Blob Data Reader", principal = local.ingest }
+      ingest_kv     = { scope = module.keyvault.id, role = "Key Vault Secrets User", principal = local.ingest }
+    },
+    local.search ? {
+      backend_search_idx = { scope = module.search[0].id, role = "Search Index Data Contributor", principal = local.backend }
+      backend_search_svc = { scope = module.search[0].id, role = "Search Service Contributor", principal = local.backend }
+      ingest_search_svc  = { scope = module.search[0].id, role = "Search Service Contributor", principal = local.ingest }
+      ingest_search_idx  = { scope = module.search[0].id, role = "Search Index Data Contributor", principal = local.ingest }
+    } : {}
+  ) : {}
 
-    ingest_acr        = { scope = module.registry.id, role = "AcrPull", principal = azurerm_user_assigned_identity.ingest.principal_id }
-    ingest_openai     = { scope = module.openai.id, role = "Cognitive Services OpenAI User", principal = azurerm_user_assigned_identity.ingest.principal_id }
-    ingest_search_svc = { scope = module.search.id, role = "Search Service Contributor", principal = azurerm_user_assigned_identity.ingest.principal_id }
-    ingest_search_idx = { scope = module.search.id, role = "Search Index Data Contributor", principal = azurerm_user_assigned_identity.ingest.principal_id }
-    ingest_blob       = { scope = module.storage.id, role = "Storage Blob Data Reader", principal = azurerm_user_assigned_identity.ingest.principal_id }
-
-    # Identidad que ejecuta Terraform: escribe el secreto de desarrollo en Key Vault.
+  # Identidad que ejecuta Terraform: escribe secretos en Key Vault.
+  roles_base = {
     deployer_kv = { scope = module.keyvault.id, role = "Key Vault Secrets Officer", principal = data.azurerm_client_config.current.object_id }
   }
 
+  # Desarrolladores (app en local contra Azure): OpenAI, blobs, secretos e índice.
   developer_roles = merge([
-    for pid in var.developer_principal_ids : {
-      "dev_blob_${pid}" = { scope = module.storage.id, role = "Storage Blob Data Contributor", principal = pid }
-      "dev_kv_${pid}"   = { scope = module.keyvault.id, role = "Key Vault Secrets User", principal = pid }
-    }
+    for pid in var.developer_principal_ids : merge(
+      {
+        "dev_blob_${pid}"   = { scope = module.storage.id, role = "Storage Blob Data Contributor", principal = pid }
+        "dev_kv_${pid}"     = { scope = module.keyvault.id, role = "Key Vault Secrets User", principal = pid }
+        "dev_openai_${pid}" = { scope = module.openai.id, role = "Cognitive Services OpenAI User", principal = pid }
+      },
+      local.search ? {
+        "dev_search_idx_${pid}" = { scope = module.search[0].id, role = "Search Index Data Contributor", principal = pid }
+        "dev_search_svc_${pid}" = { scope = module.search[0].id, role = "Search Service Contributor", principal = pid }
+      } : {}
+    )
   ]...)
 }
 
 resource "azurerm_role_assignment" "this" {
-  for_each             = merge(local.role_assignments, local.developer_roles)
+  for_each             = merge(local.roles_base, local.roles_completo, local.developer_roles)
   scope                = each.value.scope
   role_definition_name = each.value.role
   principal_id         = each.value.principal
@@ -60,12 +85,21 @@ resource "time_sleep" "kv_rbac" {
   create_duration = "60s"
 }
 
-# Clave de Azure OpenAI solo para desarrollo local (regla 3: secretos en Key Vault).
-resource "azurerm_key_vault_secret" "openai_key" {
-  count        = var.openai_local_auth_enabled ? 1 : 0
-  name         = "azure-openai-api-key"
-  value        = module.openai.primary_access_key
+# ------------------------------------------------------------------ secretos (regla 3)
+locals {
+  secretos = merge(
+    var.openai_local_auth_enabled ? { "azure-openai-api-key" = module.openai.primary_access_key } : {},
+    local.search && var.search_auth == "api_key" ? { "azure-search-api-key" = module.search[0].primary_key } : {},
+    local.qdrant && var.qdrant_modo == "cloud" ? { "qdrant-api-key" = var.qdrant_cloud_api_key } : {},
+    var.langsmith_api_key != "" ? { "langsmith-api-key" = var.langsmith_api_key } : {},
+    local.completo ? { "database-url" = module.postgres[0].database_url } : {},
+  )
+}
+
+resource "azurerm_key_vault_secret" "this" {
+  for_each     = nonsensitive(toset(keys(local.secretos)))
+  name         = each.key
+  value        = local.secretos[each.key]
   key_vault_id = module.keyvault.id
-  content_type = "api-key"
   depends_on   = [time_sleep.kv_rbac]
 }

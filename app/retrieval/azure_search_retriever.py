@@ -1,6 +1,6 @@
 import re
 
-from azure.core.credentials import TokenCredential
+from azure.core.credentials import AzureKeyCredential, TokenCredential
 from azure.core.exceptions import ResourceNotFoundError
 from azure.search.documents import SearchClient
 from azure.search.documents.indexes import SearchIndexClient
@@ -46,7 +46,11 @@ class AzureSearchRetriever:
     """Búsqueda híbrida (texto + vector) con filtro por grupos del usuario."""
 
     def __init__(
-        self, endpoint: str, index: str, credential: TokenCredential, dimensions: int
+        self,
+        endpoint: str,
+        index: str,
+        credential: TokenCredential | AzureKeyCredential,
+        dimensions: int,
     ) -> None:
         self._index = index
         self._dimensions = dimensions

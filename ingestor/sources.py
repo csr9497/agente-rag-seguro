@@ -13,6 +13,7 @@ class DocumentoCrudo(NamedTuple):
     doc_id: str
     datos: bytes
     motivo_descarte: str | None = None  # el origen ya sabe que no es válido (p. ej. symlink)
+    roles: list[str] | None = None  # si el origen los guarda (metadatos del blob); si no, carpeta
 
 
 class Source(Protocol):
@@ -51,8 +52,10 @@ class BlobSource:
         self._max_bytes = max_bytes
 
     def documentos(self) -> Iterator[DocumentoCrudo]:
-        for blob in self._container.list_blobs():
+        for blob in self._container.list_blobs(include=["metadata"]):
+            roles = [r for r in (blob.metadata or {}).get("roles", "").split(",") if r] or None
             if blob.size > self._max_bytes:  # no se descarga
                 yield DocumentoCrudo(blob.name, b"", f"tamaño: supera {self._max_bytes} bytes")
             else:
-                yield DocumentoCrudo(blob.name, self._container.download_blob(blob.name).readall())
+                datos = self._container.download_blob(blob.name).readall()
+                yield DocumentoCrudo(blob.name, datos, roles=roles)

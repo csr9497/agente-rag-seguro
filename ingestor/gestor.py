@@ -16,6 +16,7 @@ from pathlib import PurePosixPath
 from pydantic import BaseModel
 
 from app.models.schemas import DocumentoIndexado, ResultadoOperacion
+from app.persistencia.almacen import AlmacenDocumentos
 from app.persistencia.modelos import DocumentoRegistrado
 from app.persistencia.repositorios import RepositorioDocumentos, RepositorioRoles
 from app.retrieval.base import Embedder, Retriever
@@ -67,11 +68,13 @@ class GestorDocumentos:
         retriever: Retriever,
         registro: RepositorioDocumentos | None = None,
         roles: RepositorioRoles | None = None,
+        almacen: AlmacenDocumentos | None = None,
     ) -> None:
         self._embedder = embedder
         self._retriever = retriever
         self._registro = registro
         self._roles = roles
+        self._almacen = almacen
         self._indice_listo = False
 
     def _asegurar_indice(self) -> None:
@@ -119,10 +122,14 @@ class GestorDocumentos:
             doc_hash=doc_hash,
             indexado_en=datetime.now(UTC).isoformat(timespec="seconds"),
         )
-        # Embeddings antes de borrar: si el proveedor falla, el documento anterior sigue intacto.
+        # Embeddings antes de tocar nada: si el proveedor falla, no cambia nada.
         vectores: list[list[float]] = []
         for i in range(0, len(chunks), BATCH):
             vectores += self._embedder.embed([c.contenido for c in chunks[i : i + BATCH]])
+        # Orden: original (con roles) → índice → registro. El original es la fuente de verdad
+        # para reindexar; si fallara el registro, access_guardrail descarta los chunks.
+        if self._almacen:
+            self._almacen.guardar(doc_id, datos, acl, doc_hash)
         if previo is not None:
             self._retriever.delete_document(doc_id)
         for i in range(0, len(chunks), BATCH):
@@ -160,6 +167,8 @@ class GestorDocumentos:
     def eliminar(self, doc_id: str) -> ResultadoOperacion:
         if self._registro:
             self._registro.eliminar(doc_id)
+        if self._almacen:
+            self._almacen.eliminar(doc_id)
         borrados = self._retriever.delete_document(doc_id)
         return ResultadoOperacion(
             doc_id=doc_id, estado="eliminado" if borrados else "no_encontrado", chunks=borrados
@@ -182,7 +191,7 @@ class GestorDocumentos:
                     doc_id=crudo.doc_id, estado="rechazado", motivos=[crudo.motivo_descarte]
                 )
             else:
-                r = self.indexar(crudo.doc_id, crudo.datos)
+                r = self.indexar(crudo.doc_id, crudo.datos, roles=crudo.roles)
             _log(r)
             operaciones.append(r)
 

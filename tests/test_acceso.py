@@ -22,9 +22,9 @@ def supervisor() -> FakeSupervisor:
 
 
 @pytest.fixture
-def servicios(retriever, supervisor):
+def servicios(retriever, supervisor, tmp_path):
     s = build_servicios(
-        Settings(database_url="sqlite://"),
+        Settings(database_url="sqlite://", almacen_local_dir=str(tmp_path)),
         modelos=(FakeEmbedder(), FakeLLM(), supervisor),
         retriever=retriever,
     )

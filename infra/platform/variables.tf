@@ -76,8 +76,13 @@ variable "embedding_dimensions" {
 }
 
 variable "search_sku" {
-  type    = string
-  default = "basic"
+  type        = string
+  description = "free (50 MB, 3 índices, uno por suscripción, puede borrarse por inactividad) | basic | standard"
+  default     = "free"
+  validation {
+    condition     = contains(["free", "basic", "standard"], var.search_sku)
+    error_message = "search_sku debe ser 'free', 'basic' o 'standard'."
+  }
 }
 
 variable "developer_principal_ids" {
@@ -89,4 +94,67 @@ variable "developer_principal_ids" {
 variable "tags" {
   type    = map(string)
   default = {}
+}
+
+# ------------------------------------------------------------------ alcance y vector store
+variable "alcance" {
+  type        = string
+  description = "modelos: RG, OpenAI, Storage, Key Vault, Log Analytics y vector store (app en local). completo: además red, ACR, Container Apps, PostgreSQL e identidades."
+  default     = "modelos"
+  validation {
+    condition     = contains(["modelos", "completo"], var.alcance)
+    error_message = "alcance debe ser 'modelos' o 'completo'."
+  }
+}
+
+variable "vector_store" {
+  type    = string
+  default = "azure_search"
+  validation {
+    condition     = contains(["azure_search", "qdrant"], var.vector_store)
+    error_message = "vector_store debe ser 'azure_search' o 'qdrant'."
+  }
+}
+
+variable "qdrant_modo" {
+  type        = string
+  description = "local: el Qdrant de docker-compose (solo alcance=modelos). cloud: Qdrant Cloud (URL + API key en Key Vault). container_efimero: Container App sin volumen que se reconstruye desde Blob (solo alcance=completo; Qdrant no admite Azure Files)."
+  default     = "local"
+  validation {
+    condition     = contains(["local", "cloud", "container_efimero"], var.qdrant_modo)
+    error_message = "qdrant_modo debe ser 'local', 'cloud' o 'container_efimero'."
+  }
+}
+
+variable "qdrant_cloud_url" {
+  type    = string
+  default = ""
+}
+
+variable "qdrant_cloud_api_key" {
+  type      = string
+  default   = ""
+  sensitive = true
+}
+
+variable "search_auth" {
+  type        = string
+  description = "rbac (Managed Identity, sin claves) o api_key (clave en Key Vault; alternativa si el tier Free no admitiera RBAC)."
+  default     = "rbac"
+  validation {
+    condition     = contains(["rbac", "api_key"], var.search_auth)
+    error_message = "search_auth debe ser 'rbac' o 'api_key'."
+  }
+}
+
+variable "langsmith_api_key" {
+  type        = string
+  description = "Opcional. Se guarda en Key Vault para que la app en Azure envíe trazas (enmascaradas)."
+  default     = ""
+  sensitive   = true
+}
+
+variable "postgres_sku" {
+  type    = string
+  default = "B_Standard_B1ms"
 }

@@ -2,6 +2,8 @@
 
 import json
 import logging
+import tempfile
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -18,8 +20,16 @@ PUBLIC = {"X-Rol": "public"}
 TEXTO = "# Vacaciones\n\n23 días laborables al año.".encode()
 
 
+ALMACEN = Path(tempfile.mkdtemp(prefix="almacen-tests-"))
+
+
 def _settings(**kw) -> Settings:
-    base = {"database_url": "sqlite://", "seleccion_libre_de_rol": True, "gestion_documentos": True}
+    base = {
+        "database_url": "sqlite://",
+        "seleccion_libre_de_rol": True,
+        "gestion_documentos": True,
+        "almacen_local_dir": str(ALMACEN),
+    }
     return Settings(**{**base, **kw})
 
 
@@ -228,3 +238,15 @@ def test_iniciar_con_rol_inexistente(client) -> None:
 
 def test_conversacion_inexistente(client) -> None:
     assert client.get("/conversaciones/no-existe").status_code == 404
+
+
+def test_la_subida_guarda_el_original_con_sus_roles(client) -> None:
+    _subir(client, "guardado.md", roles=["public"])
+    original = ALMACEN / "rrhh" / "guardado.md"
+    assert original.read_bytes() == TEXTO
+    assert json.loads((ALMACEN / "rrhh" / "guardado.md.roles.json").read_text())["roles"] == [
+        "public",
+        "rrhh",
+    ]
+    client.delete("/documentos/rrhh/guardado.md", headers=RRHH)
+    assert not original.exists()

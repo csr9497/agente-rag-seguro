@@ -2,24 +2,32 @@ output "resource_group_name" { value = azurerm_resource_group.this.name }
 output "location" { value = var.location }
 output "name" { value = local.name }
 output "tags" { value = local.tags }
-
-output "acr_name" { value = module.registry.name }
-output "acr_login_server" { value = module.registry.login_server }
-output "container_app_environment_id" { value = azurerm_container_app_environment.this.id }
-
-output "backend_identity_id" { value = azurerm_user_assigned_identity.backend.id }
-output "backend_identity_client_id" { value = azurerm_user_assigned_identity.backend.client_id }
-output "web_identity_id" { value = azurerm_user_assigned_identity.web.id }
-output "ingest_identity_id" { value = azurerm_user_assigned_identity.ingest.id }
-output "ingest_identity_client_id" { value = azurerm_user_assigned_identity.ingest.client_id }
+output "alcance" { value = var.alcance }
 
 output "openai_endpoint" { value = module.openai.endpoint }
 output "chat_deployment" { value = module.openai.chat_deployment }
 output "embedding_deployment" { value = module.openai.embedding_deployment }
 output "embedding_dimensions" { value = var.embedding_dimensions }
 
-output "search_endpoint" { value = module.search.endpoint }
+output "vector_store" { value = var.vector_store }
+output "qdrant_modo" { value = var.qdrant_modo }
+output "qdrant_url" { value = var.qdrant_modo == "cloud" ? var.qdrant_cloud_url : "" }
+output "search_endpoint" { value = local.search ? module.search[0].endpoint : "" }
+output "search_auth" { value = var.search_auth }
+
 output "storage_blob_endpoint" { value = module.storage.blob_endpoint }
 output "storage_account_name" { value = module.storage.name }
 output "storage_container" { value = module.storage.container_name }
 output "key_vault_name" { value = module.keyvault.name }
+output "secretos_en_key_vault" { value = nonsensitive(sort(keys(local.secretos))) }
+
+# Solo alcance=completo (vacíos en alcance=modelos).
+output "acr_name" { value = local.completo ? module.registry[0].name : "" }
+output "acr_login_server" { value = local.completo ? module.registry[0].login_server : "" }
+output "container_app_environment_id" { value = local.completo ? azurerm_container_app_environment.this[0].id : "" }
+output "backend_identity_id" { value = local.completo ? azurerm_user_assigned_identity.backend[0].id : "" }
+output "backend_identity_client_id" { value = local.completo ? azurerm_user_assigned_identity.backend[0].client_id : "" }
+output "web_identity_id" { value = local.completo ? azurerm_user_assigned_identity.web[0].id : "" }
+output "ingest_identity_id" { value = local.completo ? azurerm_user_assigned_identity.ingest[0].id : "" }
+output "ingest_identity_client_id" { value = local.completo ? azurerm_user_assigned_identity.ingest[0].client_id : "" }
+output "key_vault_uri" { value = "https://${module.keyvault.name}.vault.azure.net/" }

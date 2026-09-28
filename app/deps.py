@@ -1,6 +1,7 @@
 """Composición de dependencias según configuración."""
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from azure.identity import DefaultAzureCredential
 from qdrant_client import QdrantClient
@@ -9,6 +10,7 @@ from app.config import Settings
 from app.graph.agente import Agente
 from app.graph.prompts import SUPERVISOR_PROMPT
 from app.observabilidad import configurar_trazas
+from app.persistencia.almacen import AlmacenBlob, AlmacenDocumentos, AlmacenLocal
 from app.persistencia.repositorios import (
     RepositorioDocumentos,
     RepositorioRoles,
@@ -39,12 +41,19 @@ from ingestor.gestor import GestorDocumentos
 
 def build_retriever(settings: Settings) -> Retriever:
     if settings.vector_store == "azure_search":
+        from azure.core.credentials import AzureKeyCredential
+
         from app.retrieval.azure_search_retriever import AzureSearchRetriever
 
+        credencial = (
+            AzureKeyCredential(settings.azure_search_api_key.get_secret_value())
+            if settings.azure_search_api_key
+            else DefaultAzureCredential()
+        )
         return AzureSearchRetriever(
             settings.azure_search_endpoint,
             settings.azure_search_index,
-            DefaultAzureCredential(),
+            credencial,
             settings.embedding_dimensions,
         )
     from app.retrieval.qdrant_retriever import QdrantRetriever
@@ -52,9 +61,18 @@ def build_retriever(settings: Settings) -> Retriever:
     client = (
         QdrantClient(path=settings.qdrant_path)
         if settings.qdrant_path
-        else QdrantClient(url=settings.qdrant_url)
+        else QdrantClient(
+            url=settings.qdrant_url,
+            api_key=settings.qdrant_api_key.get_secret_value() if settings.qdrant_api_key else None,
+        )
     )
     return QdrantRetriever(client, settings.qdrant_collection, settings.embedding_dimensions)
+
+
+def build_almacen(settings: Settings) -> AlmacenDocumentos:
+    if settings.almacen_documentos == "blob":
+        return AlmacenBlob(settings.azure_storage_account_url, settings.azure_storage_container)
+    return AlmacenLocal(Path(settings.almacen_local_dir))
 
 
 def build_modelos(settings: Settings) -> tuple[Embedder, LLM, Supervisor]:
@@ -107,7 +125,13 @@ def build_servicios(
     roles = ServicioRoles(repo_roles, settings.seleccion_libre_de_rol)
     return Servicios(
         agente=agente,
-        gestor=GestorDocumentos(embedder, retriever, registro=registro, roles=repo_roles),
+        gestor=GestorDocumentos(
+            embedder,
+            retriever,
+            registro=registro,
+            roles=repo_roles,
+            almacen=build_almacen(settings),
+        ),
         roles=roles,
         conversaciones=ServicioConversaciones(SqlRepositorioConversaciones(motor), roles, agente),
         registro=registro,

@@ -7,14 +7,44 @@ resource "random_string" "suffix" {
 }
 
 locals {
-  name   = "${var.project}-${var.environment}"
-  flat   = "${var.project}${var.environment}${random_string.suffix.result}" # nombres globales
-  public = !var.private_endpoints_enabled
+  name     = "${var.project}-${var.environment}"
+  flat     = "${var.project}${var.environment}${random_string.suffix.result}" # nombres globales
+  public   = !var.private_endpoints_enabled
+  completo = var.alcance == "completo"
+  search   = var.vector_store == "azure_search"
+  qdrant   = var.vector_store == "qdrant"
   tags = merge(var.tags, {
     project     = var.project
     environment = var.environment
     managed_by  = "terraform"
+    alcance     = var.alcance
   })
+}
+
+# Combinaciones inválidas: fallan en plan, antes de crear nada.
+resource "terraform_data" "validaciones" {
+  lifecycle {
+    precondition {
+      condition     = !(local.qdrant && var.qdrant_modo == "container_efimero" && !local.completo)
+      error_message = "qdrant_modo=container_efimero requiere alcance=completo (necesita Container Apps)."
+    }
+    precondition {
+      condition     = !(local.qdrant && var.qdrant_modo == "local" && local.completo)
+      error_message = "qdrant_modo=local solo sirve con alcance=modelos (la app corre en tu equipo)."
+    }
+    precondition {
+      condition     = !(local.qdrant && var.qdrant_modo == "cloud" && (var.qdrant_cloud_url == "" || var.qdrant_cloud_api_key == ""))
+      error_message = "qdrant_modo=cloud requiere qdrant_cloud_url y qdrant_cloud_api_key."
+    }
+    precondition {
+      condition     = !(var.private_endpoints_enabled && !local.completo)
+      error_message = "private_endpoints_enabled requiere alcance=completo (sin VNet, la app local no llegaría a los servicios)."
+    }
+    precondition {
+      condition     = !(var.private_endpoints_enabled && local.search && var.search_sku == "free")
+      error_message = "El tier Free de AI Search no admite private endpoints: usa search_sku=basic."
+    }
+  }
 }
 
 resource "azurerm_resource_group" "this" {
@@ -23,26 +53,10 @@ resource "azurerm_resource_group" "this" {
   tags     = local.tags
 }
 
-module "network" {
-  source              = "../modules/network"
-  name                = local.name
-  location            = var.location
-  resource_group_name = azurerm_resource_group.this.name
-  address_space       = var.address_space
-  tags                = local.tags
-}
-
+# ------------------------------------------------------------------ siempre (alcance=modelos)
 module "monitoring" {
   source              = "../modules/monitoring"
   name                = local.name
-  location            = var.location
-  resource_group_name = azurerm_resource_group.this.name
-  tags                = local.tags
-}
-
-module "registry" {
-  source              = "../modules/registry"
-  name                = "acr${local.flat}"
   location            = var.location
   resource_group_name = azurerm_resource_group.this.name
   tags                = local.tags
@@ -57,6 +71,7 @@ module "keyvault" {
   tags                = local.tags
 }
 
+# Originales de los documentos (fuente de verdad para reindexar; roles en metadatos del blob).
 module "storage" {
   source                        = "../modules/storage"
   name                          = "st${local.flat}"
@@ -79,20 +94,56 @@ module "openai" {
 }
 
 module "search" {
+  count                         = local.search ? 1 : 0
   source                        = "../modules/search"
   name                          = "srch-${local.flat}"
   location                      = var.location
   resource_group_name           = azurerm_resource_group.this.name
   sku                           = var.search_sku
+  auth                          = var.search_auth
   public_network_access_enabled = local.public
   tags                          = local.tags
 }
 
+# ------------------------------------------------------------------ solo alcance=completo
+module "network" {
+  count               = local.completo ? 1 : 0
+  source              = "../modules/network"
+  name                = local.name
+  location            = var.location
+  resource_group_name = azurerm_resource_group.this.name
+  address_space       = var.address_space
+  tags                = local.tags
+}
+
+module "registry" {
+  count               = local.completo ? 1 : 0
+  source              = "../modules/registry"
+  name                = "acr${local.flat}"
+  location            = var.location
+  resource_group_name = azurerm_resource_group.this.name
+  tags                = local.tags
+}
+
+module "postgres" {
+  count               = local.completo ? 1 : 0
+  source              = "../modules/postgres"
+  name                = "psql-${local.flat}"
+  location            = var.location
+  resource_group_name = azurerm_resource_group.this.name
+  tenant_id           = data.azurerm_client_config.current.tenant_id
+  vnet_id             = module.network[0].vnet_id
+  subnet_id           = module.network[0].postgres_subnet_id
+  sku_name            = var.postgres_sku
+  tags                = local.tags
+}
+
 resource "azurerm_container_app_environment" "this" {
+  count                          = local.completo ? 1 : 0
   name                           = "cae-${local.name}"
   location                       = var.location
   resource_group_name            = azurerm_resource_group.this.name
-  infrastructure_subnet_id       = module.network.container_apps_subnet_id
+  infrastructure_subnet_id       = module.network[0].container_apps_subnet_id
   internal_load_balancer_enabled = false # la web es pública; el backend tiene ingress interno
   logs_destination               = "log-analytics"
   log_analytics_workspace_id     = module.monitoring.workspace_id

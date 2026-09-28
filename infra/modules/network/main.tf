@@ -67,3 +67,19 @@ resource "azurerm_subnet_network_security_group_association" "private_endpoints"
   subnet_id                 = azurerm_subnet.private_endpoints.id
   network_security_group_id = azurerm_network_security_group.private_endpoints.id
 }
+
+# Subnet delegada para PostgreSQL Flexible Server (acceso solo desde la VNet).
+resource "azurerm_subnet" "postgres" {
+  name                 = "snet-postgres"
+  resource_group_name  = var.resource_group_name
+  virtual_network_name = azurerm_virtual_network.this.name
+  address_prefixes     = [cidrsubnet(var.address_space, 8, 3)] # /24
+
+  delegation {
+    name = "postgres"
+    service_delegation {
+      name    = "Microsoft.DBforPostgreSQL/flexibleServers"
+      actions = ["Microsoft.Network/virtualNetworks/subnets/join/action"]
+    }
+  }
+}
