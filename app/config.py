@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     # Solo para local/pruebas de integración: permite fijar grupos con la cabecera
     # X-Usuario-Grupos. NUNCA activarlo en Azure (lo sustituye Entra ID en Fase 3).
     identidad_debug: bool = False
+    # Expone /grafo y /grafo.mmd con la topología del agente. Solo local.
+    exponer_topologia: bool = False
 
 
 @lru_cache

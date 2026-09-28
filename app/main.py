@@ -5,9 +5,11 @@ from typing import Annotated
 
 import openai
 from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse, PlainTextResponse
 
-from app.config import get_settings
+from app.config import Settings, get_settings
 from app.deps import build_agente
+from app.graph import topologia
 from app.graph.agente import Agente
 from app.models.schemas import ConsultaRequest, RespuestaConsulta, Usuario
 from app.retrieval.no_configurado import ProveedorNoConfiguradoError
@@ -49,3 +51,20 @@ def consultar(
     except openai.APIError as exc:
         logger.exception("Error del proveedor LLM")
         raise HTTPException(status_code=502, detail="Error del proveedor de IA") from exc
+
+
+def _topologia_habilitada(settings: Annotated[Settings, Depends(get_settings)]) -> None:
+    if not settings.exponer_topologia:
+        raise HTTPException(status_code=404)
+
+
+@app.get("/grafo", response_class=HTMLResponse, dependencies=[Depends(_topologia_habilitada)])
+def grafo(agente: Annotated[Agente, Depends(get_agente)]) -> str:
+    return topologia.pagina_html(agente)
+
+
+@app.get(
+    "/grafo.mmd", response_class=PlainTextResponse, dependencies=[Depends(_topologia_habilitada)]
+)
+def grafo_mermaid(agente: Annotated[Agente, Depends(get_agente)]) -> str:
+    return topologia.mermaid(agente)

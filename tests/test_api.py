@@ -65,3 +65,25 @@ def test_sin_azure_openai_responde_503_indicando_que_falta(client, tmp_path) -> 
     r = client.post("/consultar", json={"pregunta": "vacaciones"})
     assert r.status_code == 503
     assert "AZURE_OPENAI_ENDPOINT" in r.json()["detail"]
+
+
+def test_topologia_oculta_por_defecto(client) -> None:
+    app.dependency_overrides[get_settings] = lambda: Settings(exponer_topologia=False)
+    assert client.get("/grafo").status_code == 404
+    assert client.get("/grafo.mmd").status_code == 404
+
+
+def test_topologia_muestra_el_grafo(client) -> None:
+    app.dependency_overrides[get_settings] = lambda: Settings(exponer_topologia=True)
+    mmd = client.get("/grafo.mmd").text
+    for arista in [
+        "__start__ --> authorize",
+        "authorize -.-> input_guardrail",
+        "authorize -.-> audit",
+        "supervisor -.-> tools",
+        "tools --> supervisor",
+        "supervisor -.-> generate",
+        "output_guardrail --> audit",
+    ]:
+        assert arista in mmd
+    assert 'class="mermaid"' in client.get("/grafo").text

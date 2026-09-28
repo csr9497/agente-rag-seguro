@@ -68,9 +68,14 @@ class Agente:
         g.add_node("audit", self._audit)
 
         g.add_edge(START, "authorize")
-        g.add_conditional_edges("authorize", self._continuar_o_auditar("input_guardrail"))
-        g.add_conditional_edges("input_guardrail", self._continuar_o_auditar("supervisor"))
-        g.add_conditional_edges("supervisor", self._tras_supervisor)
+        # Los destinos explícitos documentan la topología (y la dibujan bien en /grafo).
+        g.add_conditional_edges(
+            "authorize", self._continuar_o_auditar("input_guardrail"), ["input_guardrail", "audit"]
+        )
+        g.add_conditional_edges(
+            "input_guardrail", self._continuar_o_auditar("supervisor"), ["supervisor", "audit"]
+        )
+        g.add_conditional_edges("supervisor", self._tras_supervisor, ["tools", "generate"])
         g.add_edge("tools", "supervisor")
         g.add_edge("generate", "output_guardrail")
         g.add_edge("output_guardrail", "audit")
