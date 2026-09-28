@@ -25,6 +25,10 @@ class Capacidad(BaseModel):
 
     descripcion: str
     fase: int = Field(ge=1, le=6)
+    tests_unitarios: list[str] = Field(
+        default_factory=list,
+        description="Tests que la cubren fuera de HTTP, como 'tests/archivo.py::test_nombre'",
+    )
 
 
 class Expectativa(BaseModel):
@@ -176,13 +180,15 @@ def generar_informe(
         "",
         "## Cobertura por capacidad",
         "",
-        "| Capacidad | Fase | Escenarios | OK | Fallo | Omitido | Estado |",
-        "|---|---|---|---|---|---|---|",
+        "| Capacidad | Fase | Escenarios | OK | Fallo | Omitido | Tests unitarios | Estado |",
+        "|---|---|---|---|---|---|---|---|",
     ]
     for nombre, cap in matriz.capacidades.items():
         ids = [e.id for e in matriz.escenarios if nombre in e.capacidades]
         c = Counter(por_id[i].estado for i in ids if i in por_id)
-        if not ids:
+        if not ids and cap.tests_unitarios:
+            estado = "🧪 solo unitarios"
+        elif not ids:
             estado = "⚠️ sin escenarios" if cap.fase <= matriz.fase_actual else "planificada"
         elif c["fallo"]:
             estado = "❌"
@@ -192,7 +198,7 @@ def generar_informe(
             estado = "—"
         lineas.append(
             f"| {nombre} | {cap.fase} | {len(ids)} | {c['ok']} | {c['fallo']} "
-            f"| {c['omitido']} | {estado} |"
+            f"| {c['omitido']} | {len(cap.tests_unitarios)} | {estado} |"
         )
 
     lineas += [

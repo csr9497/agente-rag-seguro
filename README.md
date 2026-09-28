@@ -19,8 +19,18 @@ authorize → input_guardrail → supervisor ⇄ tools → generate → output_g
 ```
 
 - **supervisor**: gpt-4o con tool-calling; decide cuántas búsquedas hacer (una por tema).
-- **tools**: `rag_retrieve`. Los grupos del usuario los inyecta el grafo; el LLM no puede
-  elegirlos (el esquema de argumentos solo admite `consulta`).
+- **tools** ([app/tools/](app/tools/)): los grupos del usuario los inyecta el grafo; ningún
+  esquema de argumentos admite grupos ni usuario.
+
+  | Tool | Para qué |
+  |---|---|
+  | `rag_retrieve` | Búsqueda semántica en todos los documentos visibles |
+  | `listar_documentos` | Catálogo de documentos visibles (citable como "catálogo de documentos") |
+  | `buscar_en_documento` | Búsqueda semántica dentro de un documento concreto |
+  | `leer_documento` | Fragmentos consecutivos de un documento (hasta 8 por llamada) |
+
+  Un documento ajeno y uno inexistente reciben la misma respuesta (no se revela qué existe).
+  El contexto acumulado tiene un tope (`MAX_FRAGMENTOS_CONTEXTO`, 12 por defecto).
 - **generate**: respuesta con citas `[n]` y salida estructurada; sin contexto, no llama al LLM.
 - **guardrails** ([app/security/guardrails.py](app/security/guardrails.py)): devuelven un
   `Veredicto` estructurado (permitido, texto saneado, hallazgos con tipo/detalle/acción).
@@ -96,6 +106,10 @@ tener Entra ID. En local:
 curl -F grupo=public -F archivo=@politica.md localhost:8000/documentos \
   -H 'X-Usuario-Grupos: editores,public'
 ```
+
+**Red local**: la app (8000) y Qdrant (6333) solo escuchan en `127.0.0.1`; la web (8080) es
+accesible desde la red y elimina la cabecera `X-Usuario-Grupos`, así que por la web siempre
+se entra con los grupos por defecto.
 
 **Permisos**: el primer nivel de carpeta de cada documento es su grupo
 (`public/…`, `rrhh/…`). En la Fase 1 no hay autenticación: el usuario tiene

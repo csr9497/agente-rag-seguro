@@ -46,6 +46,35 @@ capacidades:
   auditoria:
     descripcion: Toda consulta queda registrada (verificable en Log Analytics / Postgres)
     fase: 1
+    tests_unitarios:
+      - tests/test_agente.py::test_toda_consulta_se_audita_una_vez
+      - tests/test_agente.py::test_consulta_bloqueada_tambien_se_audita
+      - tests/test_guardrails.py::test_grafo_pasa_la_pregunta_enmascarada_al_supervisor_y_a_la_auditoria
+  indexacion_vectorial:
+    descripcion: Colección con configuración base, embeddings e indexación en el vector store
+    fase: 1
+    tests_unitarios:
+      - tests/test_retriever.py::test_ensure_index_es_idempotente
+      - tests/test_gestor.py::test_alta_y_sin_cambios
+      - tests/test_sources.py::test_documentos_de_ejemplo_pasan_la_validacion
+  ingesta_segura:
+    descripcion: Validación de documentos contra file injection e inyección indirecta
+    fase: 2
+    tests_unitarios:
+      - tests/test_validacion.py::test_rutas_invalidas
+      - tests/test_validacion.py::test_contenido_invalido
+      - tests/test_validacion.py::test_inyeccion_de_prompt_en_documentos
+      - tests/test_validacion.py::test_inyeccion_oculta_en_comentario_html
+      - tests/test_sources.py::test_symlink_no_se_sigue
+  gestion_documentos:
+    descripcion: Alta, actualización sin chunks obsoletos, duplicados, borrado y sincronización
+    fase: 2
+    tests_unitarios:
+      - tests/test_gestor.py::test_actualizar_elimina_chunks_obsoletos
+      - tests/test_gestor.py::test_duplicado_en_el_mismo_grupo_se_rechaza
+      - tests/test_gestor.py::test_sincronizar_borra_huerfanos_solo_si_se_pide
+      - tests/test_api_documentos.py::test_subir_requiere_editor_del_grupo
+      - tests/test_api_documentos.py::test_nombre_con_ruta_no_permite_salir_del_grupo
   autenticacion_entra:
     descripcion: Grupos obtenidos del token de Entra ID; sin token → 401
     fase: 3

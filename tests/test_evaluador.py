@@ -26,7 +26,7 @@ def test_matriz_del_repo_es_valida() -> None:
     matriz = cargar_matriz()
     assert matriz.escenarios
     informe = generar_informe(matriz, [])
-    assert "| auditoria | 1 | 0 |" in informe and "sin escenarios" in informe
+    assert "| auditoria | 1 | 0 | 0 | 0 | 0 | 3 | 🧪 solo unitarios |" in informe
 
 
 def test_ok_cuando_cumple_todo() -> None:
@@ -78,3 +78,14 @@ def test_todas_fuentes_de() -> None:
     e = _esc(todas_fuentes_de=["public/a.md", "public/b.md"])
     r = evaluar(e, 200, _body())
     assert r.fallos == ["faltan citas de ['public/b.md']"]
+
+
+def test_referencias_a_tests_unitarios_existen() -> None:
+    """Cada test declarado en la matriz existe: la cobertura documentada es real."""
+    from pathlib import Path
+
+    for nombre, cap in cargar_matriz().capacidades.items():
+        for ref in cap.tests_unitarios:
+            ruta, funcion = ref.split("::")
+            fuente = Path(ruta).read_text(encoding="utf-8")
+            assert f"def {funcion}(" in fuente, f"{nombre}: no existe {ref}"
