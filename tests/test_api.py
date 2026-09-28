@@ -4,13 +4,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.config import Settings, get_settings
-from app.main import app, get_pipeline
-from app.rag.pipeline import RAGPipeline
+from app.deps import build_agente
+from app.main import app, get_agente
 
 
 @pytest.fixture
-def client(retriever_con_docs, embedder, llm):
-    app.dependency_overrides[get_pipeline] = lambda: RAGPipeline(embedder, retriever_con_docs, llm)
+def client(agente):
+    app.dependency_overrides[get_agente] = lambda: agente
     yield TestClient(app)  # sin `with`: no se ejecuta el lifespan (no toca Azure)
     app.dependency_overrides.clear()
 
@@ -57,3 +57,11 @@ def test_cabecera_de_grupos_con_identidad_debug(client) -> None:
         "/consultar", json={"pregunta": "bandas salariales"}, headers={"X-Usuario-Grupos": "rrhh"}
     )
     assert r.json()["citas"][0]["fuente"] == "rrhh/bandas-salariales.md"
+
+
+def test_sin_azure_openai_responde_503_indicando_que_falta(client, tmp_path) -> None:
+    settings = Settings(azure_openai_endpoint="", qdrant_path=str(tmp_path / "qdrant"))
+    app.dependency_overrides[get_agente] = lambda: build_agente(settings)
+    r = client.post("/consultar", json={"pregunta": "vacaciones"})
+    assert r.status_code == 503
+    assert "AZURE_OPENAI_ENDPOINT" in r.json()["detail"]

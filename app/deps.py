@@ -4,9 +4,17 @@ from azure.identity import DefaultAzureCredential
 from qdrant_client import QdrantClient
 
 from app.config import Settings
-from app.rag.pipeline import RAGPipeline
-from app.retrieval.azure_openai import AzureOpenAIEmbedder, AzureOpenAILLM, build_client
-from app.retrieval.base import Retriever
+from app.graph.agente import Agente
+from app.retrieval.azure_openai import (
+    AzureOpenAIEmbedder,
+    AzureOpenAILLM,
+    AzureOpenAISupervisor,
+    build_client,
+)
+from app.retrieval.base import LLM, Embedder, Retriever, Supervisor
+from app.retrieval.no_configurado import ModelosNoConfigurados
+from app.security.guardrails import GuardrailPermisivo
+from app.tools.rag_retrieve import RagRetrieve
 
 
 def build_retriever(settings: Settings) -> Retriever:
@@ -21,23 +29,40 @@ def build_retriever(settings: Settings) -> Retriever:
         )
     from app.retrieval.qdrant_retriever import QdrantRetriever
 
-    return QdrantRetriever(
-        QdrantClient(url=settings.qdrant_url),
-        settings.qdrant_collection,
-        settings.embedding_dimensions,
+    client = (
+        QdrantClient(path=settings.qdrant_path)
+        if settings.qdrant_path
+        else QdrantClient(url=settings.qdrant_url)
+    )
+    return QdrantRetriever(client, settings.qdrant_collection, settings.embedding_dimensions)
+
+
+def build_modelos(settings: Settings) -> tuple[Embedder, LLM, Supervisor]:
+    """Embeddings, LLM de generación y supervisor. Sin endpoint, la app arranca igualmente y
+    las consultas responden 503 indicando qué falta."""
+    if not settings.azure_openai_endpoint:
+        faltan = ModelosNoConfigurados(["AZURE_OPENAI_ENDPOINT"])
+        return faltan, faltan, faltan
+    client = build_client(settings)
+    return (
+        AzureOpenAIEmbedder(client, settings.azure_openai_embedding_deployment),
+        AzureOpenAILLM(client, settings.azure_openai_chat_deployment),
+        AzureOpenAISupervisor(client, settings.azure_openai_chat_deployment),
     )
 
 
-def build_embedder(settings: Settings) -> AzureOpenAIEmbedder:
-    return AzureOpenAIEmbedder(build_client(settings), settings.azure_openai_embedding_deployment)
+def build_embedder(settings: Settings) -> Embedder:
+    return build_modelos(settings)[0]
 
 
-def build_pipeline(settings: Settings) -> RAGPipeline:
-    client = build_client(settings)
-    return RAGPipeline(
-        embedder=AzureOpenAIEmbedder(client, settings.azure_openai_embedding_deployment),
-        retriever=build_retriever(settings),
-        llm=AzureOpenAILLM(client, settings.azure_openai_chat_deployment),
+def build_agente(settings: Settings) -> Agente:
+    embedder, llm, supervisor = build_modelos(settings)
+    return Agente(
+        supervisor=supervisor,
+        llm=llm,
+        herramientas=[RagRetrieve(embedder, build_retriever(settings), settings.min_score)],
+        guardrail_entrada=GuardrailPermisivo(),
+        guardrail_salida=GuardrailPermisivo(),
         top_k=settings.retrieval_top_k,
-        min_score=settings.min_score,
+        max_iteraciones=settings.max_iteraciones,
     )

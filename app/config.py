@@ -23,6 +23,9 @@ class Settings(BaseSettings):
 
     vector_store: Literal["qdrant", "azure_search"] = "qdrant"
     qdrant_url: str = "http://localhost:6333"
+    # Modo embebido (sin servidor ni Docker): si se define, tiene prioridad sobre qdrant_url.
+    # Solo admite un proceso a la vez (la ingesta y la app no pueden abrirlo simultáneamente).
+    qdrant_path: str | None = None
     qdrant_collection: str = "documentos"
     azure_search_endpoint: str = ""
     azure_search_index: str = "documentos"
@@ -32,6 +35,7 @@ class Settings(BaseSettings):
 
     retrieval_top_k: int = 4
     min_score: float | None = None
+    max_iteraciones: int = 3
 
     # Fase 1: sin autenticación. El usuario es un stub con estos grupos.
     default_user: str = "anonimo"
