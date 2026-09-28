@@ -62,10 +62,20 @@ def validar_ruta(doc_id: str) -> tuple[list[str], list[str]]:
     return motivos, ([partes[0]] if not motivos else [])
 
 
-def validar_documento(doc_id: str, datos: bytes, max_bytes: int = MAX_BYTES) -> DocumentoValidado:
+def validar_documento(
+    doc_id: str, datos: bytes, max_bytes: int = MAX_BYTES, roles: list[str] | None = None
+) -> DocumentoValidado:
+    """`roles` explícitos (subida desde la API) o, si no se indican, la carpeta de primer nivel
+    (convención del CLI de ingesta)."""
     motivos, acl = validar_ruta(doc_id)
     if motivos:
         return DocumentoValidado(doc_id=doc_id, aceptado=False, motivos=motivos)
+    if roles is not None:
+        if not roles:
+            return _rechazo(doc_id, "roles: el documento debe tener al menos un rol")
+        if invalidos := [r for r in roles if not _GRUPO.match(r)]:
+            return _rechazo(doc_id, f"roles: identificadores no válidos {invalidos}")
+        acl = sorted(set(roles))
 
     if len(datos) > max_bytes:
         return _rechazo(doc_id, f"tamaño: supera el máximo de {max_bytes} bytes")

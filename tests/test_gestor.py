@@ -108,3 +108,81 @@ def test_sincronizar_no_borra_grupos_ajenos_al_origen(gestor, tmp_path) -> None:
     (tmp_path / "public" / "a.md").write_text("Documento A.")
     gestor.sincronizar(LocalFolderSource(tmp_path), borrar_huerfanos=True)
     assert [d.doc_id for d in gestor.listar(["rrhh"])] == ["rrhh/salarios.md"]
+
+
+# ------------------------------------------------------------------ con registro y roles
+@pytest.fixture
+def repos():
+    from app.persistencia.repositorios import (
+        SqlRepositorioDocumentos,
+        SqlRepositorioRoles,
+        crear_motor,
+        inicializar,
+    )
+
+    motor = crear_motor("sqlite://")
+    inicializar(motor)
+    return SqlRepositorioDocumentos(motor), SqlRepositorioRoles(motor)
+
+
+@pytest.fixture
+def gestor_registrado(retriever, repos) -> GestorDocumentos:
+    registro, roles = repos
+    return GestorDocumentos(FakeEmbedder(), retriever, registro=registro, roles=roles)
+
+
+def test_indexar_con_roles_explicitos_registra_el_documento(
+    gestor_registrado, repos, retriever
+) -> None:
+    registro, _ = repos
+    r = gestor_registrado.indexar(
+        "rrhh/onboarding.md",
+        b"# Onboarding\n\nPrimer dia.",
+        roles=["public", "rrhh"],
+        subido_por="rrhh",
+    )
+    assert r.estado == "indexado"
+    doc = registro.obtener("rrhh/onboarding.md")
+    assert (
+        doc.roles == ["public", "rrhh"] and doc.titulo == "Onboarding" and doc.subido_por == "rrhh"
+    )
+    assert doc.doc_hash and doc.chunks == 1 and doc.estado == "activo"
+    [indexado] = retriever.list_documents(["public"])
+    assert indexado.acl_groups == ["public", "rrhh"]
+
+
+def test_rol_inexistente_o_inactivo_se_rechaza(gestor_registrado, repos) -> None:
+    _, roles = repos
+    r = gestor_registrado.indexar("rrhh/a.md", TEXTO, roles=["fantasma"])
+    assert r.estado == "rechazado" and "fantasma" in r.motivos[0]
+    roles.guardar(roles.obtener("rrhh").model_copy(update={"activo": False}))
+    assert gestor_registrado.indexar("rrhh/a.md", TEXTO, roles=["rrhh"]).estado == "rechazado"
+
+
+def test_roles_vacios_se_rechazan(gestor_registrado) -> None:
+    assert gestor_registrado.indexar("rrhh/a.md", TEXTO, roles=[]).estado == "rechazado"
+
+
+def test_cambiar_roles_reindexa_aunque_el_contenido_sea_igual(
+    gestor_registrado, repos, retriever
+) -> None:
+    registro, _ = repos
+    gestor_registrado.indexar("rrhh/a.md", TEXTO, roles=["rrhh"])
+    r = gestor_registrado.indexar("rrhh/a.md", TEXTO, roles=["public", "rrhh"])
+    assert r.estado == "actualizado"
+    assert registro.obtener("rrhh/a.md").roles == ["public", "rrhh"]
+    assert [d.doc_id for d in retriever.list_documents(["public"])] == ["rrhh/a.md"]
+
+
+def test_titulo_sin_encabezado_usa_el_nombre(gestor_registrado, repos) -> None:
+    registro, _ = repos
+    gestor_registrado.indexar("public/politica-de-viajes.md", b"Sin encabezado.", roles=["public"])
+    assert registro.obtener("public/politica-de-viajes.md").titulo == "politica de viajes"
+
+
+def test_eliminar_borra_tambien_el_registro(gestor_registrado, repos) -> None:
+    registro, _ = repos
+    gestor_registrado.indexar("public/a.md", TEXTO)  # convención de carpeta → rol public
+    assert registro.obtener("public/a.md").roles == ["public"]
+    gestor_registrado.eliminar("public/a.md")
+    assert registro.obtener("public/a.md") is None

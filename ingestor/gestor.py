@@ -11,10 +11,13 @@ Lo usan el CLI de ingesta y la API (/documentos):
 import hashlib
 import logging
 from datetime import UTC, datetime
+from pathlib import PurePosixPath
 
 from pydantic import BaseModel
 
 from app.models.schemas import DocumentoIndexado, ResultadoOperacion
+from app.persistencia.modelos import DocumentoRegistrado
+from app.persistencia.repositorios import RepositorioDocumentos, RepositorioRoles
 from app.retrieval.base import Embedder, Retriever
 from ingestor.chunking import chunk_document
 from ingestor.sources import Source
@@ -42,14 +45,33 @@ class InformeIngesta(BaseModel):
         return conteo
 
 
+def titulo_de(texto: str, doc_id: str) -> str:
+    """Primer encabezado Markdown o, si no hay, el nombre del archivo."""
+    for linea in texto.splitlines():
+        if linea.startswith("# ") and linea[2:].strip():
+            return linea[2:].strip()[:200]
+    return PurePosixPath(doc_id).stem.replace("-", " ").replace("_", " ")[:200]
+
+
 def hash_texto(texto: str) -> str:
     return hashlib.sha256(texto.encode("utf-8")).hexdigest()
 
 
 class GestorDocumentos:
-    def __init__(self, embedder: Embedder, retriever: Retriever) -> None:
+    """Con `registro` y `roles` (la app y el CLI) valida que los roles existen y están activos
+    y registra cada documento: el registro es la fuente de verdad de sus permisos."""
+
+    def __init__(
+        self,
+        embedder: Embedder,
+        retriever: Retriever,
+        registro: RepositorioDocumentos | None = None,
+        roles: RepositorioRoles | None = None,
+    ) -> None:
         self._embedder = embedder
         self._retriever = retriever
+        self._registro = registro
+        self._roles = roles
         self._indice_listo = False
 
     def _asegurar_indice(self) -> None:
@@ -57,26 +79,38 @@ class GestorDocumentos:
             self._retriever.ensure_index()
             self._indice_listo = True
 
-    def indexar(self, doc_id: str, datos: bytes, forzar: bool = False) -> ResultadoOperacion:
-        validado = validar_documento(doc_id, datos)
+    def indexar(
+        self,
+        doc_id: str,
+        datos: bytes,
+        forzar: bool = False,
+        roles: list[str] | None = None,
+        subido_por: str | None = None,
+    ) -> ResultadoOperacion:
+        validado = validar_documento(doc_id, datos, roles=roles)
         if not validado.aceptado or validado.texto is None:
             return ResultadoOperacion(doc_id=doc_id, estado="rechazado", motivos=validado.motivos)
+        acl = validado.acl_groups
+        if motivo := self._roles_no_validos(acl):
+            return ResultadoOperacion(doc_id=doc_id, estado="rechazado", motivos=[motivo])
 
         self._asegurar_indice()
         doc_hash = hash_texto(validado.texto)
         previo = self._retriever.document_hash(doc_id)
-        if previo == doc_hash and not forzar:
+        registrado = self._registro.obtener(doc_id) if self._registro else None
+        mismos_roles = registrado is None or registrado.roles == acl
+        if previo == doc_hash and mismos_roles and not forzar:
             return ResultadoOperacion(doc_id=doc_id, estado="sin_cambios", avisos=validado.avisos)
 
-        grupo = validado.acl_groups[0]
-        otros = [d for d in self._retriever.find_by_hash(doc_hash, grupo) if d != doc_id]
-        if otros and not forzar:
-            return ResultadoOperacion(
-                doc_id=doc_id,
-                estado="duplicado",
-                duplicado_de=otros[0],
-                motivos=[f"mismo contenido que {otros[0]} en el grupo {grupo!r}"],
-            )
+        for rol in acl:
+            otros = [d for d in self._retriever.find_by_hash(doc_hash, rol) if d != doc_id]
+            if otros and not forzar:
+                return ResultadoOperacion(
+                    doc_id=doc_id,
+                    estado="duplicado",
+                    duplicado_de=otros[0],
+                    motivos=[f"mismo contenido que {otros[0]} para el rol {rol!r}"],
+                )
 
         chunks = chunk_document(
             doc_id,
@@ -93,6 +127,20 @@ class GestorDocumentos:
             self._retriever.delete_document(doc_id)
         for i in range(0, len(chunks), BATCH):
             self._retriever.upsert(chunks[i : i + BATCH], vectores[i : i + BATCH])
+        # Registro después del índice: si fallara, access_guardrail descarta los chunks
+        # (no registrados) hasta que un reintento lo complete.
+        if self._registro:
+            self._registro.registrar(
+                DocumentoRegistrado(
+                    doc_id=doc_id,
+                    titulo=titulo_de(validado.texto, doc_id),
+                    roles=acl,
+                    doc_hash=doc_hash,
+                    chunks=len(chunks),
+                    subido_por=subido_por,
+                    indexado_en=chunks[0].indexado_en if chunks else "",
+                )
+            )
 
         return ResultadoOperacion(
             doc_id=doc_id,
@@ -101,7 +149,17 @@ class GestorDocumentos:
             avisos=validado.avisos,
         )
 
+    def _roles_no_validos(self, acl: list[str]) -> str | None:
+        if self._roles is None:
+            return None
+        activos = {r.id for r in self._roles.listar(incluir_inactivos=False)}
+        if faltan := [r for r in acl if r not in activos]:
+            return f"roles: no existen o están inactivos {faltan}"
+        return None
+
     def eliminar(self, doc_id: str) -> ResultadoOperacion:
+        if self._registro:
+            self._registro.eliminar(doc_id)
         borrados = self._retriever.delete_document(doc_id)
         return ResultadoOperacion(
             doc_id=doc_id, estado="eliminado" if borrados else "no_encontrado", chunks=borrados
