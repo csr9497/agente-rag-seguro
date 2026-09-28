@@ -22,7 +22,14 @@ authorize → input_guardrail → supervisor ⇄ tools → generate → output_g
 - **tools**: `rag_retrieve`. Los grupos del usuario los inyecta el grafo; el LLM no puede
   elegirlos (el esquema de argumentos solo admite `consulta`).
 - **generate**: respuesta con citas `[n]` y salida estructurada; sin contexto, no llama al LLM.
-- **guardrails**: interfaz lista; implementación real (Content Safety + PII) en la Fase 3.
+- **guardrails** ([app/security/guardrails.py](app/security/guardrails.py)): devuelven un
+  `Veredicto` estructurado (permitido, texto saneado, hallazgos con tipo/detalle/acción).
+  - entrada: bloquea inyección de prompt y texto oculto; enmascara PII (email, teléfono,
+    IBAN, tarjeta con Luhn, DNI/NIE con letra de control) antes del LLM y de la auditoría.
+  - salida: bloquea fugas de los prompts de sistema, elimina etiquetas estructurales y
+    enmascara PII sensible (tarjeta, IBAN, DNI).
+  - Heurísticos y locales; en Azure se añadirá Content Safety (Prompt Shields) detrás de la
+    misma interfaz.
 - **audit**: toda consulta que entra al grafo se audita, también las rechazadas.
 
 - **Local**: backend + web + Qdrant con `docker compose`, o sin Docker con Qdrant embebido
@@ -64,6 +71,11 @@ QDRANT_PATH=.qdrant uv run uvicorn app.main:app --reload
 
 Sin `AZURE_OPENAI_ENDPOINT` la app arranca igualmente y `/consultar` responde **503**
 indicando qué falta; el resto del grafo (permisos, auditoría, validación) funciona.
+
+**Ingesta segura** ([ingestor/validacion.py](ingestor/validacion.py)): solo `.md`/`.txt`
+de hasta 1 MB en UTF-8, sin symlinks, rutas ocultas ni `..`; rechaza documentos con texto
+invisible o instrucciones dirigidas al modelo. La ingesta informa de los rechazados y sale
+con código 1 si hay alguno.
 
 **Permisos**: el primer nivel de carpeta de cada documento es su grupo
 (`public/…`, `rrhh/…`). En la Fase 1 no hay autenticación: el usuario tiene
