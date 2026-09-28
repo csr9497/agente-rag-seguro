@@ -104,6 +104,43 @@ UI: historial ──GET /conversaciones/{id}──▶ mensajes con citas y docum
 
 ## 3. Interfaz de una sola página (sin pestañas)
 
+**Prototipo navegable:** http://localhost:8080/prototipo/ (datos de ejemplo, sin backend).
+Tiene una barra para cambiar el estado del chat y el rol. También se puede enlazar
+directamente a un estado, p. ej. `?estado=sin-rol`, `?estado=cargando&rol=rrhh` o
+`?estado=error`.
+
+| Escritorio (RRHH, claro) | Escritorio (Empleado, oscuro) |
+|---|---|
+| ![](prototipo/escritorio-rrhh-claro.png) | ![](prototipo/escritorio-empleado-oscuro.png) |
+| **Sin rol elegido** | **Buscando respuesta** |
+| ![](prototipo/sin-rol.png) | ![](prototipo/cargando.png) |
+
+Móvil (390 px, emulación real): ![](prototipo/movil-empleado.png)
+
+**Sistema de diseño**
+- **Estilo**: minimalista y funcional.
+- **Color**: tokens semánticos para claro y oscuro. Azul `#2563EB`/`#60A5FA` como primario;
+  verde para citado o correcto, ámbar para bloqueado o aviso y rojo para rechazo o error.
+  El estado nunca se indica solo con color: siempre lleva icono y texto.
+- **Contraste**: al menos 4,5:1 en todo el texto.
+- **Tipografía**: fuente del sistema, sin Google Fonts, para cumplir el CSP `'self'`.
+- **Espaciado**: escala de 4/8 px.
+- **Iconos**: SVG en un sprite propio, sin emojis.
+- **Interacción**: objetivos táctiles de al menos 44 px, foco visible, enlace para saltar al
+  contenido, `aria-live` en el chat y respeto de `prefers-reduced-motion`.
+
+**Reglas de visibilidad en la UI**
+- La lista de documentos solo muestra los del rol activo; el filtro acota dentro de ese
+  conjunto ("compartidos con…").
+- Sin rol elegido, no se lista ningún documento.
+- La subida y el borrado solo aparecen para roles con gestión.
+
+**Pendiente de decidir:** ¿puede un rol gestor publicar documentos para roles a los que no
+pertenece? Ejemplo: RRHH publica el onboarding para "Empleado general". El prototipo lo
+permite. La alternativa segura es exigir que el documento incluya siempre el rol del gestor.
+
+**Boceto de distribución** (referencia):
+
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │ Asistente de documentación          Rol: [Recursos Humanos ▾] [Nueva conv.] │
