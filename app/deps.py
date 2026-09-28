@@ -1,11 +1,21 @@
 """Composición de dependencias según configuración."""
 
+from dataclasses import dataclass
+
 from azure.identity import DefaultAzureCredential
 from qdrant_client import QdrantClient
 
 from app.config import Settings
 from app.graph.agente import Agente
 from app.graph.prompts import SUPERVISOR_PROMPT
+from app.persistencia.repositorios import (
+    RepositorioDocumentos,
+    SqlRepositorioConversaciones,
+    SqlRepositorioDocumentos,
+    SqlRepositorioRoles,
+    crear_motor,
+    inicializar,
+)
 from app.rag.prompts import SYSTEM_PROMPT
 from app.retrieval.azure_openai import (
     AzureOpenAIEmbedder,
@@ -16,6 +26,8 @@ from app.retrieval.azure_openai import (
 from app.retrieval.base import LLM, Embedder, Retriever, Supervisor
 from app.retrieval.no_configurado import ModelosNoConfigurados
 from app.security.guardrails import GuardrailEntrada, GuardrailSalida
+from app.servicios.conversaciones import ServicioConversaciones
+from app.servicios.roles import ServicioRoles
 from app.tools.documentos import BuscarEnDocumento, LeerDocumento, ListarDocumentos
 from app.tools.rag_retrieve import RagRetrieve
 from ingestor.gestor import GestorDocumentos
@@ -59,13 +71,37 @@ def build_embedder(settings: Settings) -> Embedder:
     return build_modelos(settings)[0]
 
 
-def build_servicios(settings: Settings) -> tuple[Agente, GestorDocumentos]:
-    """Agente y gestor de documentos comparten embedder y retriever (Qdrant embebido solo
-    admite un cliente por proceso)."""
-    embedder, llm, supervisor = build_modelos(settings)
-    retriever = build_retriever(settings)
-    return _agente(settings, embedder, llm, supervisor, retriever), GestorDocumentos(
-        embedder, retriever
+@dataclass(frozen=True)
+class Servicios:
+    agente: Agente
+    gestor: GestorDocumentos
+    roles: ServicioRoles
+    conversaciones: ServicioConversaciones
+    registro: RepositorioDocumentos
+
+
+def build_servicios(
+    settings: Settings,
+    *,
+    modelos: tuple[Embedder, LLM, Supervisor] | None = None,
+    retriever: Retriever | None = None,
+) -> Servicios:
+    """Composición completa. Agente y gestor comparten embedder, retriever (Qdrant embebido
+    solo admite un cliente por proceso) y registro. `modelos`/`retriever` permiten tests."""
+    embedder, llm, supervisor = modelos or build_modelos(settings)
+    retriever = retriever or build_retriever(settings)
+    motor = crear_motor(settings.database_url)
+    inicializar(motor)
+    repo_roles = SqlRepositorioRoles(motor)
+    registro = SqlRepositorioDocumentos(motor)
+    agente = _agente(settings, embedder, llm, supervisor, retriever)
+    roles = ServicioRoles(repo_roles, settings.seleccion_libre_de_rol)
+    return Servicios(
+        agente=agente,
+        gestor=GestorDocumentos(embedder, retriever, registro=registro, roles=repo_roles),
+        roles=roles,
+        conversaciones=ServicioConversaciones(SqlRepositorioConversaciones(motor), roles, agente),
+        registro=registro,
     )
 
 

@@ -64,8 +64,8 @@ class QdrantRetriever:
         top_k: int,
         doc_id: str | None = None,
     ) -> list[ChunkRecuperado]:
-        if not groups:
-            return []
+        if not groups or not self._client.collection_exists(self._collection):
+            return []  # índice aún sin crear (despliegue nuevo): no hay nada visible
         condiciones = [FieldCondition(key="acl_groups", match=MatchAny(any=groups))]
         if doc_id is not None:
             condiciones.append(_es("doc_id", doc_id))

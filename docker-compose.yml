@@ -20,8 +20,8 @@ services:
       IDENTIDAD_DEBUG: "true"   # permite probar permisos con X-Usuario-Grupos en local
       EXPONER_TOPOLOGIA: "true" # http://localhost:8000/grafo
       GESTION_DOCUMENTOS: "true" # /documentos (editores: X-Usuario-Grupos: editores,<grupo>)
-      # Usuario local (sin Entra ID): editor de "public". No pertenece a "rrhh".
-      DEFAULT_GROUPS: '["public", "editores"]'
+      # Sin Entra ID: el rol se elige en la interfaz (solo local).
+      SELECCION_LIBRE_DE_ROL: "true"
       DATABASE_URL: sqlite:////data/app.db
     volumes:
       - app_data:/data

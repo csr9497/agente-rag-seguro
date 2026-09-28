@@ -5,17 +5,17 @@ from typing import Annotated
 
 import openai
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
-from app.api import documentos
+from app.api import conversaciones, documentos, roles
 from app.config import Settings, get_settings
 from app.deps import build_servicios
 from app.graph import topologia
 from app.graph.agente import Agente
-from app.models.schemas import ConsultaRequest, Perfil, RespuestaConsulta, Usuario
+from app.models.schemas import ConsultaRequest, RespuestaConsulta, Usuario
 from app.retrieval.no_configurado import ProveedorNoConfiguradoError
 from app.security.identity import get_usuario
-from app.security.permisos import puede_editar
+from app.servicios.errores import DatosInvalidosError, NoEncontradoError, PermisoDenegadoError
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -23,12 +23,31 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    app.state.agente, app.state.gestor = build_servicios(get_settings())
+    servicios = build_servicios(get_settings())
+    app.state.servicios = servicios
+    app.state.agente = servicios.agente
+    app.state.gestor = servicios.gestor
     yield
 
 
 app = FastAPI(title="Asistente RAG", version="0.2.0", lifespan=lifespan)
-app.include_router(documentos.router)
+for router in (documentos.router, roles.router, conversaciones.router):
+    app.include_router(router)
+
+
+@app.exception_handler(PermisoDenegadoError)
+def _permiso_denegado(_: Request, exc: PermisoDenegadoError) -> JSONResponse:
+    return JSONResponse({"detail": str(exc)}, status_code=403)
+
+
+@app.exception_handler(NoEncontradoError)
+def _no_encontrado(_: Request, exc: NoEncontradoError) -> JSONResponse:
+    return JSONResponse({"detail": str(exc)}, status_code=404)
+
+
+@app.exception_handler(DatosInvalidosError)
+def _datos_invalidos(_: Request, exc: DatosInvalidosError) -> JSONResponse:
+    return JSONResponse({"detail": str(exc)}, status_code=422)
 
 
 def get_agente(request: Request) -> Agente:
@@ -38,24 +57,6 @@ def get_agente(request: Request) -> Agente:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
-
-
-@app.get("/yo", response_model=Perfil)
-def yo(
-    usuario: Annotated[Usuario, Depends(get_usuario)],
-    settings: Annotated[Settings, Depends(get_settings)],
-) -> Perfil:
-    editables = [
-        g
-        for g in usuario.groups
-        if g != settings.grupo_editores and puede_editar(usuario, g, settings.grupo_editores)
-    ]
-    return Perfil(
-        id=usuario.id,
-        groups=usuario.groups,
-        grupos_editables=editables if settings.gestion_documentos else [],
-        gestion_documentos=settings.gestion_documentos,
-    )
 
 
 @app.post("/consultar", response_model=RespuestaConsulta)

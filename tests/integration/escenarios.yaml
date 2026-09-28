@@ -73,8 +73,9 @@ capacidades:
       - tests/test_gestor.py::test_actualizar_elimina_chunks_obsoletos
       - tests/test_gestor.py::test_duplicado_en_el_mismo_grupo_se_rechaza
       - tests/test_gestor.py::test_sincronizar_borra_huerfanos_solo_si_se_pide
-      - tests/test_api_documentos.py::test_subir_requiere_editor_del_grupo
-      - tests/test_api_documentos.py::test_nombre_con_ruta_no_permite_salir_del_grupo
+      - tests/test_api_roles.py::test_subir_requiere_gestionar_documentos
+      - tests/test_api_roles.py::test_no_se_puede_publicar_para_roles_fuera_de_publica_para
+      - tests/test_api_roles.py::test_nombre_con_ruta_no_permite_salir_del_espacio_del_rol
   autenticacion_entra:
     descripcion: Grupos obtenidos del token de Entra ID; sin token → 401
     fase: 3

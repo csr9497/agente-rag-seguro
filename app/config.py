@@ -51,7 +51,8 @@ class Settings(BaseSettings):
     exponer_topologia: bool = False
     # API de gestión de documentos (subir/borrar). Desactivada por defecto hasta tener Entra ID.
     gestion_documentos: bool = False
-    grupo_editores: str = "editores"
+    # Solo local: cualquier rol activo es elegible. En Azure, los roles del usuario (Entra ID).
+    seleccion_libre_de_rol: bool = False
 
 
 @lru_cache

@@ -10,11 +10,11 @@ from typing import Any, Literal
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
-from pydantic import ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from app.graph.prompts import SUPERVISOR_PROMPT
 from app.graph.state import EstadoAgente
-from app.models.schemas import ChunkRecuperado, RespuestaConsulta, Usuario
+from app.models.schemas import ChunkRecuperado, Hallazgo, RespuestaConsulta, Usuario
 from app.rag.generacion import generar_respuesta, respuesta_sin_contexto
 from app.retrieval.base import LLM, Supervisor
 from app.security.audit import registrar_consulta
@@ -22,6 +22,14 @@ from app.security.guardrails import MENSAJE_BLOQUEO, Guardrail
 from app.tools.base import Herramienta, ResultadoHerramienta, schema_openai
 
 Update = dict[str, Any]
+
+
+class ResultadoAgente(BaseModel):
+    respuesta: RespuestaConsulta
+    pregunta_procesada: str = Field(description="Tras input_guardrail (PII enmascarada)")
+    documentos_consultados: list[str]
+    fragmentos_descartados: int
+    hallazgos: list[Hallazgo]
 
 
 def _bloqueada() -> RespuestaConsulta:
@@ -54,9 +62,23 @@ class Agente:
     def consultar(
         self, pregunta: str, usuario: Usuario, top_k: int | None = None
     ) -> RespuestaConsulta:
+        return self.consultar_detallado(pregunta, usuario, top_k).respuesta
+
+    def consultar_detallado(
+        self, pregunta: str, usuario: Usuario, top_k: int | None = None
+    ) -> ResultadoAgente:
         inicial = EstadoAgente(pregunta=pregunta, usuario=usuario, top_k=top_k or self._top_k)
         final = EstadoAgente.model_validate(self.grafo.invoke(inicial))
-        return _requerir_respuesta(final)
+        consultados = list(
+            dict.fromkeys(r.chunk.doc_id for r in final.recuperados if r.chunk.doc_id != "catalogo")
+        )
+        return ResultadoAgente(
+            respuesta=_requerir_respuesta(final),
+            pregunta_procesada=final.pregunta,
+            documentos_consultados=consultados,
+            fragmentos_descartados=final.fragmentos_descartados,
+            hallazgos=final.hallazgos,
+        )
 
     # ------------------------------------------------------------------ construcción
     def _construir(self) -> CompiledStateGraph:

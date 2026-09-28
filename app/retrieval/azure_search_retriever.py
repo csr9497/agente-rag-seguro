@@ -113,6 +113,14 @@ class AzureSearchRetriever:
         filtro = build_acl_filter(groups)
         if doc_id is not None:
             filtro += f" and doc_id eq {_literal(doc_id)}"
+        try:
+            return self._buscar_vectorial(consulta, vector, filtro, top_k)
+        except ResourceNotFoundError:
+            return []  # índice aún sin crear (despliegue nuevo): no hay nada visible
+
+    def _buscar_vectorial(
+        self, consulta: str, vector: list[float], filtro: str, top_k: int
+    ) -> list[ChunkRecuperado]:
         resultados = self._search.search(
             search_text=consulta,
             vector_queries=[

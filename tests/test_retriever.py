@@ -55,3 +55,10 @@ def test_filtro_odata_rechaza_inyeccion(malo) -> None:
 def test_filtro_odata_exige_grupos() -> None:
     with pytest.raises(ValueError):
         build_acl_filter([])
+
+
+def test_buscar_sin_coleccion_devuelve_vacio(retriever, embedder) -> None:
+    [v] = embedder.embed(["vacaciones"])
+    assert retriever.search("vacaciones", v, groups=["public"], top_k=4) == []
+    assert retriever.get_document_chunks("public/x.md", ["public"]) == []
+    assert retriever.list_documents(["public"]) == []

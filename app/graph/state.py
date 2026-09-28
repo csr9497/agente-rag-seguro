@@ -20,6 +20,9 @@ class EstadoAgente(BaseModel):
     # Contexto acumulado de todas las herramientas; su orden define la numeración [n].
     recuperados: list[ChunkRecuperado] = Field(default_factory=list)
 
+    # Fragmentos devueltos por las tools que access_guardrail descartó (solo se cuentan).
+    fragmentos_descartados: int = 0
+
     # Hallazgos de los guardrails de entrada y salida (van a la auditoría).
     hallazgos: list[Hallazgo] = Field(default_factory=list)
 
