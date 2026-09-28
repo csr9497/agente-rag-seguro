@@ -8,6 +8,7 @@ from qdrant_client import QdrantClient
 from app.config import Settings
 from app.graph.agente import Agente
 from app.graph.prompts import SUPERVISOR_PROMPT
+from app.observabilidad import configurar_trazas
 from app.persistencia.repositorios import (
     RepositorioDocumentos,
     RepositorioRoles,
@@ -130,6 +131,8 @@ def _agente(
     registro: RepositorioDocumentos | None = None,
 ) -> Agente:
     return Agente(
+        trazas=configurar_trazas(settings),
+        settings=settings,
         supervisor=supervisor,
         llm=llm,
         herramientas=[

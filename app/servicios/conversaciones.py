@@ -36,7 +36,7 @@ class ServicioConversaciones:
         conv = self.obtener(usuario, conversacion_id)
         # El agente solo recibe el rol de la conversación: nunca más grupos que ese.
         resultado = self._agente.consultar_detallado(
-            pregunta, Usuario(id=usuario.id, groups=[conv.rol_id])
+            pregunta, Usuario(id=usuario.id, groups=[conv.rol_id]), conversacion_id=conv.id
         )
         mensaje = MensajeGuardado(
             pregunta=resultado.pregunta_procesada,

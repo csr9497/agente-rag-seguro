@@ -10,11 +10,14 @@ from typing import Any, Literal
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
+from langsmith import Client
 from pydantic import BaseModel, Field, ValidationError
 
+from app.config import Settings
 from app.graph.prompts import SUPERVISOR_PROMPT
 from app.graph.state import EstadoAgente, ResultadoLlamada
 from app.models.schemas import ChunkRecuperado, Hallazgo, RespuestaConsulta, Usuario
+from app.observabilidad import traza_consulta, usuario_seudonimo
 from app.rag.generacion import generar_respuesta, respuesta_sin_contexto
 from app.retrieval.base import LLM, Supervisor
 from app.security.acceso import VerificadorAcceso, VerificadorPermisivo
@@ -49,6 +52,8 @@ class Agente:
         max_iteraciones: int = 3,
         max_contexto: int = 12,
         verificador: VerificadorAcceso | None = None,
+        trazas: Client | None = None,
+        settings: Settings | None = None,
     ) -> None:
         self._supervisor = supervisor
         self._llm = llm
@@ -60,6 +65,8 @@ class Agente:
         self._max_iteraciones = max_iteraciones
         self._max_contexto = max_contexto
         self._verificador = verificador or VerificadorPermisivo()
+        self._trazas = trazas
+        self._settings = settings or Settings()
         self.grafo = self._construir()
 
     def consultar(
@@ -68,10 +75,18 @@ class Agente:
         return self.consultar_detallado(pregunta, usuario, top_k).respuesta
 
     def consultar_detallado(
-        self, pregunta: str, usuario: Usuario, top_k: int | None = None
+        self,
+        pregunta: str,
+        usuario: Usuario,
+        top_k: int | None = None,
+        conversacion_id: str | None = None,
     ) -> ResultadoAgente:
         inicial = EstadoAgente(pregunta=pregunta, usuario=usuario, top_k=top_k or self._top_k)
-        final = EstadoAgente.model_validate(self.grafo.invoke(inicial))
+        with traza_consulta(
+            self._trazas, self._settings, roles=usuario.groups, conversacion_id=conversacion_id
+        ) as config:
+            config["metadata"]["usuario"] = usuario_seudonimo(usuario.id)
+            final = EstadoAgente.model_validate(self.grafo.invoke(inicial, config=config))
         consultados = list(
             dict.fromkeys(r.chunk.doc_id for r in final.recuperados if r.chunk.doc_id != "catalogo")
         )

@@ -41,6 +41,13 @@ class Settings(BaseSettings):
     max_iteraciones: int = 3
     max_fragmentos_contexto: int = 12
 
+    # Observabilidad (LangSmith). Ver app/observabilidad.py.
+    entorno: Literal["local", "dev", "prod"] = "local"
+    trazas_modo: Literal["apagado", "completo", "enmascarado"] = "apagado"
+    langsmith_api_key: SecretStr | None = None
+    langsmith_project: str = "agente-rag-dev"
+    app_version: str = "local"
+
     # Fase 1: sin autenticación. El usuario es un stub con estos grupos.
     default_user: str = "anonimo"
     default_groups: list[str] = ["public"]

@@ -17,6 +17,7 @@ dependencies = [
     "langgraph>=1.2.12",
     "python-multipart",        # subida de documentos (UploadFile) en la API
     "sqlalchemy",              # repositorios: mismo SQL para SQLite (local) y PostgreSQL (Azure)
+    "langsmith",               # trazas y evaluaciones (ya dependencia de LangGraph; uso directo)
 ]
 
 [dependency-groups]
@@ -35,7 +36,10 @@ package = false
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-m 'not integration'"
-filterwarnings = ["ignore:Payload indexes have no effect in the local Qdrant"]
+filterwarnings = [
+    "ignore:Payload indexes have no effect in the local Qdrant",
+    "ignore:langsmith.wrappers._openai_agents is deprecated",  # plugin interno de langsmith
+]
 markers = [
     "integration: pruebas contra un despliegue real (local o Azure); requieren INTEGRATION_BASE_URL",
 ]

@@ -1,4 +1,10 @@
+import os
 from pathlib import Path
+
+# Los tests nunca envían trazas a LangSmith, aunque .env las active (las variables de
+# entorno tienen prioridad sobre .env en pydantic-settings).
+os.environ["TRAZAS_MODO"] = "apagado"
+os.environ["LANGSMITH_TRACING"] = "false"
 
 import pytest
 from qdrant_client import QdrantClient

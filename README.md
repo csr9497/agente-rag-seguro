@@ -156,6 +156,19 @@ Entrada de ejemplo:
 Sin cuenta de LangSmith, la topología también está en http://localhost:8000/grafo
 (Mermaid, solo con `EXPONER_TOPOLOGIA=true`, activo en docker-compose).
 
+## Trazas (LangSmith)
+
+Con `TRAZAS_MODO` y `LANGSMITH_API_KEY` en `.env`, cada consulta genera una traza con el
+grafo completo (nodos, tools, llamadas a Azure OpenAI con tokens y latencia) y metadata de
+rol, conversación, entorno y versión (el usuario va seudonimizado). Detalles en
+[app/observabilidad.py](app/observabilidad.py).
+
+| Modo | Contenido | Uso |
+|---|---|---|
+| `apagado` | Nada (por defecto; los tests siempre) | — |
+| `completo` | Todo el texto | Solo dev, con datos de ejemplo |
+| `enmascarado` | Estructura y `doc_id`; PII enmascarada y fragmentos ocultos | Prod (`completo` + `ENTORNO=prod` no arranca) |
+
 ## Pruebas de integración (matriz de escenarios)
 
 Los escenarios están en [tests/integration/escenarios.yaml](tests/integration/escenarios.yaml).

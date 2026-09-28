@@ -1,6 +1,7 @@
 from typing import Any
 
 from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+from langsmith.wrappers import wrap_openai
 from openai import AzureOpenAI
 
 from app.config import Settings
@@ -10,7 +11,13 @@ _SCOPE_COGNITIVE = "https://cognitiveservices.azure.com/.default"
 
 
 def build_client(settings: Settings) -> AzureOpenAI:
-    """Clave solo en local (desde Key Vault vía .env); en Azure, Managed Identity."""
+    """Clave solo en local (desde Key Vault vía .env); en Azure, Managed Identity. Con trazas
+    activas, cada llamada (tokens, coste, latencia) aparece en LangSmith."""
+    cliente = _cliente_base(settings)
+    return cliente if settings.trazas_modo == "apagado" else wrap_openai(cliente)
+
+
+def _cliente_base(settings: Settings) -> AzureOpenAI:
     if settings.azure_openai_api_key:
         return AzureOpenAI(
             azure_endpoint=settings.azure_openai_endpoint,
