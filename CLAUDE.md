@@ -80,8 +80,10 @@ El agente es un grafo LangGraph:
 - Lint / formato: `ruff check` · `ruff format`
 
 ## Fase actual
-**Fase 1 — RAG básico local**: FastAPI + RAG mínimo (chunk → embed → vector store
-local → respuesta con citación) levantado con docker-compose. El plan completo son
+**Fase 2 — Agente LangGraph local** (Fase 1 completada): grafo
+`authorize → input_guardrail → supervisor ⇄ tools → generate → output_guardrail → audit`
+con `rag_retrieve`. Siguiente: desplegar en Azure solo gpt-4o + embeddings y validar con la
+matriz de integración; después empaquetar y desplegar el resto. El plan completo son
 6 fases (RAG → agente → permisos/guardrails → Azure → automatización/HA → pulido).
 
 ## Cómo trabajar en este repo

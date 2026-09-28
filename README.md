@@ -1,4 +1,4 @@
-# Asistente RAG seguro — Fase 1
+# Asistente RAG seguro — Fase 2 (agente LangGraph)
 
 Asistente interno que responde preguntas sobre documentos de la empresa **con citas** y
 **solo con lo que el grupo del usuario puede ver**. Contexto completo y reglas en
@@ -11,7 +11,22 @@ Asistente interno que responde preguntas sobre documentos de la empresa **con ci
             └───────────────────────────────────────────┴─▶ Storage (documentos) · Key Vault
 ```
 
-- **Local**: backend + web + Qdrant con `docker compose`; embeddings y LLM en Azure OpenAI.
+El backend es un grafo LangGraph ([app/graph/agente.py](app/graph/agente.py)):
+
+```
+authorize → input_guardrail → supervisor ⇄ tools → generate → output_guardrail → audit
+    └──────────────┴── (sin grupos / bloqueada) ──────────────────────────────────▶ audit
+```
+
+- **supervisor**: gpt-4o con tool-calling; decide cuántas búsquedas hacer (una por tema).
+- **tools**: `rag_retrieve`. Los grupos del usuario los inyecta el grafo; el LLM no puede
+  elegirlos (el esquema de argumentos solo admite `consulta`).
+- **generate**: respuesta con citas `[n]` y salida estructurada; sin contexto, no llama al LLM.
+- **guardrails**: interfaz lista; implementación real (Content Safety + PII) en la Fase 3.
+- **audit**: toda consulta que entra al grafo se audita, también las rechazadas.
+
+- **Local**: backend + web + Qdrant con `docker compose`, o sin Docker con Qdrant embebido
+  (`QDRANT_PATH`); embeddings y LLM en Azure OpenAI.
 - **Azure**: el mismo código con `VECTOR_STORE=azure_search` y Managed Identity (sin claves).
 
 ## Puesta en marcha (anaconda + uv)
@@ -40,6 +55,15 @@ make ingest
 curl -s localhost:8000/consultar -H 'content-type: application/json' \
   -d '{"pregunta": "¿Cuántos días de vacaciones tengo?"}'
 ```
+
+Sin Docker:
+
+```bash
+QDRANT_PATH=.qdrant uv run uvicorn app.main:app --reload
+```
+
+Sin `AZURE_OPENAI_ENDPOINT` la app arranca igualmente y `/consultar` responde **503**
+indicando qué falta; el resto del grafo (permisos, auditoría, validación) funciona.
 
 **Permisos**: el primer nivel de carpeta de cada documento es su grupo
 (`public/…`, `rrhh/…`). En la Fase 1 no hay autenticación: el usuario tiene

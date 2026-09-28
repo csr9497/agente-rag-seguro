@@ -12,3 +12,4 @@ reports/
 *.tfplan
 crash.log
 .terraform.tfstate.lock.info
+.qdrant/
