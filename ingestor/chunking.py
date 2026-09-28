@@ -35,6 +35,8 @@ def chunk_document(
     acl_groups: list[str],
     max_chars: int = 1000,
     overlap: int = 150,
+    doc_hash: str = "",
+    indexado_en: str = "",
 ) -> list[Chunk]:
     return [
         Chunk(
@@ -43,6 +45,8 @@ def chunk_document(
             fuente=doc_id,
             contenido=trozo,
             acl_groups=acl_groups,
+            doc_hash=doc_hash,
+            indexado_en=indexado_en,
         )
         for i, trozo in enumerate(split_text(texto, max_chars, overlap))
     ]

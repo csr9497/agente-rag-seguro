@@ -3,7 +3,13 @@ y cambiar de proveedor de modelos sin tocar el grafo del agente."""
 
 from typing import Any, Protocol
 
-from app.models.schemas import Chunk, ChunkRecuperado, DecisionSupervisor, RespuestaLLM
+from app.models.schemas import (
+    Chunk,
+    ChunkRecuperado,
+    DecisionSupervisor,
+    DocumentoIndexado,
+    RespuestaLLM,
+)
 
 
 class Embedder(Protocol):
@@ -31,4 +37,21 @@ class Retriever(Protocol):
         self, consulta: str, vector: list[float], groups: list[str], top_k: int
     ) -> list[ChunkRecuperado]:
         """Devuelve solo chunks cuya ACL intersecta `groups`. Sin grupos, no devuelve nada."""
+        ...
+
+    # ------------------------------------------------------------ gestión por documento
+    def delete_document(self, doc_id: str) -> int:
+        """Borra todos los chunks del documento. Devuelve cuántos había."""
+        ...
+
+    def document_hash(self, doc_id: str) -> str | None:
+        """Hash del documento indexado, o None si no existe."""
+        ...
+
+    def find_by_hash(self, doc_hash: str, group: str) -> list[str]:
+        """doc_ids con ese hash dentro del grupo (detección de duplicados)."""
+        ...
+
+    def list_documents(self, groups: list[str]) -> list[DocumentoIndexado]:
+        """Documentos visibles para `groups`. Sin grupos, lista vacía."""
         ...

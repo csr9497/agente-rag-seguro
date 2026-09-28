@@ -37,6 +37,8 @@ class Chunk(BaseModel):
     fuente: str
     contenido: str
     acl_groups: list[str] = Field(min_length=1)
+    doc_hash: str = Field(default="", description="SHA-256 del texto saneado del documento")
+    indexado_en: str = Field(default="", description="Fecha ISO-8601 (UTC) de indexación")
 
 
 class ChunkRecuperado(BaseModel):
@@ -90,3 +92,27 @@ class DecisionSupervisor(BaseModel):
     mensaje_asistente: dict[str, Any] = Field(
         description="Mensaje del asistente tal cual, para mantener el historial de tool-calling"
     )
+
+
+class DocumentoIndexado(BaseModel):
+    """Vista agregada de un documento en el índice."""
+
+    doc_id: str
+    acl_groups: list[str]
+    doc_hash: str
+    chunks: int
+    indexado_en: str
+
+
+EstadoOperacion = Literal[
+    "indexado", "actualizado", "sin_cambios", "duplicado", "rechazado", "eliminado", "no_encontrado"
+]
+
+
+class ResultadoOperacion(BaseModel):
+    doc_id: str
+    estado: EstadoOperacion
+    chunks: int = 0
+    motivos: list[str] = Field(default_factory=list)
+    avisos: list[str] = Field(default_factory=list)
+    duplicado_de: str | None = None

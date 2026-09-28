@@ -16,7 +16,7 @@ from azure.search.documents.indexes.models import (
 )
 from azure.search.documents.models import VectorizedQuery
 
-from app.models.schemas import Chunk, ChunkRecuperado
+from app.models.schemas import Chunk, ChunkRecuperado, DocumentoIndexado
 
 # IDs de grupo permitidos en el filtro OData (nombres simples o GUIDs de Entra ID).
 _GRUPO_VALIDO = re.compile(r"^[A-Za-z0-9_.\-]+$")
@@ -30,6 +30,11 @@ def build_acl_filter(groups: list[str]) -> str:
         if not _GRUPO_VALIDO.match(g):
             raise ValueError(f"Identificador de grupo no válido: {g!r}")
     return f"acl_groups/any(g: search.in(g, '{','.join(groups)}', ','))"
+
+
+def _literal(valor: str) -> str:
+    """Literal de cadena OData: las comillas simples se duplican."""
+    return "'" + valor.replace("'", "''") + "'"
 
 
 def _clave_documento(chunk_id: str) -> str:
@@ -59,6 +64,8 @@ class AzureSearchRetriever:
             SimpleField(name="chunk_id", type=SearchFieldDataType.String),
             SimpleField(name="doc_id", type=SearchFieldDataType.String, filterable=True),
             SimpleField(name="fuente", type=SearchFieldDataType.String),
+            SimpleField(name="doc_hash", type=SearchFieldDataType.String, filterable=True),
+            SimpleField(name="indexado_en", type=SearchFieldDataType.String),
             SearchableField(name="contenido", type=SearchFieldDataType.String),
             SimpleField(
                 name="acl_groups",
@@ -105,7 +112,7 @@ class AzureSearchRetriever:
             ],
             filter=build_acl_filter(groups),
             top=top_k,
-            select=["chunk_id", "doc_id", "fuente", "contenido", "acl_groups"],
+            select=list(Chunk.model_fields),
         )
         return [
             ChunkRecuperado(
@@ -114,3 +121,34 @@ class AzureSearchRetriever:
             )
             for r in resultados
         ]
+
+    # ------------------------------------------------------------ gestión por documento
+    def _buscar(self, filtro: str, campos: list[str], top: int | None = None):
+        return self._search.search(search_text="*", filter=filtro, select=campos, top=top)
+
+    def delete_document(self, doc_id: str) -> int:
+        ids = [{"id": r["id"]} for r in self._buscar(f"doc_id eq {_literal(doc_id)}", ["id"])]
+        for i in range(0, len(ids), 1000):
+            self._search.delete_documents(ids[i : i + 1000])
+        return len(ids)
+
+    def document_hash(self, doc_id: str) -> str | None:
+        for r in self._buscar(f"doc_id eq {_literal(doc_id)}", ["doc_hash"], top=1):
+            return r["doc_hash"] or None
+        return None
+
+    def find_by_hash(self, doc_hash: str, group: str) -> list[str]:
+        filtro = f"doc_hash eq {_literal(doc_hash)} and {build_acl_filter([group])}"
+        return sorted({r["doc_id"] for r in self._buscar(filtro, ["doc_id"])})
+
+    def list_documents(self, groups: list[str]) -> list[DocumentoIndexado]:
+        if not groups:
+            return []
+        campos = ["doc_id", "acl_groups", "doc_hash", "indexado_en"]
+        docs: dict[str, DocumentoIndexado] = {}
+        for r in self._buscar(build_acl_filter(groups), campos):
+            if actual := docs.get(r["doc_id"]):
+                actual.chunks += 1
+            else:
+                docs[r["doc_id"]] = DocumentoIndexado(chunks=1, **{c: r[c] for c in campos})
+        return sorted(docs.values(), key=lambda d: d.doc_id)
