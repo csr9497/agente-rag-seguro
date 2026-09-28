@@ -10,7 +10,7 @@
 # Los escenarios se basan en ingestor/sample_docs.
 
 version: 1
-fase_actual: 2
+fase_actual: 3
 
 capacidades:
   contrato_api:
@@ -76,6 +76,27 @@ capacidades:
       - tests/test_api_roles.py::test_subir_requiere_gestionar_documentos
       - tests/test_api_roles.py::test_no_se_puede_publicar_para_roles_fuera_de_publica_para
       - tests/test_api_roles.py::test_nombre_con_ruta_no_permite_salir_del_espacio_del_rol
+  roles_y_permisos:
+    descripcion: Roles y permisos gestionados desde la UI; solo el administrador los cambia
+    fase: 3
+    tests_unitarios:
+      - tests/test_api_roles.py::test_admin_crea_y_asigna_permisos
+      - tests/test_api_roles.py::test_solo_administrador_gestiona_roles
+      - tests/test_api_roles.py::test_no_se_quita_la_administracion_al_ultimo_admin
+      - tests/test_api_roles.py::test_conversacion_usa_solo_el_rol_elegido
+  barrera_acceso:
+    descripcion: access_guardrail contrasta cada fragmento con el registro antes del LLM
+    fase: 3
+    tests_unitarios:
+      - tests/test_acceso.py::test_indice_con_acl_manipulada_se_descarta
+      - tests/test_acceso.py::test_chunk_huerfano_sin_registro_se_descarta
+      - tests/test_acceso.py::test_documento_en_cuarentena_no_se_usa
+  integridad_permisos:
+    descripcion: Verificación índice ↔ registro al arrancar y bajo demanda, con cuarentena
+    fase: 3
+    tests_unitarios:
+      - tests/test_acceso.py::test_integridad_detecta_y_pone_en_cuarentena
+      - tests/test_acceso.py::test_integridad_falta_en_indice_y_reactivacion
   autenticacion_entra:
     descripcion: Grupos obtenidos del token de Entra ID; sin token → 401
     fase: 3

@@ -9,6 +9,7 @@ DESCRIPCIONES = {
     "input_guardrail": "Bloquea inyección/texto oculto; enmascara PII",
     "supervisor": "gpt-4o con tool-calling: decide qué buscar",
     "tools": "rag_retrieve, listar/leer/buscar_en_documento con los grupos del estado",
+    "access_guardrail": "Contrasta cada fragmento con el registro de permisos; descarta el resto",
     "generate": "Respuesta con citas [n] y salida estructurada",
     "output_guardrail": "Bloquea fuga del prompt; enmascara PII sensible",
     "audit": "Registra usuario, pregunta, fuentes y respuesta",

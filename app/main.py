@@ -7,7 +7,7 @@ import openai
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
-from app.api import conversaciones, documentos, roles
+from app.api import admin, conversaciones, documentos, roles
 from app.config import Settings, get_settings
 from app.deps import build_servicios
 from app.graph import topologia
@@ -24,6 +24,12 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     servicios = build_servicios(get_settings())
+    informe = servicios.verificar_integridad()  # "validar antes de todo"
+    logger.info(
+        "Integridad al arrancar: %d revisados, %d problemas",
+        informe.revisados,
+        len(informe.problemas),
+    )
     app.state.servicios = servicios
     app.state.agente = servicios.agente
     app.state.gestor = servicios.gestor
@@ -31,7 +37,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="Asistente RAG", version="0.2.0", lifespan=lifespan)
-for router in (documentos.router, roles.router, conversaciones.router):
+for router in (documentos.router, roles.router, conversaciones.router, admin.router):
     app.include_router(router)
 
 

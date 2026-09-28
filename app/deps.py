@@ -10,6 +10,7 @@ from app.graph.agente import Agente
 from app.graph.prompts import SUPERVISOR_PROMPT
 from app.persistencia.repositorios import (
     RepositorioDocumentos,
+    RepositorioRoles,
     SqlRepositorioConversaciones,
     SqlRepositorioDocumentos,
     SqlRepositorioRoles,
@@ -25,8 +26,10 @@ from app.retrieval.azure_openai import (
 )
 from app.retrieval.base import LLM, Embedder, Retriever, Supervisor
 from app.retrieval.no_configurado import ModelosNoConfigurados
+from app.security.acceso import VerificadorRegistro
 from app.security.guardrails import GuardrailEntrada, GuardrailSalida
 from app.servicios.conversaciones import ServicioConversaciones
+from app.servicios.integridad import InformeIntegridad, verificar_integridad
 from app.servicios.roles import ServicioRoles
 from app.tools.documentos import BuscarEnDocumento, LeerDocumento, ListarDocumentos
 from app.tools.rag_retrieve import RagRetrieve
@@ -78,6 +81,11 @@ class Servicios:
     roles: ServicioRoles
     conversaciones: ServicioConversaciones
     registro: RepositorioDocumentos
+    repo_roles: RepositorioRoles
+    retriever: Retriever
+
+    def verificar_integridad(self) -> InformeIntegridad:
+        return verificar_integridad(self.retriever, self.registro, self.repo_roles)
 
 
 def build_servicios(
@@ -94,7 +102,7 @@ def build_servicios(
     inicializar(motor)
     repo_roles = SqlRepositorioRoles(motor)
     registro = SqlRepositorioDocumentos(motor)
-    agente = _agente(settings, embedder, llm, supervisor, retriever)
+    agente = _agente(settings, embedder, llm, supervisor, retriever, registro)
     roles = ServicioRoles(repo_roles, settings.seleccion_libre_de_rol)
     return Servicios(
         agente=agente,
@@ -102,23 +110,31 @@ def build_servicios(
         roles=roles,
         conversaciones=ServicioConversaciones(SqlRepositorioConversaciones(motor), roles, agente),
         registro=registro,
+        repo_roles=repo_roles,
+        retriever=retriever,
     )
 
 
 def build_agente(settings: Settings) -> Agente:
+    """Agente sin registro (LangGraph Studio y /consultar): verificación solo por ACL."""
     embedder, llm, supervisor = build_modelos(settings)
     return _agente(settings, embedder, llm, supervisor, build_retriever(settings))
 
 
 def _agente(
-    settings: Settings, embedder: Embedder, llm: LLM, supervisor: Supervisor, retriever: Retriever
+    settings: Settings,
+    embedder: Embedder,
+    llm: LLM,
+    supervisor: Supervisor,
+    retriever: Retriever,
+    registro: RepositorioDocumentos | None = None,
 ) -> Agente:
     return Agente(
         supervisor=supervisor,
         llm=llm,
         herramientas=[
             RagRetrieve(embedder, retriever, settings.min_score),
-            ListarDocumentos(retriever),
+            ListarDocumentos(retriever, registro),
             BuscarEnDocumento(embedder, retriever),
             LeerDocumento(retriever),
         ],
@@ -127,4 +143,5 @@ def _agente(
         top_k=settings.retrieval_top_k,
         max_iteraciones=settings.max_iteraciones,
         max_contexto=settings.max_fragmentos_contexto,
+        verificador=VerificadorRegistro(registro) if registro else None,
     )

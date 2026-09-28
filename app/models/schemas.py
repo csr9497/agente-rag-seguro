@@ -69,7 +69,14 @@ class Usuario(BaseModel):
 class Hallazgo(BaseModel):
     """Resultado de un guardrail sobre la entrada o la salida."""
 
-    tipo: Literal["inyeccion", "texto_oculto", "pii", "fuga_prompt", "etiqueta_estructural"]
+    tipo: Literal[
+        "inyeccion",
+        "texto_oculto",
+        "pii",
+        "fuga_prompt",
+        "etiqueta_estructural",
+        "acceso_no_autorizado",
+    ]
     detalle: str
     accion: Literal["bloquear", "enmascarar", "eliminar"]
 

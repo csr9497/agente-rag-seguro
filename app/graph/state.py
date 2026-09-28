@@ -3,6 +3,12 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from app.models.schemas import ChunkRecuperado, Hallazgo, RespuestaConsulta, ToolCall, Usuario
+from app.tools.base import ResultadoHerramienta
+
+
+class ResultadoLlamada(BaseModel):
+    tool_call_id: str
+    resultado: ResultadoHerramienta
 
 
 class EstadoAgente(BaseModel):
@@ -15,6 +21,8 @@ class EstadoAgente(BaseModel):
     # Historial de tool-calling del supervisor (formato chat de OpenAI).
     mensajes: list[dict[str, Any]] = Field(default_factory=list)
     pendientes: list[ToolCall] = Field(default_factory=list)
+    # Resultados de tools pendientes de access_guardrail (aún no visibles para el supervisor).
+    por_revisar: list[ResultadoLlamada] = Field(default_factory=list)
     iteraciones: int = 0
 
     # Contexto acumulado de todas las herramientas; su orden define la numeración [n].

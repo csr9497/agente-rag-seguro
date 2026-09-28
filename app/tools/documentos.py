@@ -3,6 +3,7 @@
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.schemas import Chunk, ChunkRecuperado, Usuario
+from app.persistencia.repositorios import RepositorioDocumentos
 from app.retrieval.base import Embedder, Retriever
 from app.tools.base import PATRON_GRUPO, SIN_ACCESO, DocId, ResultadoHerramienta
 
@@ -29,22 +30,21 @@ class ListarDocumentos:
     )
     args_model = ListarDocumentosArgs
 
-    def __init__(self, retriever: Retriever) -> None:
+    def __init__(self, retriever: Retriever, registro: RepositorioDocumentos | None = None) -> None:
         self._retriever = retriever
+        self._registro = registro
 
     def ejecutar(
         self, args: ListarDocumentosArgs, usuario: Usuario, top_k: int
     ) -> ResultadoHerramienta:
         grupos = [g for g in usuario.groups if args.grupo in (None, g)]
-        docs = self._retriever.list_documents(grupos)
-        if not docs:
+        lineas = self._lineas(grupos)
+        if not lineas:
             return ResultadoHerramienta(nota="No hay documentos visibles.")
-        lineas = [
-            f"- {d.doc_id} (grupo: {', '.join(d.acl_groups)}; fragmentos: {d.chunks})"
-            for d in docs[:MAX_CATALOGO]
-        ]
-        if len(docs) > MAX_CATALOGO:
-            lineas.append(f"- … y {len(docs) - MAX_CATALOGO} documentos más")
+        total = len(lineas)
+        lineas = lineas[:MAX_CATALOGO]
+        if total > MAX_CATALOGO:
+            lineas.append(f"- … y {total - MAX_CATALOGO} documentos más")
         catalogo = Chunk(
             chunk_id=f"catalogo#{args.grupo or '*'}",
             doc_id="catalogo",
@@ -53,6 +53,22 @@ class ListarDocumentos:
             acl_groups=grupos,
         )
         return ResultadoHerramienta(chunks=[ChunkRecuperado(chunk=catalogo, score=1.0)])
+
+    def _lineas(self, grupos: list[str]) -> list[str]:
+        """Con registro (la app), el catálogo sale de la fuente de verdad: solo documentos
+        activos de esos roles. Sin registro, del índice."""
+        if not grupos:
+            return []
+        if self._registro is not None:
+            return [
+                f"- {d.titulo}: {d.doc_id} (fragmentos: {d.chunks})"
+                for d in self._registro.listar(estado="activo")
+                if set(d.roles) & set(grupos)
+            ]
+        return [
+            f"- {d.doc_id} (grupo: {', '.join(d.acl_groups)}; fragmentos: {d.chunks})"
+            for d in self._retriever.list_documents(grupos)
+        ]
 
 
 # ------------------------------------------------------------------- leer_documento

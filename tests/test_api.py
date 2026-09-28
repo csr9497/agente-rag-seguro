@@ -81,7 +81,8 @@ def test_topologia_muestra_el_grafo(client) -> None:
         "authorize -.-> input_guardrail",
         "authorize -.-> audit",
         "supervisor -.-> tools",
-        "tools --> supervisor",
+        "tools --> access_guardrail",
+        "access_guardrail --> supervisor",
         "supervisor -.-> generate",
         "output_guardrail --> audit",
     ]:

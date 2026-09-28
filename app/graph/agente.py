@@ -13,13 +13,14 @@ from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel, Field, ValidationError
 
 from app.graph.prompts import SUPERVISOR_PROMPT
-from app.graph.state import EstadoAgente
+from app.graph.state import EstadoAgente, ResultadoLlamada
 from app.models.schemas import ChunkRecuperado, Hallazgo, RespuestaConsulta, Usuario
 from app.rag.generacion import generar_respuesta, respuesta_sin_contexto
 from app.retrieval.base import LLM, Supervisor
+from app.security.acceso import VerificadorAcceso, VerificadorPermisivo
 from app.security.audit import registrar_consulta
 from app.security.guardrails import MENSAJE_BLOQUEO, Guardrail
-from app.tools.base import Herramienta, ResultadoHerramienta, schema_openai
+from app.tools.base import SIN_ACCESO, Herramienta, ResultadoHerramienta, schema_openai
 
 Update = dict[str, Any]
 
@@ -47,6 +48,7 @@ class Agente:
         top_k: int = 4,
         max_iteraciones: int = 3,
         max_contexto: int = 12,
+        verificador: VerificadorAcceso | None = None,
     ) -> None:
         self._supervisor = supervisor
         self._llm = llm
@@ -57,6 +59,7 @@ class Agente:
         self._top_k = top_k
         self._max_iteraciones = max_iteraciones
         self._max_contexto = max_contexto
+        self._verificador = verificador or VerificadorPermisivo()
         self.grafo = self._construir()
 
     def consultar(
@@ -87,6 +90,7 @@ class Agente:
         g.add_node("input_guardrail", self._input_guardrail)
         g.add_node("supervisor", self._supervisor_node)
         g.add_node("tools", self._tools)
+        g.add_node("access_guardrail", self._access_guardrail)
         g.add_node("generate", self._generate)
         g.add_node("output_guardrail", self._output_guardrail)
         g.add_node("audit", self._audit)
@@ -100,7 +104,8 @@ class Agente:
             "input_guardrail", self._continuar_o_auditar("supervisor"), ["supervisor", "audit"]
         )
         g.add_conditional_edges("supervisor", self._tras_supervisor, ["tools", "generate"])
-        g.add_edge("tools", "supervisor")
+        g.add_edge("tools", "access_guardrail")
+        g.add_edge("access_guardrail", "supervisor")
         g.add_edge("generate", "output_guardrail")
         g.add_edge("output_guardrail", "audit")
         g.add_edge("audit", END)
@@ -149,35 +154,72 @@ class Agente:
         }
 
     def _tools(self, estado: EstadoAgente) -> Update:
+        """Solo ejecuta. El contenido no llega al supervisor hasta pasar access_guardrail."""
+        resultados = [
+            ResultadoLlamada(
+                tool_call_id=llamada.id,
+                resultado=self._ejecutar(llamada.nombre, llamada.argumentos, estado),
+            )
+            for llamada in estado.pendientes
+        ]
+        return {"por_revisar": resultados, "pendientes": []}
+
+    def _access_guardrail(self, estado: EstadoAgente) -> Update:
+        """Verifica cada fragmento contra el registro; acumula contexto y compone los mensajes
+        de tool para el supervisor solo con lo autorizado."""
         recuperados = list(estado.recuperados)
         vistos = {r.chunk.chunk_id for r in recuperados}
         mensajes = list(estado.mensajes)
-        for llamada in estado.pendientes:
-            resultado = self._ejecutar(llamada.nombre, llamada.argumentos, estado)
+        hallazgos = list(estado.hallazgos)
+        descartados_total = estado.fragmentos_descartados
+        for llamada in estado.por_revisar:
+            resultado = llamada.resultado
             nuevos: list[ChunkRecuperado] = []
-            descartados = 0
+            sin_acceso = por_tope = 0
             for r in resultado.chunks:
+                if motivo := self._verificador.motivo_rechazo(r.chunk, estado.usuario.groups):
+                    sin_acceso += 1
+                    hallazgos.append(
+                        Hallazgo(
+                            tipo="acceso_no_autorizado",
+                            detalle=f"{r.chunk.chunk_id}: {motivo}",
+                            accion="eliminar",
+                        )
+                    )
+                    continue
                 if r.chunk.chunk_id in vistos:
                     continue
                 if len(recuperados) >= self._max_contexto:
-                    descartados += 1
+                    por_tope += 1
                     continue
                 vistos.add(r.chunk.chunk_id)
                 recuperados.append(r)
                 nuevos.append(r)
+            descartados_total += sin_acceso
             partes = [resultado.nota] if resultado.nota else []
             if nuevos:
                 partes.append(_resumen(nuevos))
-            elif resultado.chunks and not descartados:
+            elif resultado.chunks and not (por_tope or sin_acceso):
                 partes.append("Sin resultados nuevos.")
-            if descartados:
+            if por_tope:
                 partes.append(
                     f"Límite de contexto alcanzado ({self._max_contexto} fragmentos): "
-                    f"{descartados} descartados. Responde con lo que ya tienes."
+                    f"{por_tope} descartados. Responde con lo que ya tienes."
                 )
+            if sin_acceso and not nuevos and not resultado.nota:
+                # Mismo mensaje que "no existe": no se revela que había algo sin acceso.
+                partes.append(SIN_ACCESO)
             contenido = "\n\n".join(partes) or "Sin resultados."
-            mensajes.append({"role": "tool", "tool_call_id": llamada.id, "content": contenido})
-        return {"recuperados": recuperados, "mensajes": mensajes, "pendientes": []}
+            mensajes.append(
+                {"role": "tool", "tool_call_id": llamada.tool_call_id, "content": contenido}
+            )
+        return {
+            "recuperados": recuperados,
+            "mensajes": mensajes,
+            "por_revisar": [],
+            "hallazgos": hallazgos,
+            "fragmentos_descartados": descartados_total,
+        }
 
     def _ejecutar(self, nombre: str, argumentos: str, estado: EstadoAgente) -> ResultadoHerramienta:
         herramienta = self._herramientas.get(nombre)
