@@ -77,6 +77,26 @@ de hasta 1 MB en UTF-8, sin symlinks, rutas ocultas ni `..`; rechaza documentos 
 invisible o instrucciones dirigidas al modelo. La ingesta informa de los rechazados y sale
 con código 1 si hay alguno.
 
+**Gestión de documentos** ([ingestor/gestor.py](ingestor/gestor.py),
+[app/api/documentos.py](app/api/documentos.py)): cada chunk guarda el hash SHA-256 del
+documento y su fecha de indexación.
+
+| Operación | CLI / API | Comportamiento |
+|---|---|---|
+| Indexar | `make ingest` · `POST /documentos` (multipart: `grupo`, `archivo`) | `indexado` / `actualizado` (borra antes los chunks antiguos) / `sin_cambios` / `duplicado` (409, mismo contenido en el mismo grupo) / `rechazado` (422, con motivos) |
+| Listar | `GET /documentos` | Solo documentos visibles para los grupos del usuario |
+| Eliminar | `DELETE /documentos/{grupo}/{archivo}` | Borra todos sus chunks (404 si no existe) |
+| Sincronizar | `python -m ingestor.ingest --borrar-huerfanos` | Además borra del índice lo que ya no está en el origen (solo en los grupos del origen) |
+
+Subir o borrar exige pertenecer al grupo `editores` **y** al grupo destino. La API de
+escritura está desactivada por defecto (`GESTION_DOCUMENTOS=true` en docker-compose) hasta
+tener Entra ID. En local:
+
+```bash
+curl -F grupo=public -F archivo=@politica.md localhost:8000/documentos \
+  -H 'X-Usuario-Grupos: editores,public'
+```
+
 **Permisos**: el primer nivel de carpeta de cada documento es su grupo
 (`public/…`, `rrhh/…`). En la Fase 1 no hay autenticación: el usuario tiene
 `DEFAULT_GROUPS=["public"]`. En local (`IDENTIDAD_DEBUG=true`) se puede simular otro grupo

@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     identidad_debug: bool = False
     # Expone /grafo y /grafo.mmd con la topología del agente. Solo local.
     exponer_topologia: bool = False
+    # API de gestión de documentos (subir/borrar). Desactivada por defecto hasta tener Entra ID.
+    gestion_documentos: bool = False
+    grupo_editores: str = "editores"
 
 
 @lru_cache

@@ -19,6 +19,7 @@ services:
       QDRANT_URL: http://qdrant:6333
       IDENTIDAD_DEBUG: "true"   # permite probar permisos con X-Usuario-Grupos en local
       EXPONER_TOPOLOGIA: "true" # http://localhost:8000/grafo
+      GESTION_DOCUMENTOS: "true" # /documentos (editores: X-Usuario-Grupos: editores,<grupo>)
     ports:
       - "8000:8000"
     depends_on:

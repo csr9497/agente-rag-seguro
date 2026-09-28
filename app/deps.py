@@ -17,6 +17,7 @@ from app.retrieval.base import LLM, Embedder, Retriever, Supervisor
 from app.retrieval.no_configurado import ModelosNoConfigurados
 from app.security.guardrails import GuardrailEntrada, GuardrailSalida
 from app.tools.rag_retrieve import RagRetrieve
+from ingestor.gestor import GestorDocumentos
 
 
 def build_retriever(settings: Settings) -> Retriever:
@@ -57,12 +58,28 @@ def build_embedder(settings: Settings) -> Embedder:
     return build_modelos(settings)[0]
 
 
+def build_servicios(settings: Settings) -> tuple[Agente, GestorDocumentos]:
+    """Agente y gestor de documentos comparten embedder y retriever (Qdrant embebido solo
+    admite un cliente por proceso)."""
+    embedder, llm, supervisor = build_modelos(settings)
+    retriever = build_retriever(settings)
+    return _agente(settings, embedder, llm, supervisor, retriever), GestorDocumentos(
+        embedder, retriever
+    )
+
+
 def build_agente(settings: Settings) -> Agente:
     embedder, llm, supervisor = build_modelos(settings)
+    return _agente(settings, embedder, llm, supervisor, build_retriever(settings))
+
+
+def _agente(
+    settings: Settings, embedder: Embedder, llm: LLM, supervisor: Supervisor, retriever: Retriever
+) -> Agente:
     return Agente(
         supervisor=supervisor,
         llm=llm,
-        herramientas=[RagRetrieve(embedder, build_retriever(settings), settings.min_score)],
+        herramientas=[RagRetrieve(embedder, retriever, settings.min_score)],
         guardrail_entrada=GuardrailEntrada(),
         guardrail_salida=GuardrailSalida([SYSTEM_PROMPT, SUPERVISOR_PROMPT]),
         top_k=settings.retrieval_top_k,

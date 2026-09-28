@@ -7,8 +7,9 @@ import openai
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse
 
+from app.api import documentos
 from app.config import Settings, get_settings
-from app.deps import build_agente
+from app.deps import build_servicios
 from app.graph import topologia
 from app.graph.agente import Agente
 from app.models.schemas import ConsultaRequest, RespuestaConsulta, Usuario
@@ -21,11 +22,12 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    app.state.agente = build_agente(get_settings())
+    app.state.agente, app.state.gestor = build_servicios(get_settings())
     yield
 
 
 app = FastAPI(title="Asistente RAG", version="0.2.0", lifespan=lifespan)
+app.include_router(documentos.router)
 
 
 def get_agente(request: Request) -> Agente:
