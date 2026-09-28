@@ -16,7 +16,7 @@ from azure.search.documents.indexes.models import (
 )
 from azure.search.documents.models import VectorizedQuery
 
-from app.models.schemas import Chunk, ChunkRecuperado, DocumentoIndexado
+from app.models.schemas import Chunk, ChunkRecuperado, DocumentoIndexado, indice_chunk
 
 # IDs de grupo permitidos en el filtro OData (nombres simples o GUIDs de Entra ID).
 _GRUPO_VALIDO = re.compile(r"^[A-Za-z0-9_.\-]+$")
@@ -101,16 +101,24 @@ class AzureSearchRetriever:
         self._search.merge_or_upload_documents(documentos)
 
     def search(
-        self, consulta: str, vector: list[float], groups: list[str], top_k: int
+        self,
+        consulta: str,
+        vector: list[float],
+        groups: list[str],
+        top_k: int,
+        doc_id: str | None = None,
     ) -> list[ChunkRecuperado]:
         if not groups:
             return []
+        filtro = build_acl_filter(groups)
+        if doc_id is not None:
+            filtro += f" and doc_id eq {_literal(doc_id)}"
         resultados = self._search.search(
             search_text=consulta,
             vector_queries=[
                 VectorizedQuery(vector=vector, k_nearest_neighbors=top_k, fields="vector")
             ],
-            filter=build_acl_filter(groups),
+            filter=filtro,
             top=top_k,
             select=list(Chunk.model_fields),
         )
@@ -121,6 +129,16 @@ class AzureSearchRetriever:
             )
             for r in resultados
         ]
+
+    def get_document_chunks(self, doc_id: str, groups: list[str]) -> list[Chunk]:
+        if not groups:
+            return []
+        filtro = f"doc_id eq {_literal(doc_id)} and {build_acl_filter(groups)}"
+        chunks = [
+            Chunk.model_validate({k: r[k] for k in Chunk.model_fields})
+            for r in self._buscar(filtro, list(Chunk.model_fields))
+        ]
+        return sorted(chunks, key=lambda c: indice_chunk(c.chunk_id))
 
     # ------------------------------------------------------------ gestión por documento
     def _buscar(self, filtro: str, campos: list[str], top: int | None = None):

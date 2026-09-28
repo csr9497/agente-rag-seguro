@@ -41,6 +41,11 @@ class Chunk(BaseModel):
     indexado_en: str = Field(default="", description="Fecha ISO-8601 (UTC) de indexación")
 
 
+def indice_chunk(chunk_id: str) -> int:
+    """Posición del chunk dentro de su documento (`<doc_id>#<n>`)."""
+    return int(chunk_id.rsplit("#", 1)[1])
+
+
 class ChunkRecuperado(BaseModel):
     chunk: Chunk
     score: float

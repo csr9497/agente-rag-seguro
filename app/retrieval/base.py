@@ -34,9 +34,19 @@ class Retriever(Protocol):
     def upsert(self, chunks: list[Chunk], vectores: list[list[float]]) -> None: ...
 
     def search(
-        self, consulta: str, vector: list[float], groups: list[str], top_k: int
+        self,
+        consulta: str,
+        vector: list[float],
+        groups: list[str],
+        top_k: int,
+        doc_id: str | None = None,
     ) -> list[ChunkRecuperado]:
-        """Devuelve solo chunks cuya ACL intersecta `groups`. Sin grupos, no devuelve nada."""
+        """Devuelve solo chunks cuya ACL intersecta `groups` (y del documento `doc_id`, si se
+        indica). Sin grupos, no devuelve nada."""
+        ...
+
+    def get_document_chunks(self, doc_id: str, groups: list[str]) -> list[Chunk]:
+        """Chunks del documento en orden, solo si es visible para `groups`; si no, []."""
         ...
 
     # ------------------------------------------------------------ gestión por documento

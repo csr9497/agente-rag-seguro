@@ -15,7 +15,7 @@ from qdrant_client.models import (
     VectorParams,
 )
 
-from app.models.schemas import Chunk, ChunkRecuperado, DocumentoIndexado
+from app.models.schemas import Chunk, ChunkRecuperado, DocumentoIndexado, indice_chunk
 
 _CAMPOS_INDEXADOS = ("acl_groups", "doc_id", "doc_hash")
 
@@ -57,16 +57,22 @@ class QdrantRetriever:
         self._client.upsert(self._collection, points=puntos)
 
     def search(
-        self, consulta: str, vector: list[float], groups: list[str], top_k: int
+        self,
+        consulta: str,
+        vector: list[float],
+        groups: list[str],
+        top_k: int,
+        doc_id: str | None = None,
     ) -> list[ChunkRecuperado]:
         if not groups:
             return []
+        condiciones = [FieldCondition(key="acl_groups", match=MatchAny(any=groups))]
+        if doc_id is not None:
+            condiciones.append(_es("doc_id", doc_id))
         resultado = self._client.query_points(
             self._collection,
             query=vector,
-            query_filter=Filter(
-                must=[FieldCondition(key="acl_groups", match=MatchAny(any=groups))]
-            ),
+            query_filter=Filter(must=condiciones),
             limit=top_k,
             with_payload=True,
         )
@@ -74,6 +80,18 @@ class QdrantRetriever:
             ChunkRecuperado(chunk=Chunk.model_validate(p.payload), score=p.score)
             for p in resultado.points
         ]
+
+    def get_document_chunks(self, doc_id: str, groups: list[str]) -> list[Chunk]:
+        if not groups:
+            return []
+        filtro = Filter(
+            must=[
+                _es("doc_id", doc_id),
+                FieldCondition(key="acl_groups", match=MatchAny(any=groups)),
+            ]
+        )
+        chunks = [Chunk.model_validate(p.payload) for p in self._scroll(filtro)]
+        return sorted(chunks, key=lambda c: indice_chunk(c.chunk_id))
 
     # ------------------------------------------------------------ gestión por documento
     def delete_document(self, doc_id: str) -> int:
