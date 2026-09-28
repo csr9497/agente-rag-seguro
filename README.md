@@ -107,9 +107,14 @@ curl -F grupo=public -F archivo=@politica.md localhost:8000/documentos \
   -H 'X-Usuario-Grupos: editores,public'
 ```
 
-**Red local**: la app (8000) y Qdrant (6333) solo escuchan en `127.0.0.1`; la web (8080) es
-accesible desde la red y elimina la cabecera `X-Usuario-Grupos`, así que por la web siempre
-se entra con los grupos por defecto.
+**Web** (http://localhost:8080): pestañas *Preguntar* y *Documentos*
+(http://localhost:8080/#documentos: subir `.md`/`.txt`, ver el resultado de la validación,
+listar y eliminar). En docker-compose el usuario local es `["public", "editores"]`: puede
+subir a `public` pero no a `rrhh`.
+
+**Red local**: web (8080), app (8000) y Qdrant (6333) solo escuchan en `127.0.0.1`. Sin
+autenticación, exponerlos en la red permitiría a cualquiera subir o borrar documentos o leer
+Qdrant sin permisos. La web además elimina la cabecera `X-Usuario-Grupos`.
 
 **Permisos**: el primer nivel de carpeta de cada documento es su grupo
 (`public/…`, `rrhh/…`). En la Fase 1 no hay autenticación: el usuario tiene

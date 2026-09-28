@@ -74,6 +74,15 @@ class Hallazgo(BaseModel):
     accion: Literal["bloquear", "enmascarar", "eliminar"]
 
 
+class Perfil(BaseModel):
+    """Lo que la interfaz necesita saber del usuario actual."""
+
+    id: str
+    groups: list[str]
+    grupos_editables: list[str] = Field(description="Grupos en los que puede subir y borrar")
+    gestion_documentos: bool
+
+
 class RegistroAuditoria(BaseModel):
     usuario: str
     grupos: list[str]

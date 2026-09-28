@@ -12,9 +12,10 @@ from app.config import Settings, get_settings
 from app.deps import build_servicios
 from app.graph import topologia
 from app.graph.agente import Agente
-from app.models.schemas import ConsultaRequest, RespuestaConsulta, Usuario
+from app.models.schemas import ConsultaRequest, Perfil, RespuestaConsulta, Usuario
 from app.retrieval.no_configurado import ProveedorNoConfiguradoError
 from app.security.identity import get_usuario
+from app.security.permisos import puede_editar
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -37,6 +38,24 @@ def get_agente(request: Request) -> Agente:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/yo", response_model=Perfil)
+def yo(
+    usuario: Annotated[Usuario, Depends(get_usuario)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> Perfil:
+    editables = [
+        g
+        for g in usuario.groups
+        if g != settings.grupo_editores and puede_editar(usuario, g, settings.grupo_editores)
+    ]
+    return Perfil(
+        id=usuario.id,
+        groups=usuario.groups,
+        grupos_editables=editables if settings.gestion_documentos else [],
+        gestion_documentos=settings.gestion_documentos,
+    )
 
 
 @app.post("/consultar", response_model=RespuestaConsulta)

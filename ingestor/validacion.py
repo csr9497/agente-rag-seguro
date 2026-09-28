@@ -68,7 +68,7 @@ def validar_documento(doc_id: str, datos: bytes, max_bytes: int = MAX_BYTES) -> 
         return DocumentoValidado(doc_id=doc_id, aceptado=False, motivos=motivos)
 
     if len(datos) > max_bytes:
-        return _rechazo(doc_id, f"tamaño: {len(datos)} bytes supera el máximo de {max_bytes}")
+        return _rechazo(doc_id, f"tamaño: supera el máximo de {max_bytes} bytes")
     if not datos.strip():
         return _rechazo(doc_id, "contenido: documento vacío")
     try:

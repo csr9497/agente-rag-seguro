@@ -20,6 +20,8 @@ services:
       IDENTIDAD_DEBUG: "true"   # permite probar permisos con X-Usuario-Grupos en local
       EXPONER_TOPOLOGIA: "true" # http://localhost:8000/grafo
       GESTION_DOCUMENTOS: "true" # /documentos (editores: X-Usuario-Grupos: editores,<grupo>)
+      # Usuario local (sin Entra ID): editor de "public". No pertenece a "rrhh".
+      DEFAULT_GROUPS: '["public", "editores"]'
     ports:
       # Solo este equipo: con IDENTIDAD_DEBUG la cabecera X-Usuario-Grupos elige los grupos.
       - "127.0.0.1:8000:8000"
@@ -31,7 +33,8 @@ services:
     environment:
       BACKEND_URL: http://app:8000
     ports:
-      - "8080:8080"
+      # Solo este equipo: sin autenticación, desde la red cualquiera podría subir o borrar.
+      - "127.0.0.1:8080:8080"
     depends_on:
       - app
 

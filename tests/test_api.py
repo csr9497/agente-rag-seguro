@@ -87,3 +87,19 @@ def test_topologia_muestra_el_grafo(client) -> None:
     ]:
         assert arista in mmd
     assert 'class="mermaid"' in client.get("/grafo").text
+
+
+def test_yo_indica_grupos_editables(client) -> None:
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        default_groups=["public", "editores"], gestion_documentos=True
+    )
+    perfil = client.get("/yo").json()
+    assert perfil["groups"] == ["public", "editores"]
+    assert perfil["grupos_editables"] == ["public"]
+
+
+def test_yo_sin_gestion_no_ofrece_edicion(client) -> None:
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        default_groups=["public", "editores"], gestion_documentos=False
+    )
+    assert client.get("/yo").json()["grupos_editables"] == []

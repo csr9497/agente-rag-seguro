@@ -13,16 +13,17 @@ def _compose() -> dict:
     return yaml.safe_load((RAIZ / "docker-compose.yml").read_text(encoding="utf-8"))
 
 
-def test_app_y_qdrant_solo_escuchan_en_localhost() -> None:
+def test_servicios_solo_escuchan_en_localhost() -> None:
     servicios = _compose()["services"]
-    for nombre in ("app", "qdrant"):
+    for nombre in ("app", "qdrant", "web"):
         for puerto in servicios[nombre]["ports"]:
             assert str(puerto).startswith("127.0.0.1:"), f"{nombre} expuesto: {puerto}"
 
 
 def test_la_web_elimina_la_cabecera_de_identidad() -> None:
     conf = (RAIZ / "web" / "default.conf.template").read_text(encoding="utf-8")
-    assert 'proxy_set_header X-Usuario-Grupos "";' in conf
+    # En cada location que hace proxy al backend.
+    assert conf.count("proxy_pass") == conf.count('proxy_set_header X-Usuario-Grupos "";') == 2
 
 
 def test_terraform_no_activa_modos_de_depuracion() -> None:
