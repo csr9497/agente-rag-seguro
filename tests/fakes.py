@@ -6,7 +6,7 @@ import math
 import re
 from typing import Any
 
-from app.models.schemas import DecisionSupervisor, RespuestaLLM, ToolCall
+from app.models.schemas import DecisionSupervisor, Hallazgo, RespuestaLLM, ToolCall
 from app.security.guardrails import Veredicto
 
 DIM = 64
@@ -82,4 +82,7 @@ class GuardrailQueBloquea:
         self.palabra = palabra
 
     def revisar(self, texto: str) -> Veredicto:
-        return Veredicto(permitido=self.palabra not in texto.lower(), motivo="palabra prohibida")
+        if self.palabra in texto.lower():
+            hallazgo = Hallazgo(tipo="inyeccion", detalle=self.palabra, accion="bloquear")
+            return Veredicto(permitido=False, texto=texto, hallazgos=[hallazgo])
+        return Veredicto(permitido=True, texto=texto)

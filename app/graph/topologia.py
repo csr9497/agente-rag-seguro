@@ -6,11 +6,11 @@ from app.graph.agente import Agente
 
 DESCRIPCIONES = {
     "authorize": "Deny by default: sin grupos no hay contexto visible",
-    "input_guardrail": "Revisa la pregunta (Fase 3: Content Safety + PII)",
+    "input_guardrail": "Bloquea inyección/texto oculto; enmascara PII",
     "supervisor": "gpt-4o con tool-calling: decide qué buscar",
     "tools": "Ejecuta rag_retrieve con los grupos del estado, no del LLM",
     "generate": "Respuesta con citas [n] y salida estructurada",
-    "output_guardrail": "Revisa la respuesta antes de devolverla",
+    "output_guardrail": "Bloquea fuga del prompt; enmascara PII sensible",
     "audit": "Registra usuario, pregunta, fuentes y respuesta",
 }
 

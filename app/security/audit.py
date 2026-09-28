@@ -3,12 +3,17 @@ En la fase de PostgreSQL se persistirá en tabla."""
 
 import logging
 
-from app.models.schemas import RegistroAuditoria, RespuestaConsulta, Usuario
+from app.models.schemas import Hallazgo, RegistroAuditoria, RespuestaConsulta, Usuario
 
 logger = logging.getLogger("audit")
 
 
-def registrar_consulta(usuario: Usuario, pregunta: str, respuesta: RespuestaConsulta) -> None:
+def registrar_consulta(
+    usuario: Usuario,
+    pregunta: str,
+    respuesta: RespuestaConsulta,
+    hallazgos: list[Hallazgo] | None = None,
+) -> None:
     registro = RegistroAuditoria(
         usuario=usuario.id,
         grupos=usuario.groups,
@@ -16,5 +21,6 @@ def registrar_consulta(usuario: Usuario, pregunta: str, respuesta: RespuestaCons
         fuentes=sorted({c.chunk_id for c in respuesta.citas}),
         respuesta=respuesta.respuesta,
         sin_contexto=respuesta.sin_contexto,
+        hallazgos=hallazgos or [],
     )
     logger.info(registro.model_dump_json())

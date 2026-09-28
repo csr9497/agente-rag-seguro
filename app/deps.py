@@ -5,6 +5,8 @@ from qdrant_client import QdrantClient
 
 from app.config import Settings
 from app.graph.agente import Agente
+from app.graph.prompts import SUPERVISOR_PROMPT
+from app.rag.prompts import SYSTEM_PROMPT
 from app.retrieval.azure_openai import (
     AzureOpenAIEmbedder,
     AzureOpenAILLM,
@@ -13,7 +15,7 @@ from app.retrieval.azure_openai import (
 )
 from app.retrieval.base import LLM, Embedder, Retriever, Supervisor
 from app.retrieval.no_configurado import ModelosNoConfigurados
-from app.security.guardrails import GuardrailPermisivo
+from app.security.guardrails import GuardrailEntrada, GuardrailSalida
 from app.tools.rag_retrieve import RagRetrieve
 
 
@@ -61,8 +63,8 @@ def build_agente(settings: Settings) -> Agente:
         supervisor=supervisor,
         llm=llm,
         herramientas=[RagRetrieve(embedder, build_retriever(settings), settings.min_score)],
-        guardrail_entrada=GuardrailPermisivo(),
-        guardrail_salida=GuardrailPermisivo(),
+        guardrail_entrada=GuardrailEntrada(),
+        guardrail_salida=GuardrailSalida([SYSTEM_PROMPT, SUPERVISOR_PROMPT]),
         top_k=settings.retrieval_top_k,
         max_iteraciones=settings.max_iteraciones,
     )

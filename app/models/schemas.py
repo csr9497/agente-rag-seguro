@@ -1,6 +1,6 @@
 """Esquemas Pydantic v2 de todo el I/O del asistente."""
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -59,13 +59,22 @@ class Usuario(BaseModel):
     groups: list[str]
 
 
+class Hallazgo(BaseModel):
+    """Resultado de un guardrail sobre la entrada o la salida."""
+
+    tipo: Literal["inyeccion", "texto_oculto", "pii", "fuga_prompt", "etiqueta_estructural"]
+    detalle: str
+    accion: Literal["bloquear", "enmascarar", "eliminar"]
+
+
 class RegistroAuditoria(BaseModel):
     usuario: str
     grupos: list[str]
-    pregunta: str
+    pregunta: str = Field(description="Tal como la procesó el agente (PII enmascarada)")
     fuentes: list[str]
     respuesta: str
     sin_contexto: bool
+    hallazgos: list[Hallazgo] = Field(default_factory=list)
 
 
 class ToolCall(BaseModel):

@@ -101,9 +101,14 @@ class Agente:
         return {}
 
     def _input_guardrail(self, estado: EstadoAgente) -> Update:
-        if not self._guardrail_entrada.revisar(estado.pregunta).permitido:
-            return {"respuesta": _bloqueada()}
-        return {}
+        veredicto = self._guardrail_entrada.revisar(estado.pregunta)
+        update: Update = {
+            "pregunta": veredicto.texto,
+            "hallazgos": [*estado.hallazgos, *veredicto.hallazgos],
+        }
+        if not veredicto.permitido:
+            update["respuesta"] = _bloqueada()
+        return update
 
     def _supervisor_node(self, estado: EstadoAgente) -> Update:
         if estado.iteraciones >= self._max_iteraciones:
@@ -151,12 +156,21 @@ class Agente:
         return {"respuesta": generar_respuesta(self._llm, estado.pregunta, estado.recuperados)}
 
     def _output_guardrail(self, estado: EstadoAgente) -> Update:
-        if not self._guardrail_salida.revisar(_requerir_respuesta(estado).respuesta).permitido:
-            return {"respuesta": _bloqueada()}
-        return {}
+        respuesta = _requerir_respuesta(estado)
+        veredicto = self._guardrail_salida.revisar(respuesta.respuesta)
+        return {
+            "respuesta": (
+                respuesta.model_copy(update={"respuesta": veredicto.texto})
+                if veredicto.permitido
+                else _bloqueada()
+            ),
+            "hallazgos": [*estado.hallazgos, *veredicto.hallazgos],
+        }
 
     def _audit(self, estado: EstadoAgente) -> Update:
-        registrar_consulta(estado.usuario, estado.pregunta, _requerir_respuesta(estado))
+        registrar_consulta(
+            estado.usuario, estado.pregunta, _requerir_respuesta(estado), estado.hallazgos
+        )
         return {}
 
 
