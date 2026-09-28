@@ -35,6 +35,8 @@ jobs:
             terraform -chdir=infra/$stack init -backend=false -input=false
             terraform -chdir=infra/$stack validate
           done
+      - name: test de flags (providers simulados, sin Azure)
+        run: terraform -chdir=infra/platform test
 
   docker:
     runs-on: ubuntu-latest

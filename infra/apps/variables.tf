@@ -32,3 +32,9 @@ variable "azure_openai_api_version" {
   type    = string
   default = "2024-10-21"
 }
+
+variable "app_version" {
+  type        = string
+  description = "Versión desplegada (git SHA); va a la metadata de las trazas"
+  default     = "desconocida"
+}

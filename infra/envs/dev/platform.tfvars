@@ -2,10 +2,18 @@ project     = "ragseg"
 environment = "dev"
 location    = "eastus2"
 
-# dev: acceso público (con RBAC) para poder desarrollar en local contra Azure OpenAI.
-# prod: true → OpenAI, AI Search y Storage solo por private endpoint desde la VNet.
+# Etapa A: solo modelos, almacenamiento y vector store; la app corre en local.
+alcance      = "modelos"
+vector_store = "azure_search" # "qdrant" + qdrant_modo = "local" usa el Qdrant de docker-compose
+search_sku   = "free"         # 0 €, 50 MB
+search_auth  = "api_key"      # la app en Docker no tiene az login; la clave va a Key Vault → .env
+
+# dev: acceso público (con RBAC) para desarrollar en local contra Azure.
 private_endpoints_enabled = false
 openai_local_auth_enabled = true
 
-# Object IDs de tu usuario o grupo de desarrollo (az ad signed-in-user show --query id -o tsv)
+# Object IDs de tu usuario o grupo (az ad signed-in-user show --query id -o tsv): OpenAI,
+# blobs, índice y secretos para la app en local.
 developer_principal_ids = []
+
+# Opcional: la clave de LangSmith se pasa por TF_VAR_langsmith_api_key (nunca en este archivo).

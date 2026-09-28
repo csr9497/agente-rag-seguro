@@ -12,16 +12,51 @@ data "terraform_remote_state" "platform" {
 locals {
   p = data.terraform_remote_state.platform.outputs
 
-  # Configuración común de la app (sin secretos: todo con Managed Identity).
+  qdrant_efimero = local.p.vector_store == "qdrant" && local.p.qdrant_modo == "container_efimero"
+  qdrant_url = (
+    local.qdrant_efimero ? "http://ca-qdrant-${local.p.name}" : local.p.qdrant_url
+  )
+  langsmith = contains(local.p.secretos_en_key_vault, "langsmith-api-key")
+
+  # Secretos: referencias a Key Vault resueltas con la identidad gestionada (nunca en claro).
+  secretos = {
+    for nombre, variable in {
+      "database-url"         = "DATABASE_URL"
+      "langsmith-api-key"    = "LANGSMITH_API_KEY"
+      "qdrant-api-key"       = "QDRANT_API_KEY"
+      "azure-search-api-key" = "AZURE_SEARCH_API_KEY"
+    } : nombre => variable if contains(local.p.secretos_en_key_vault, nombre)
+  }
+
   common_env = {
     AZURE_OPENAI_ENDPOINT             = local.p.openai_endpoint
     AZURE_OPENAI_API_VERSION          = var.azure_openai_api_version
     AZURE_OPENAI_CHAT_DEPLOYMENT      = local.p.chat_deployment
     AZURE_OPENAI_EMBEDDING_DEPLOYMENT = local.p.embedding_deployment
     EMBEDDING_DIMENSIONS              = tostring(local.p.embedding_dimensions)
-    VECTOR_STORE                      = "azure_search"
+    VECTOR_STORE                      = local.p.vector_store
     AZURE_SEARCH_ENDPOINT             = local.p.search_endpoint
     AZURE_SEARCH_INDEX                = "documentos"
+    QDRANT_URL                        = local.qdrant_url
+    ALMACEN_DOCUMENTOS                = "blob"
+    AZURE_STORAGE_ACCOUNT_URL         = local.p.storage_blob_endpoint
+    AZURE_STORAGE_CONTAINER           = local.p.storage_container
+    ENTORNO                           = "prod"
+    TRAZAS_MODO                       = local.langsmith ? "enmascarado" : "apagado"
+    LANGSMITH_PROJECT                 = "agente-rag-${local.p.name}"
+    APP_VERSION                       = var.app_version
+    # Sin Entra ID todavía: ni selección libre de rol ni gestión de documentos en Azure.
+    SELECCION_LIBRE_DE_ROL = "false"
+    GESTION_DOCUMENTOS     = "false"
+  }
+}
+
+resource "terraform_data" "validaciones" {
+  lifecycle {
+    precondition {
+      condition     = local.p.alcance == "completo"
+      error_message = "El stack apps requiere que platform se haya desplegado con alcance=completo."
+    }
   }
 }
 
@@ -42,6 +77,15 @@ resource "azurerm_container_app" "backend" {
   registry {
     server   = local.p.acr_login_server
     identity = local.p.backend_identity_id
+  }
+
+  dynamic "secret" {
+    for_each = local.secretos
+    content {
+      name                = secret.key
+      key_vault_secret_id = "${local.p.key_vault_uri}secrets/${secret.key}"
+      identity            = local.p.backend_identity_id
+    }
   }
 
   # Solo accesible desde dentro del entorno (la web hace de proxy).
@@ -75,6 +119,14 @@ resource "azurerm_container_app" "backend" {
         content {
           name  = env.key
           value = env.value
+        }
+      }
+
+      dynamic "env" {
+        for_each = local.secretos
+        content {
+          name        = env.value
+          secret_name = env.key
         }
       }
 
@@ -146,6 +198,41 @@ resource "azurerm_container_app" "web" {
   }
 }
 
+# ---------------------------------------------------------------- Qdrant efímero (opcional)
+# Sin volumen: Qdrant no admite Azure Files. El índice se reconstruye desde Blob con el job
+# de ingesta (roles en los metadatos de cada blob). Solo para demos.
+resource "azurerm_container_app" "qdrant" {
+  count                        = local.qdrant_efimero ? 1 : 0
+  name                         = "ca-qdrant-${local.p.name}"
+  resource_group_name          = local.p.resource_group_name
+  container_app_environment_id = local.p.container_app_environment_id
+  revision_mode                = "Single"
+  workload_profile_name        = "Consumption"
+  tags                         = local.p.tags
+
+  ingress {
+    external_enabled = false
+    target_port      = 6333
+    transport        = "http"
+    traffic_weight {
+      latest_revision = true
+      percentage      = 100
+    }
+  }
+
+  template {
+    min_replicas = 1
+    max_replicas = 1
+
+    container {
+      name   = "qdrant"
+      image  = "qdrant/qdrant:v1.19.1"
+      cpu    = 0.5
+      memory = "1Gi"
+    }
+  }
+}
+
 # ---------------------------------------------------------------- job de ingesta (manual)
 resource "azurerm_container_app_job" "ingest" {
   name                         = "caj-ingest-${local.p.name}"
@@ -172,6 +259,15 @@ resource "azurerm_container_app_job" "ingest" {
     identity = local.p.ingest_identity_id
   }
 
+  dynamic "secret" {
+    for_each = local.secretos
+    content {
+      name                = secret.key
+      key_vault_secret_id = "${local.p.key_vault_uri}secrets/${secret.key}"
+      identity            = local.p.ingest_identity_id
+    }
+  }
+
   template {
     container {
       name    = "ingest"
@@ -181,14 +277,18 @@ resource "azurerm_container_app_job" "ingest" {
       command = ["python", "-m", "ingestor.ingest", "--source", "blob"]
 
       dynamic "env" {
-        for_each = merge(local.common_env, {
-          AZURE_CLIENT_ID           = local.p.ingest_identity_client_id
-          AZURE_STORAGE_ACCOUNT_URL = local.p.storage_blob_endpoint
-          AZURE_STORAGE_CONTAINER   = local.p.storage_container
-        })
+        for_each = merge(local.common_env, { AZURE_CLIENT_ID = local.p.ingest_identity_client_id })
         content {
           name  = env.key
           value = env.value
+        }
+      }
+
+      dynamic "env" {
+        for_each = local.secretos
+        content {
+          name        = env.value
+          secret_name = env.key
         }
       }
     }

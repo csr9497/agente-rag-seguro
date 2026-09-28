@@ -38,6 +38,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: dev
     outputs:
+      alcance: ${{ steps.out.outputs.alcance }}
       acr_name: ${{ steps.out.outputs.acr_name }}
       acr_login_server: ${{ steps.out.outputs.acr_login_server }}
     steps:
@@ -50,14 +51,18 @@ jobs:
         run: |
           terraform init -input=false $BACKEND_CONFIG -backend-config=key=dev/platform.tfstate
           terraform apply -input=false -auto-approve -var-file=../envs/dev/platform.tfvars
+        env:
+          TF_VAR_langsmith_api_key: ${{ secrets.LANGSMITH_API_KEY }}
       - id: out
         working-directory: infra/platform
         run: |
+          echo "alcance=$(terraform output -raw alcance)" >> "$GITHUB_OUTPUT"
           echo "acr_name=$(terraform output -raw acr_name)" >> "$GITHUB_OUTPUT"
           echo "acr_login_server=$(terraform output -raw acr_login_server)" >> "$GITHUB_OUTPUT"
 
   images:
     needs: platform
+    if: needs.platform.outputs.alcance == 'completo'
     runs-on: ubuntu-latest
     environment: dev
     steps:
@@ -82,6 +87,7 @@ jobs:
 
   apps:
     needs: [platform, images]
+    if: needs.platform.outputs.alcance == 'completo'
     runs-on: ubuntu-latest
     environment: dev
     steps:
@@ -99,6 +105,7 @@ jobs:
             -var-file=../envs/dev/apps.tfvars \
             -var="backend_image=${REGISTRY}/backend:${GITHUB_SHA}" \
             -var="web_image=${REGISTRY}/web:${GITHUB_SHA}" \
+            -var="app_version=${GITHUB_SHA}" \
             -var='platform_state={resource_group_name="${{ vars.TFSTATE_RG }}",storage_account_name="${{ vars.TFSTATE_ACCOUNT }}",container_name="${{ vars.TFSTATE_CONTAINER }}",key="dev/platform.tfstate"}'
           echo "### Web: $(terraform output -raw web_url)" >> "$GITHUB_STEP_SUMMARY"
       - uses: azure/login@v2

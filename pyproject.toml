@@ -18,6 +18,7 @@ dependencies = [
     "python-multipart",        # subida de documentos (UploadFile) en la API
     "sqlalchemy",              # repositorios: mismo SQL para SQLite (local) y PostgreSQL (Azure)
     "langsmith",               # trazas y evaluaciones (ya dependencia de LangGraph; uso directo)
+    "psycopg[binary]",         # PostgreSQL en Azure (DATABASE_URL postgresql+psycopg)
 ]
 
 [dependency-groups]
