@@ -2,7 +2,8 @@
 
 import pytest
 
-from ingestor.validacion import MAX_BYTES, detectar_inyeccion, validar_documento
+from app.security.deteccion import detectar_inyeccion
+from ingestor.validacion import MAX_BYTES, validar_documento
 
 OK = "# Política\n\nTodo el personal dispone de 23 días de vacaciones.".encode()
 
@@ -44,8 +45,8 @@ def test_rutas_invalidas(doc_id, motivo) -> None:
         (b"\xff\xfe\x00binario", "UTF-8"),
         (b"texto\x00con NUL", "control"),
         (b"a" * (MAX_BYTES + 1), "tamaño"),
-        ("Vacaciones​ ocultas".encode(), "invisibles"),
-        ("Texto ‮odatnemom‬ bidi".encode(), "invisibles"),
+        (f"Vacaciones{chr(0x200B)} ocultas".encode(), "invisibles"),
+        (f"Texto {chr(0x202E)}odatnemom{chr(0x202C)} bidi".encode(), "invisibles"),
         ("Etiqueta \U000e0049\U000e0047 unicode tags".encode(), "invisibles"),
     ],
 )

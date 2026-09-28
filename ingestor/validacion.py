@@ -18,45 +18,15 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.security.deteccion import CONTROL, INVISIBLES, detectar_inyeccion
+
 EXTENSIONES_PERMITIDAS = frozenset({".md", ".txt"})
 MAX_BYTES = 1_000_000
 
 _GRUPO = re.compile(r"^[a-z0-9][a-z0-9_\-]{0,63}$")
 _SEGMENTO = re.compile(r"^[\w\-. ]{1,120}$")
 
-# Zero-width, BOM intermedio, word joiner, controles bidi y bloque "tags" de Unicode.
-_INVISIBLES = re.compile("[​-‏‪-‮⁠-⁤⁦-⁩﻿\U000e0000-\U000e007f]")
-# Controles C0/C1 salvo tabulador y saltos de línea.
-_CONTROL = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 _COMENTARIO_HTML = re.compile(r"<!--.*?-->", re.DOTALL)
-
-_PATRONES_INYECCION: dict[str, re.Pattern[str]] = {
-    nombre: re.compile(patron, re.IGNORECASE | re.MULTILINE)
-    for nombre, patron in {
-        "ignorar_instrucciones_es": (
-            r"\b(ignora|olvida|omite|descarta)\b[^.\n]{0,40}\b(instrucciones|reglas|"
-            r"indicaciones|directrices)\b"
-        ),
-        "ignorar_instrucciones_en": (
-            r"\b(ignore|disregard|forget|override)\b[^.\n]{0,40}\b(instructions|rules|"
-            r"guidelines|prompts?)\b"
-        ),
-        "cambio_de_rol": (
-            r"\b(ahora eres|a partir de ahora eres|actúa como|you are now|act as)\b[^.\n]{0,40}"
-            r"\b(administrador|admin|root|sistema|system|desarrollador|developer|dan)\b"
-        ),
-        "prompt_de_sistema": (
-            r"(\bsystem prompt\b|\bprompt del sistema\b|\bmensaje de sistema\b|"
-            r"^\s*#{1,6}\s*(system|sistema)\s*:?\s*$)"
-        ),
-        "tokens_de_chat": r"(<\|im_(start|end)\|>|<\|endoftext\|>|\[/?INST\]|<</?SYS>>)",
-        "exfiltracion": (
-            r"\b(revela|muestra|imprime|reveal|print|show)\b[^.\n]{0,40}"
-            r"\b(tus instrucciones|your instructions|system prompt|contraseñas?|passwords?|"
-            r"api[ _-]?keys?|claves?)\b"
-        ),
-    }.items()
-}
 
 
 class DocumentoValidado(BaseModel):
@@ -70,11 +40,6 @@ class DocumentoValidado(BaseModel):
     @property
     def estado(self) -> Literal["aceptado", "rechazado"]:
         return "aceptado" if self.aceptado else "rechazado"
-
-
-def detectar_inyeccion(texto: str) -> list[str]:
-    """Nombres de los patrones de inyección de prompt presentes en el texto."""
-    return [n for n, p in _PATRONES_INYECCION.items() if p.search(texto)]
 
 
 def validar_ruta(doc_id: str) -> tuple[list[str], list[str]]:
@@ -111,10 +76,10 @@ def validar_documento(doc_id: str, datos: bytes, max_bytes: int = MAX_BYTES) -> 
     except UnicodeDecodeError:
         return _rechazo(doc_id, "codificación: no es UTF-8 válido")
 
-    texto = unicodedata.normalize("NFC", texto.removeprefix("﻿"))
-    if _CONTROL.search(texto):
+    texto = unicodedata.normalize("NFC", texto.removeprefix(chr(0xFEFF)))
+    if CONTROL.search(texto):
         return _rechazo(doc_id, "contenido: caracteres de control o binario")
-    if _INVISIBLES.search(texto):
+    if INVISIBLES.search(texto):
         return _rechazo(doc_id, "contenido: caracteres invisibles o de control bidireccional")
 
     avisos: list[str] = []
