@@ -1,0 +1,48 @@
+[project]
+name = "agente-rag"
+version = "0.1.0"
+description = "Asistente RAG agéntico seguro (Fase 1: RAG básico)"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "pydantic",
+    "pydantic-settings",
+    "openai",                  # Azure OpenAI (AzureOpenAI client)
+    "azure-identity",          # Managed Identity / DefaultAzureCredential
+    "qdrant-client",           # vector store local
+    "azure-search-documents",  # vector store en Azure (security trimming)
+    "azure-storage-blob",      # origen de documentos para la ingesta en Azure
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "httpx",   # TestClient de FastAPI y cliente de las pruebas de integración
+    "pyyaml",  # matriz de escenarios de integración
+    "ruff",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-m 'not integration'"
+filterwarnings = ["ignore:Payload indexes have no effect in the local Qdrant"]
+markers = [
+    "integration: pruebas contra un despliegue real (local o Azure); requieren INTEGRATION_BASE_URL",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "N"]
+ignore = []
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]

@@ -1,0 +1,7 @@
+# Intérprete base del proyecto (anaconda). Las dependencias las gestiona uv en .venv
+# usando este Python: ver `make setup` en el README.
+name: agente-rag
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
