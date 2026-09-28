@@ -1,54 +1,58 @@
-"""Orígenes de documentos.
+"""Orígenes de documentos. Solo leen bytes; la validación y la ACL las decide
+`ingestor.validacion` (convención: `<grupo>/<documento>.md` → acl_groups=["<grupo>"])."""
 
-Convención de ACL: el primer nivel de carpeta (o prefijo del blob) es el grupo que puede
-ver el documento, p. ej. `rrhh/salarios.md` → acl_groups=["rrhh"].
-"""
-
+import os
 from collections.abc import Iterator
 from pathlib import Path
 from typing import NamedTuple, Protocol
 
-EXTENSIONES = {".md", ".txt"}
+from ingestor.validacion import MAX_BYTES
 
 
-class Documento(NamedTuple):
+class DocumentoCrudo(NamedTuple):
     doc_id: str
-    texto: str
-    acl_groups: list[str]
+    datos: bytes
+    motivo_descarte: str | None = None  # el origen ya sabe que no es válido (p. ej. symlink)
 
 
 class Source(Protocol):
-    def documentos(self) -> Iterator[Documento]: ...
-
-
-def _acl_desde_ruta(ruta_relativa: str) -> list[str]:
-    partes = ruta_relativa.split("/")
-    if len(partes) < 2:
-        raise ValueError(f"'{ruta_relativa}' debe estar dentro de una carpeta de grupo")
-    return [partes[0]]
+    def documentos(self) -> Iterator[DocumentoCrudo]: ...
 
 
 class LocalFolderSource:
-    def __init__(self, raiz: Path) -> None:
-        self._raiz = raiz
+    """Recorre la carpeta sin seguir enlaces simbólicos ni salir de la raíz."""
 
-    def documentos(self) -> Iterator[Documento]:
-        for ruta in sorted(self._raiz.rglob("*")):
-            if ruta.is_file() and ruta.suffix in EXTENSIONES:
+    def __init__(self, raiz: Path, max_bytes: int = MAX_BYTES) -> None:
+        self._raiz = raiz.resolve()
+        self._max_bytes = max_bytes
+
+    def documentos(self) -> Iterator[DocumentoCrudo]:
+        for carpeta, subcarpetas, archivos in os.walk(self._raiz, followlinks=False):
+            subcarpetas.sort()
+            for nombre in sorted(archivos):
+                ruta = Path(carpeta) / nombre
                 rel = ruta.relative_to(self._raiz).as_posix()
-                yield Documento(rel, ruta.read_text(encoding="utf-8"), _acl_desde_ruta(rel))
+                if ruta.is_symlink():
+                    yield DocumentoCrudo(rel, b"", "ruta: enlace simbólico no permitido")
+                elif not ruta.resolve().is_relative_to(self._raiz):
+                    yield DocumentoCrudo(rel, b"", "ruta: fuera de la carpeta de documentos")
+                elif ruta.stat().st_size > self._max_bytes:
+                    yield DocumentoCrudo(rel, b"", f"tamaño: supera {self._max_bytes} bytes")
+                else:
+                    yield DocumentoCrudo(rel, ruta.read_bytes())
 
 
 class BlobSource:
-    def __init__(self, account_url: str, container: str) -> None:
+    def __init__(self, account_url: str, container: str, max_bytes: int = MAX_BYTES) -> None:
         from azure.identity import DefaultAzureCredential
         from azure.storage.blob import ContainerClient
 
         self._container = ContainerClient(account_url, container, DefaultAzureCredential())
+        self._max_bytes = max_bytes
 
-    def documentos(self) -> Iterator[Documento]:
+    def documentos(self) -> Iterator[DocumentoCrudo]:
         for blob in self._container.list_blobs():
-            if Path(blob.name).suffix not in EXTENSIONES:
-                continue
-            texto = self._container.download_blob(blob.name).readall().decode("utf-8")
-            yield Documento(blob.name, texto, _acl_desde_ruta(blob.name))
+            if blob.size > self._max_bytes:  # no se descarga
+                yield DocumentoCrudo(blob.name, b"", f"tamaño: supera {self._max_bytes} bytes")
+            else:
+                yield DocumentoCrudo(blob.name, self._container.download_blob(blob.name).readall())
