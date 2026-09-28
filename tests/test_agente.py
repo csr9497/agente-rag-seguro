@@ -153,3 +153,54 @@ def test_prompt_delimita_contexto_y_neutraliza_etiquetas() -> None:
     assert prompt.count("</fragmento>") == 1 and prompt.count("</contexto>") == 1
     assert prompt.count("<pregunta>") == 1 and prompt.count("</pregunta>") == 1
     assert 'fuente="public/x&quot;.md"' in prompt
+
+
+# ------------------------------------------------------------------ varias herramientas
+@pytest.fixture
+def agente_completo(crear_agente, retriever_con_docs, embedder):
+    from app.tools.documentos import BuscarEnDocumento, LeerDocumento, ListarDocumentos
+    from app.tools.rag_retrieve import RagRetrieve
+
+    def _crear(**kw):
+        herramientas = [
+            RagRetrieve(embedder, retriever_con_docs),
+            ListarDocumentos(retriever_con_docs),
+            BuscarEnDocumento(embedder, retriever_con_docs),
+            LeerDocumento(retriever_con_docs),
+        ]
+        return crear_agente(herramientas=herramientas, **kw)
+
+    return _crear
+
+
+def test_supervisor_encadena_listar_y_leer(agente_completo, llm) -> None:
+    sup = FakeSupervisor(
+        [
+            [("listar_documentos", "{}")],
+            [("leer_documento", json.dumps({"doc_id": "public/teletrabajo.md"}))],
+        ]
+    )
+    agente_completo(supervisor=sup).consultar("¿Qué dice la política de teletrabajo?", PUBLIC)
+    assert "public/teletrabajo.md" in sup.llamadas[1][-1]["content"]  # catálogo al supervisor
+    _, user = llm.llamadas[0]
+    assert '<fragmento n="1" fuente="catálogo de documentos">' in user
+    assert '<fragmento n="2" fuente="public/teletrabajo.md">' in user
+
+
+def test_limite_de_contexto(agente_completo, llm) -> None:
+    sup = FakeSupervisor([[_rag("vacaciones"), _rag("teletrabajo")]])
+    # Un usuario public ve 2 fragmentos en los documentos de ejemplo; con tope 1 sobra uno.
+    agente_completo(supervisor=sup, max_contexto=1).consultar("todo", PUBLIC)
+    _, user = llm.llamadas[0]
+    assert user.count("<fragmento ") == 1
+    assert "Límite de contexto alcanzado" in str(sup.llamadas[1])
+
+
+def test_leer_documento_ajeno_a_traves_del_agente(agente_completo, llm) -> None:
+    doc = json.dumps({"doc_id": "rrhh/bandas-salariales.md"})
+    sup = FakeSupervisor(
+        [[("leer_documento", doc), ("buscar_en_documento", doc[:-1] + ', "consulta": "B3"}')]]
+    )
+    r = agente_completo(supervisor=sup).consultar("banda B3", PUBLIC)
+    assert r.sin_contexto and llm.llamadas == []
+    assert str(sup.llamadas[1]).count("no existe o no tienes acceso") == 2

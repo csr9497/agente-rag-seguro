@@ -1,7 +1,8 @@
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.schemas import ChunkRecuperado, Usuario
+from app.models.schemas import Usuario
 from app.retrieval.base import Embedder, Retriever
+from app.tools.base import ResultadoHerramienta
 
 
 class RagRetrieveArgs(BaseModel):
@@ -17,8 +18,8 @@ class RagRetrieveArgs(BaseModel):
 class RagRetrieve:
     nombre = "rag_retrieve"
     descripcion = (
-        "Busca fragmentos relevantes en los documentos internos de la empresa a los que el "
-        "usuario tiene acceso. Úsala una vez por cada tema distinto de la pregunta."
+        "Búsqueda semántica en todos los documentos internos a los que el usuario tiene "
+        "acceso. Úsala una vez por cada tema distinto de la pregunta."
     )
     args_model = RagRetrieveArgs
 
@@ -29,13 +30,11 @@ class RagRetrieve:
         self._retriever = retriever
         self._min_score = min_score
 
-    def ejecutar(
-        self, args: RagRetrieveArgs, usuario: Usuario, top_k: int
-    ) -> list[ChunkRecuperado]:
+    def ejecutar(self, args: RagRetrieveArgs, usuario: Usuario, top_k: int) -> ResultadoHerramienta:
         [vector] = self._embedder.embed([args.consulta])
         recuperados = self._retriever.search(
             args.consulta, vector, groups=usuario.groups, top_k=top_k
         )
         if self._min_score is not None:
             recuperados = [r for r in recuperados if r.score >= self._min_score]
-        return recuperados
+        return ResultadoHerramienta(chunks=recuperados)

@@ -19,7 +19,7 @@ from app.rag.generacion import generar_respuesta, respuesta_sin_contexto
 from app.retrieval.base import LLM, Supervisor
 from app.security.audit import registrar_consulta
 from app.security.guardrails import MENSAJE_BLOQUEO, Guardrail
-from app.tools.base import Herramienta, schema_openai
+from app.tools.base import Herramienta, ResultadoHerramienta, schema_openai
 
 Update = dict[str, Any]
 
@@ -38,6 +38,7 @@ class Agente:
         guardrail_salida: Guardrail,
         top_k: int = 4,
         max_iteraciones: int = 3,
+        max_contexto: int = 12,
     ) -> None:
         self._supervisor = supervisor
         self._llm = llm
@@ -47,6 +48,7 @@ class Agente:
         self._guardrail_salida = guardrail_salida
         self._top_k = top_k
         self._max_iteraciones = max_iteraciones
+        self._max_contexto = max_contexto
         self.grafo = self._construir()
 
     def consultar(
@@ -129,28 +131,43 @@ class Agente:
         vistos = {r.chunk.chunk_id for r in recuperados}
         mensajes = list(estado.mensajes)
         for llamada in estado.pendientes:
-            nuevos, contenido = self._ejecutar(llamada.nombre, llamada.argumentos, estado)
-            inicio = len(recuperados) + 1
-            for r in nuevos:
-                if r.chunk.chunk_id not in vistos:
-                    vistos.add(r.chunk.chunk_id)
-                    recuperados.append(r)
-            if contenido is None:
-                contenido = _resumen(recuperados[inicio - 1 :]) or "Sin resultados nuevos."
+            resultado = self._ejecutar(llamada.nombre, llamada.argumentos, estado)
+            nuevos: list[ChunkRecuperado] = []
+            descartados = 0
+            for r in resultado.chunks:
+                if r.chunk.chunk_id in vistos:
+                    continue
+                if len(recuperados) >= self._max_contexto:
+                    descartados += 1
+                    continue
+                vistos.add(r.chunk.chunk_id)
+                recuperados.append(r)
+                nuevos.append(r)
+            partes = [resultado.nota] if resultado.nota else []
+            if nuevos:
+                partes.append(_resumen(nuevos))
+            elif resultado.chunks and not descartados:
+                partes.append("Sin resultados nuevos.")
+            if descartados:
+                partes.append(
+                    f"Límite de contexto alcanzado ({self._max_contexto} fragmentos): "
+                    f"{descartados} descartados. Responde con lo que ya tienes."
+                )
+            contenido = "\n\n".join(partes) or "Sin resultados."
             mensajes.append({"role": "tool", "tool_call_id": llamada.id, "content": contenido})
         return {"recuperados": recuperados, "mensajes": mensajes, "pendientes": []}
 
-    def _ejecutar(
-        self, nombre: str, argumentos: str, estado: EstadoAgente
-    ) -> tuple[list[ChunkRecuperado], str | None]:
+    def _ejecutar(self, nombre: str, argumentos: str, estado: EstadoAgente) -> ResultadoHerramienta:
         herramienta = self._herramientas.get(nombre)
         if herramienta is None:
-            return [], f"Error: la herramienta '{nombre}' no existe."
+            return ResultadoHerramienta(nota=f"Error: la herramienta '{nombre}' no existe.")
         try:
             args = herramienta.args_model.model_validate_json(argumentos)
         except ValidationError as exc:
-            return [], f"Error: argumentos no válidos ({exc.error_count()} errores)."
-        return herramienta.ejecutar(args, estado.usuario, estado.top_k), None
+            return ResultadoHerramienta(
+                nota=f"Error: argumentos no válidos ({exc.error_count()} errores)."
+            )
+        return herramienta.ejecutar(args, estado.usuario, estado.top_k)
 
     def _generate(self, estado: EstadoAgente) -> Update:
         return {"respuesta": generar_respuesta(self._llm, estado.pregunta, estado.recuperados)}

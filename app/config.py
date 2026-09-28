@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     retrieval_top_k: int = 4
     min_score: float | None = None
     max_iteraciones: int = 3
+    max_fragmentos_contexto: int = 12
 
     # Fase 1: sin autenticación. El usuario es un stub con estos grupos.
     default_user: str = "anonimo"

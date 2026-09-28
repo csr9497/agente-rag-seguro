@@ -8,7 +8,7 @@ DESCRIPCIONES = {
     "authorize": "Deny by default: sin grupos no hay contexto visible",
     "input_guardrail": "Bloquea inyección/texto oculto; enmascara PII",
     "supervisor": "gpt-4o con tool-calling: decide qué buscar",
-    "tools": "Ejecuta rag_retrieve con los grupos del estado, no del LLM",
+    "tools": "rag_retrieve, listar/leer/buscar_en_documento con los grupos del estado",
     "generate": "Respuesta con citas [n] y salida estructurada",
     "output_guardrail": "Bloquea fuga del prompt; enmascara PII sensible",
     "audit": "Registra usuario, pregunta, fuentes y respuesta",

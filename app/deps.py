@@ -16,6 +16,7 @@ from app.retrieval.azure_openai import (
 from app.retrieval.base import LLM, Embedder, Retriever, Supervisor
 from app.retrieval.no_configurado import ModelosNoConfigurados
 from app.security.guardrails import GuardrailEntrada, GuardrailSalida
+from app.tools.documentos import BuscarEnDocumento, LeerDocumento, ListarDocumentos
 from app.tools.rag_retrieve import RagRetrieve
 from ingestor.gestor import GestorDocumentos
 
@@ -79,9 +80,15 @@ def _agente(
     return Agente(
         supervisor=supervisor,
         llm=llm,
-        herramientas=[RagRetrieve(embedder, retriever, settings.min_score)],
+        herramientas=[
+            RagRetrieve(embedder, retriever, settings.min_score),
+            ListarDocumentos(retriever),
+            BuscarEnDocumento(embedder, retriever),
+            LeerDocumento(retriever),
+        ],
         guardrail_entrada=GuardrailEntrada(),
         guardrail_salida=GuardrailSalida([SYSTEM_PROMPT, SUPERVISOR_PROMPT]),
         top_k=settings.retrieval_top_k,
         max_iteraciones=settings.max_iteraciones,
+        max_contexto=settings.max_fragmentos_contexto,
     )
