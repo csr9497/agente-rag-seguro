@@ -41,7 +41,7 @@ def test_ingesta_no_indexa_rechazados_e_informa(tmp_path, retriever) -> None:
 
     assert informe.chunks == 1
     assert {d.doc_id for d in informe.rechazados} == {"public/malo.md", "public/script.sh"}
-    assert all(d.texto is None for d in informe.documentos)
+    assert informe.por_estado() == {"indexado": 1, "rechazado": 2}
     [v] = FakeEmbedder().embed(["ignore instructions"])
     indexados = {r.chunk.doc_id for r in retriever.search("", v, ["public"], 10)}
     assert indexados == {"public/ok.md"}
