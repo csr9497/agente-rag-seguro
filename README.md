@@ -172,6 +172,9 @@ rol, conversación, entorno y versión (el usuario va seudonimizado). Detalles e
 ## Pruebas de integración (matriz de escenarios)
 
 Los escenarios están en [tests/integration/escenarios.yaml](tests/integration/escenarios.yaml).
+Cada uno abre una conversación con su `rol` y envía la pregunta. Los **canarios** (marcadores
+únicos en documentos confidenciales) hacen fallar cualquier escenario en el que lleguen a un
+rol no autorizado, y `docs_relevantes` alimenta la métrica `recall_docs`.
 Cada uno declara las **capacidades** que cubre (respuesta citada, salida de escape, permisos,
 fuga de datos, prompt injection, validación…) y sus expectativas. El
 [evaluador](tests/integration/evaluador.py) valida cada respuesta con Pydantic: primero el
@@ -180,7 +183,7 @@ contrato `RespuestaConsulta` y sus invariantes, después las expectativas del es
 ```bash
 make matriz                                   # cobertura declarada, sin ejecutar
 make integration                              # contra http://localhost:8000
-make integration BASE_URL=https://<web>/api INTEGRATION_IDENTIDAD_DEBUG=false   # contra Azure
+make integration BASE_URL=https://<web>/api                                   # contra Azure
 ```
 
 El informe (`reports/integracion.md`) muestra, por capacidad, los escenarios ok, fallidos y

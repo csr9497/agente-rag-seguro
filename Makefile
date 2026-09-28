@@ -25,8 +25,7 @@ test: ## Tests unitarios
 	uv run pytest
 
 integration: ## Matriz de escenarios contra BASE_URL (informe en reports/integracion.md)
-	INTEGRATION_BASE_URL=$(BASE_URL) INTEGRATION_IDENTIDAD_DEBUG=$${INTEGRATION_IDENTIDAD_DEBUG:-true} \
-		uv run pytest -m integration
+	INTEGRATION_BASE_URL=$(BASE_URL) uv run pytest -m integration
 
 matriz: ## Informe de cobertura de la matriz sin ejecutar nada
 	uv run python -m tests.integration.evaluador

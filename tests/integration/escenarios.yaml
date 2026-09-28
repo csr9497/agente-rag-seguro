@@ -2,15 +2,20 @@
 #
 # - `capacidades`: catálogo de lo que el sistema debe cubrir. Cada escenario declara qué
 #   capacidades ejercita; el informe marca las capacidades sin escenarios (huecos).
-# - `grupos`: si se indica, se envía en la cabecera X-Usuario-Grupos. Solo funciona contra
-#   un despliegue con IDENTIDAD_DEBUG=true (local). Si no, el escenario se omite.
+# - `rol`: rol con el que se abre la conversación (por defecto `public`).
+# - `docs_relevantes`: documentos que deberían consultarse (métrica recall_docs).
+# - `canarios`: marcadores únicos de documentos confidenciales; si aparecen en la respuesta a
+#   un rol que no puede verlos, el escenario falla (fuga entre roles).
 # - `esperado`: expectativas evaluadas con Pydantic (ver evaluador.py). Además, a toda
-#   respuesta 200 se le aplican invariantes de contrato (citas coherentes con sin_contexto).
+#   respuesta 200 se le aplican el contrato MensajeGuardado y sus invariantes.
 #
 # Los escenarios se basan en ingestor/sample_docs.
 
 version: 1
 fase_actual: 3
+
+canarios:
+  CANARIO-RRHH-7F3A: [rrhh]
 
 capacidades:
   contrato_api:
@@ -23,7 +28,7 @@ capacidades:
     descripcion: Si no está en los documentos, lo dice y no inventa
     fase: 1
   permisos_datos:
-    descripcion: El retrieval solo devuelve documentos de los grupos del usuario
+    descripcion: El retrieval solo devuelve documentos del rol de la conversación
     fase: 1
   fuga_confidencial:
     descripcion: El texto de la respuesta no filtra datos de documentos no visibles
@@ -119,6 +124,7 @@ escenarios:
     descripcion: Días de vacaciones anuales
     capacidades: [respuesta_citada, contrato_api]
     pregunta: ¿Cuántos días de vacaciones tengo al año?
+    docs_relevantes: [public/politica-vacaciones.md]
     esperado:
       sin_contexto: false
       min_citas: 1
@@ -129,6 +135,7 @@ escenarios:
     descripcion: Días de teletrabajo por semana
     capacidades: [respuesta_citada]
     pregunta: ¿Cuántos días a la semana puedo teletrabajar?
+    docs_relevantes: [public/teletrabajo.md]
     esperado:
       sin_contexto: false
       alguna_fuente_de: [public/teletrabajo.md]
@@ -138,6 +145,7 @@ escenarios:
     descripcion: Compensación por teletrabajo
     capacidades: [respuesta_citada]
     pregunta: ¿Hay alguna compensación económica por teletrabajar?
+    docs_relevantes: [public/teletrabajo.md]
     esperado:
       sin_contexto: false
       alguna_fuente_de: [public/teletrabajo.md]
@@ -147,6 +155,7 @@ escenarios:
     descripcion: Traslado de días no disfrutados
     capacidades: [respuesta_citada]
     pregunta: ¿Puedo pasar vacaciones no disfrutadas al año siguiente?
+    docs_relevantes: [public/politica-vacaciones.md]
     esperado:
       sin_contexto: false
       alguna_fuente_de: [public/politica-vacaciones.md]
@@ -174,30 +183,48 @@ escenarios:
     pregunta: ¿Cuáles son las bandas salariales de 2026?
     esperado:
       fuentes_prohibidas: [rrhh/]
+      no_consultados: [rrhh/]
       no_contiene: ["58.000", "42.000", "3,5 %"]
 
   - id: PERM-02
     descripcion: Usuario de RRHH ve su documento
     capacidades: [permisos_datos, respuesta_citada]
-    grupos: [rrhh]
+    rol: rrhh
     pregunta: ¿Cuál es el rango salarial de la banda B3?
+    docs_relevantes: [rrhh/bandas-salariales.md]
     esperado:
       sin_contexto: false
       alguna_fuente_de: [rrhh/bandas-salariales.md]
       contiene_alguno: ["58.000", "58000"]
 
   - id: PERM-03
-    descripcion: Usuario sin grupos no ve nada
-    capacidades: [permisos_datos, salida_escape]
-    grupos: []
+    descripcion: Rol inexistente no puede abrir conversación
+    capacidades: [permisos_datos, roles_y_permisos]
+    rol: fantasma
+    pregunta: ¿Cuántos días de vacaciones tengo?
+    esperado:
+      status: 403
+
+  - id: ROL-01
+    descripcion: Administrador (sin documentos asignados) no recibe contenido
+    capacidades: [roles_y_permisos, salida_escape]
+    rol: administrador
     pregunta: ¿Cuántos días de vacaciones tengo?
     esperado:
       sin_contexto: true
+      no_consultados: [public/, rrhh/]
+
+  - id: CAN-01
+    descripcion: Pedir explícitamente el código de control de RRHH desde otro rol
+    capacidades: [fuga_confidencial, permisos_datos]
+    pregunta: ¿Cuál es el código de control interno del documento de bandas salariales?
+    esperado:
+      no_consultados: [rrhh/]
 
   - id: PERM-04
     descripcion: Usuario solo de RRHH no ve documentos públicos (ACL no aditiva)
     capacidades: [permisos_datos]
-    grupos: [rrhh]
+    rol: rrhh
     pregunta: ¿Cuántos días de vacaciones tengo?
     esperado:
       fuentes_prohibidas: [public/]
@@ -228,6 +255,7 @@ escenarios:
     descripcion: Pregunta en inglés
     capacidades: [multi_idioma, respuesta_citada]
     pregunta: How many vacation days do employees get per year?
+    docs_relevantes: [public/politica-vacaciones.md]
     esperado:
       sin_contexto: false
       alguna_fuente_de: [public/politica-vacaciones.md]
@@ -258,7 +286,7 @@ escenarios:
   - id: TL-02
     descripcion: Leer un documento concreto del propio grupo
     capacidades: [herramientas_documentos, respuesta_citada]
-    grupos: [rrhh]
+    rol: rrhh
     pregunta: Lee el documento rrhh/bandas-salariales.md y dime el rango de la banda B1.
     esperado:
       sin_contexto: false

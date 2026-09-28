@@ -1,7 +1,10 @@
-"""Ejecuta la matriz de escenarios contra un despliegue real.
+"""Ejecuta la matriz de escenarios contra un despliegue real: cada escenario abre una
+conversación con su rol y envía la pregunta.
 
-    INTEGRATION_BASE_URL=http://localhost:8000 INTEGRATION_IDENTIDAD_DEBUG=true \
-        uv run pytest -m integration
+    INTEGRATION_BASE_URL=http://localhost:8000 uv run pytest -m integration
+
+El destino necesita SELECCION_LIBRE_DE_ROL=true (local) y los documentos de ejemplo
+ingestados (`make ingest`).
 """
 
 import httpx
@@ -17,25 +20,22 @@ from tests.integration.evaluador import (
 MATRIZ = cargar_matriz()
 
 
+def _json(resp: httpx.Response):  # noqa: ANN202
+    es_json = resp.headers.get("content-type", "").startswith("application/json")
+    return resp.json() if es_json else None
+
+
 @pytest.mark.integration
 @pytest.mark.parametrize("escenario", MATRIZ.escenarios, ids=lambda e: e.id)
 def test_escenario(
-    escenario: Escenario,
-    http: httpx.Client,
-    identidad_debug: bool,
-    resultados: list[ResultadoEscenario],
+    escenario: Escenario, http: httpx.Client, resultados: list[ResultadoEscenario]
 ) -> None:
-    if escenario.grupos is not None and not identidad_debug:
-        resultados.append(
-            ResultadoEscenario(id=escenario.id, capacidades=escenario.capacidades, estado="omitido")
-        )
-        pytest.skip("requiere IDENTIDAD_DEBUG en el destino")
-
-    resp = http.post("/consultar", json=escenario.cuerpo(), headers=escenario.cabeceras())
-    body = (
-        resp.json() if resp.headers.get("content-type", "").startswith("application/json") else None
-    )
-    resultado = evaluar(escenario, resp.status_code, body)
+    conv = http.post("/conversaciones", json={"rol_id": escenario.rol})
+    if conv.status_code != 201:
+        resultado = evaluar(escenario, conv.status_code, _json(conv), MATRIZ.canarios)
+    else:
+        resp = http.post(f"/conversaciones/{conv.json()['id']}/mensajes", json=escenario.cuerpo())
+        resultado = evaluar(escenario, resp.status_code, _json(resp), MATRIZ.canarios)
     resultados.append(resultado)
 
     assert resultado.estado == "ok", "\n".join(

@@ -2,8 +2,6 @@
 
 Variables de entorno:
     INTEGRATION_BASE_URL        URL del backend (p. ej. http://localhost:8000). Obligatoria.
-    INTEGRATION_IDENTIDAD_DEBUG "true" si el destino tiene IDENTIDAD_DEBUG=true; habilita los
-                                escenarios con `grupos`.
     INTEGRATION_REPORT          Ruta del informe (por defecto reports/integracion.md).
 """
 
@@ -25,11 +23,6 @@ def base_url() -> str:
     if not url:
         pytest.skip("INTEGRATION_BASE_URL no definida")
     return url.rstrip("/")
-
-
-@pytest.fixture(scope="session")
-def identidad_debug() -> bool:
-    return os.environ.get("INTEGRATION_IDENTIDAD_DEBUG", "").lower() == "true"
 
 
 @pytest.fixture(scope="session")

@@ -7,6 +7,7 @@ Informe de cobertura sin ejecutar (solo la matriz):
     uv run python -m tests.integration.evaluador
 """
 
+import json
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
@@ -15,7 +16,7 @@ from typing import Any, Literal, Self
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-from app.models.schemas import RespuestaConsulta
+from app.persistencia.modelos import MensajeGuardado
 
 MATRIZ_PATH = Path(__file__).with_name("escenarios.yaml")
 
@@ -40,6 +41,9 @@ class Expectativa(BaseModel):
     alguna_fuente_de: list[str] = []
     todas_fuentes_de: list[str] = Field(default=[], description="Cada una debe estar citada")
     fuentes_prohibidas: list[str] = Field(default=[], description="Prefijos de fuente")
+    no_consultados: list[str] = Field(
+        default=[], description="Prefijos de doc_id que no pueden aparecer entre los consultados"
+    )
     contiene_alguno: list[str] = []
     no_contiene: list[str] = []
 
@@ -50,9 +54,12 @@ class Escenario(BaseModel):
     id: str
     descripcion: str
     capacidades: list[str] = Field(min_length=1)
+    rol: str = Field(default="public", description="Rol con el que se inicia la conversación")
     pregunta: str | None = None
     payload: dict[str, Any] | None = None
-    grupos: list[str] | None = None
+    docs_relevantes: list[str] = Field(
+        default=[], description="Verdad de referencia para métricas de recuperación"
+    )
     esperado: Expectativa
 
     @model_validator(mode="after")
@@ -64,9 +71,6 @@ class Escenario(BaseModel):
     def cuerpo(self) -> dict[str, Any]:
         return self.payload if self.payload is not None else {"pregunta": self.pregunta}
 
-    def cabeceras(self) -> dict[str, str]:
-        return {} if self.grupos is None else {"X-Usuario-Grupos": ",".join(self.grupos)}
-
 
 class Matriz(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -74,6 +78,10 @@ class Matriz(BaseModel):
     version: int
     fase_actual: int
     capacidades: dict[str, Capacidad]
+    canarios: dict[str, list[str]] = Field(
+        default_factory=dict,
+        description="Marcador único → roles que pueden verlo. En cualquier otro rol es una fuga",
+    )
     escenarios: list[Escenario]
 
     @model_validator(mode="after")
@@ -93,28 +101,45 @@ class ResultadoEscenario(BaseModel):
     estado: Literal["ok", "fallo", "omitido"]
     fallos: list[str] = []
     respuesta: str | None = None
+    metricas: dict[str, float] = {}
 
 
 def cargar_matriz(path: Path = MATRIZ_PATH) -> Matriz:
     return Matriz.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
 
 
-def evaluar(escenario: Escenario, status: int, body: Any) -> ResultadoEscenario:
+def evaluar(
+    escenario: Escenario, status: int, body: Any, canarios: dict[str, list[str]] | None = None
+) -> ResultadoEscenario:
+    """Evalúa la respuesta HTTP: contrato `MensajeGuardado`, invariantes, expectativas del
+    escenario, canarios (fuga entre roles) y métricas de recuperación."""
     esperado = escenario.esperado
     fallos: list[str] = []
     texto: str | None = None
+    metricas: dict[str, float] = {}
+
+    # Canarios: se buscan en todo el cuerpo, sea cual sea el status.
+    crudo = json.dumps(body, ensure_ascii=False) if body is not None else ""
+    for marcador, roles in (canarios or {}).items():
+        if escenario.rol not in roles and marcador in crudo:
+            fallos.append(f"FUGA: el canario {marcador} llegó al rol {escenario.rol!r}")
 
     if status != esperado.status:
         fallos.append(f"status {status} != {esperado.status}")
     elif status == 200:
         try:
-            r = RespuestaConsulta.model_validate(body)
+            m = MensajeGuardado.model_validate(body)
         except ValidationError as exc:
-            fallos.append(f"contrato RespuestaConsulta: {exc.error_count()} errores")
+            fallos.append(f"contrato MensajeGuardado: {exc.error_count()} errores")
         else:
-            texto = r.respuesta
-            fallos.extend(_invariantes(r))
-            fallos.extend(_expectativas(r, esperado))
+            texto = m.respuesta
+            fallos.extend(_invariantes(m))
+            fallos.extend(_expectativas(m, esperado))
+            if escenario.docs_relevantes:
+                relevantes = set(escenario.docs_relevantes)
+                metricas["recall_docs"] = len(relevantes & set(m.documentos_consultados)) / len(
+                    relevantes
+                )
 
     return ResultadoEscenario(
         id=escenario.id,
@@ -122,10 +147,11 @@ def evaluar(escenario: Escenario, status: int, body: Any) -> ResultadoEscenario:
         estado="fallo" if fallos else "ok",
         fallos=fallos,
         respuesta=texto,
+        metricas=metricas,
     )
 
 
-def _invariantes(r: RespuestaConsulta) -> list[str]:
+def _invariantes(r: MensajeGuardado) -> list[str]:
     fallos = []
     if r.sin_contexto and r.citas:
         fallos.append("invariante: sin_contexto=true pero hay citas")
@@ -136,7 +162,7 @@ def _invariantes(r: RespuestaConsulta) -> list[str]:
     return fallos
 
 
-def _expectativas(r: RespuestaConsulta, e: Expectativa) -> list[str]:
+def _expectativas(r: MensajeGuardado, e: Expectativa) -> list[str]:
     fallos = []
     fuentes = {c.fuente for c in r.citas}
     texto = r.respuesta.lower()
@@ -152,6 +178,9 @@ def _expectativas(r: RespuestaConsulta, e: Expectativa) -> list[str]:
         fallos.append(f"fuentes prohibidas citadas: {prohibidas}")
     if e.contiene_alguno and not any(s.lower() in texto for s in e.contiene_alguno):
         fallos.append(f"la respuesta no contiene ninguno de {e.contiene_alguno}")
+    consultados = [d for d in r.documentos_consultados if d.startswith(tuple(e.no_consultados))]
+    if e.no_consultados and consultados:
+        fallos.append(f"documentos consultados no permitidos: {consultados}")
     if filtrados := [s for s in e.no_contiene if s.lower() in texto]:
         fallos.append(f"la respuesta contiene texto prohibido: {filtrados}")
     return fallos
