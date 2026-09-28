@@ -1,0 +1,23 @@
+# BACKEND_URL lo inyecta el entrypoint de nginx (envsubst) al arrancar.
+server {
+    listen 8080;
+    server_tokens off;
+    root /usr/share/nginx/html;
+
+    add_header X-Content-Type-Options nosniff always;
+    add_header X-Frame-Options DENY always;
+    add_header Content-Security-Policy "default-src 'self'; style-src 'self' 'unsafe-inline'" always;
+
+    location /api/ {
+        proxy_pass ${BACKEND_URL}/;
+        proxy_set_header Host $proxy_host;
+        proxy_ssl_server_name on;
+        proxy_read_timeout 120s;
+        client_max_body_size 16k;
+    }
+
+    location = /healthz {
+        access_log off;
+        return 200 "ok";
+    }
+}

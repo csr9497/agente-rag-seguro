@@ -1,0 +1,49 @@
+# Entorno local: backend + web + Qdrant. Embeddings y LLM en Azure OpenAI (.env).
+#   docker compose up --build
+#   docker compose run --rm ingest        # indexa ingestor/sample_docs en Qdrant
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.19.1
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  app:
+    build: .
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      VECTOR_STORE: qdrant
+      QDRANT_URL: http://qdrant:6333
+      IDENTIDAD_DEBUG: "true"   # permite probar permisos con X-Usuario-Grupos en local
+    ports:
+      - "8000:8000"
+    depends_on:
+      - qdrant
+
+  web:
+    build: ./web
+    environment:
+      BACKEND_URL: http://app:8000
+    ports:
+      - "8080:8080"
+    depends_on:
+      - app
+
+  ingest:
+    build: .
+    profiles: ["tools"]
+    command: ["python", "-m", "ingestor.ingest", "--source", "local", "--path", "ingestor/sample_docs"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      VECTOR_STORE: qdrant
+      QDRANT_URL: http://qdrant:6333
+    depends_on:
+      - qdrant
+
+volumes:
+  qdrant_data:
