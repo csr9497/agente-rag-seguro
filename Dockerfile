@@ -12,7 +12,8 @@ COPY app ./app
 COPY ingestor ./ingestor
 
 FROM python:3.12-slim AS runtime
-RUN useradd --create-home --uid 10001 appuser
+RUN useradd --create-home --uid 10001 appuser \
+    && mkdir -p /data && chown appuser /data   # SQLite local (volumen app_data)
 WORKDIR /app
 COPY --from=builder --chown=appuser /app /app
 ENV PATH="/app/.venv/bin:$PATH" PYTHONUNBUFFERED=1

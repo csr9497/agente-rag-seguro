@@ -107,10 +107,21 @@ curl -F grupo=public -F archivo=@politica.md localhost:8000/documentos \
   -H 'X-Usuario-Grupos: editores,public'
 ```
 
-**Web** (http://localhost:8080): pestañas *Preguntar* y *Documentos*
-(http://localhost:8080/#documentos: subir `.md`/`.txt`, ver el resultado de la validación,
-listar y eliminar). En docker-compose el usuario local es `["public", "editores"]`: puede
-subir a `public` pero no a `rrhh`.
+**Web** (http://localhost:8080), página única:
+- Se elige un **rol** para empezar. Cada conversación usa solo los permisos de ese rol, y el
+  historial muestra por respuesta los documentos consultados, los citados y los fragmentos
+  descartados por permisos.
+- **Documentos**: los visibles para el rol. Los roles con `gestionar_documentos` pueden
+  subir (eligiendo para qué roles es visible, dentro de su `publica_para`) y eliminar.
+- **Roles y permisos**: el rol `administrador` crea roles y asigna permisos.
+- Roles iniciales: `administrador`, `rrhh` (gestiona y publica para `public` y `rrhh`) y
+  `public`. En local cualquier rol es elegible (`SELECCION_LIBRE_DE_ROL=true`); en Azure
+  vendrán de Entra ID.
+
+API: `GET /roles`, `POST/PATCH /roles` (administrador), `POST /conversaciones`,
+`GET /conversaciones/{id}`, `POST /conversaciones/{id}/mensajes`, `GET/POST/DELETE
+/documentos` y `GET /admin/integridad`. El rol de actuación va en la cabecera `X-Rol` y el
+servidor valida que se puede usar. Persistencia en SQLite (`DATABASE_URL`).
 
 **Red local**: web (8080), app (8000) y Qdrant (6333) solo escuchan en `127.0.0.1`. Sin
 autenticación, exponerlos en la red permitiría a cualquiera subir o borrar documentos o leer
