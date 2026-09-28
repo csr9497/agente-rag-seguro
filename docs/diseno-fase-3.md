@@ -37,6 +37,26 @@ Mensaje        id, conversacion_id, pregunta (PII enmascarada), respuesta, sin_c
 - **Ingesta por CLI.** Se mantiene la convención de carpeta = rol. La carpeta debe
   corresponder a un rol registrado; si no, el documento se rechaza.
 
+### Permisos configurables desde la interfaz (decisión 2026-09-28)
+
+Los roles **y sus permisos** se asignan desde la UI (panel "Roles y permisos"):
+
+| Permiso | Qué habilita |
+|---|---|
+| (implícito) consultar | Chatear con los documentos marcados para ese rol |
+| `gestionar_documentos` | Subir, reindexar y eliminar documentos |
+| `publica_para: [roles]` | A qué roles puede asignar documentos al subirlos. Si incluye roles ajenos, el propio rol se añade siempre, para que nadie cree documentos que no puede ver ni mantener |
+| `administrar_roles` | Crear, editar y desactivar roles y asignar permisos |
+
+- **Semilla inicial**:
+  - `administrador`: `administrar_roles`.
+  - `rrhh`: gestiona y publica para `rrhh` y `public`.
+  - `public`: solo consulta.
+- **Protecciones**:
+  - Nadie puede quitarse `administrar_roles` si es el último rol que lo tiene.
+  - Desactivar un rol no borra sus documentos: dejan de ser consultables con ese rol.
+- **Auditoría**: cada cambio de rol o permiso queda registrado.
+
 ### Validación de permisos: cuatro barreras
 
 | # | Dónde | Qué valida | Si falla |
@@ -135,9 +155,8 @@ Móvil (390 px, emulación real): ![](prototipo/movil-empleado.png)
 - Sin rol elegido, no se lista ningún documento.
 - La subida y el borrado solo aparecen para roles con gestión.
 
-**Pendiente de decidir:** ¿puede un rol gestor publicar documentos para roles a los que no
-pertenece? Ejemplo: RRHH publica el onboarding para "Empleado general". El prototipo lo
-permite. La alternativa segura es exigir que el documento incluya siempre el rol del gestor.
+**Decidido:** a qué roles puede publicar cada rol se configura en la UI (`publica_para`), y
+el rol que publica se incluye siempre en el documento.
 
 **Boceto de distribución** (referencia):
 
