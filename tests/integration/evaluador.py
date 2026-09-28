@@ -34,6 +34,7 @@ class Expectativa(BaseModel):
     sin_contexto: bool | None = None
     min_citas: int = 0
     alguna_fuente_de: list[str] = []
+    todas_fuentes_de: list[str] = Field(default=[], description="Cada una debe estar citada")
     fuentes_prohibidas: list[str] = Field(default=[], description="Prefijos de fuente")
     contiene_alguno: list[str] = []
     no_contiene: list[str] = []
@@ -141,6 +142,8 @@ def _expectativas(r: RespuestaConsulta, e: Expectativa) -> list[str]:
         fallos.append(f"{len(r.citas)} citas < mínimo {e.min_citas}")
     if e.alguna_fuente_de and not fuentes & set(e.alguna_fuente_de):
         fallos.append(f"ninguna cita de {e.alguna_fuente_de} (citadas: {sorted(fuentes)})")
+    if faltan := sorted(set(e.todas_fuentes_de) - fuentes):
+        fallos.append(f"faltan citas de {faltan}")
     if prohibidas := sorted(f for f in fuentes if f.startswith(tuple(e.fuentes_prohibidas))):
         fallos.append(f"fuentes prohibidas citadas: {prohibidas}")
     if e.contiene_alguno and not any(s.lower() in texto for s in e.contiene_alguno):

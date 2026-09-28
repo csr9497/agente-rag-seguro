@@ -10,7 +10,7 @@
 # Los escenarios se basan en ingestor/sample_docs.
 
 version: 1
-fase_actual: 1
+fase_actual: 2
 
 capacidades:
   contrato_api:
@@ -37,6 +37,9 @@ capacidades:
   validacion_entrada:
     descripcion: Entradas inválidas se rechazan con 422
     fase: 1
+  orquestacion_agente:
+    descripcion: El supervisor descompone preguntas compuestas en varias búsquedas
+    fase: 2
   auditoria:
     descripcion: Toda consulta queda registrada (verificable en Log Analytics / Postgres)
     fase: 1
@@ -166,6 +169,17 @@ escenarios:
     esperado:
       sin_contexto: false
       alguna_fuente_de: [public/politica-vacaciones.md]
+      contiene_alguno: ["23"]
+
+  # --- Orquestación del agente -------------------------------------------------------
+  - id: AG-01
+    descripcion: Pregunta compuesta que requiere dos documentos
+    capacidades: [orquestacion_agente, respuesta_citada]
+    pregunta: ¿Cuántos días de vacaciones tengo y cuántos días a la semana puedo teletrabajar?
+    esperado:
+      sin_contexto: false
+      min_citas: 2
+      todas_fuentes_de: [public/politica-vacaciones.md, public/teletrabajo.md]
       contiene_alguno: ["23"]
 
   # --- Validación de entrada ----------------------------------------------------------

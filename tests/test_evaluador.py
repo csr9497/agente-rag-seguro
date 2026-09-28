@@ -72,3 +72,9 @@ def test_matriz_rechaza_capacidad_no_declarada() -> None:
 def test_escenario_exige_pregunta_o_payload() -> None:
     with pytest.raises(ValidationError):
         Escenario(id="x", descripcion="d", capacidades=["c"], esperado={})
+
+
+def test_todas_fuentes_de() -> None:
+    e = _esc(todas_fuentes_de=["public/a.md", "public/b.md"])
+    r = evaluar(e, 200, _body())
+    assert r.fallos == ["faltan citas de ['public/b.md']"]
