@@ -335,26 +335,29 @@ Se amplía el evaluador actual (`tests/integration/evaluador.py`) a un paquete `
 organizado en capas. Cada capa produce resultados tipados.
 
 ```python
-class Escenario(BaseModel):           # matriz ampliada
+class Escenario(BaseModel):  # matriz ampliada
     id: str
-    rol: str                          # sustituye a `grupos`
+    rol: str  # sustituye a `grupos`
     pregunta: str
-    docs_relevantes: list[str] = []   # verdad de referencia para métricas de recuperación
+    docs_relevantes: list[str] = []  # verdad de referencia para métricas de recuperación
     respuesta_referencia: str | None = None
-    esperado: Expectativa             # la actual
+    esperado: Expectativa  # la actual
 
-class JuicioRespuesta(BaseModel):     # salida estructurada del juez (LLM)
-    fidelidad: int = Field(ge=1, le=5)           # cada afirmación sale del contexto
+
+class JuicioRespuesta(BaseModel):  # salida estructurada del juez (LLM)
+    fidelidad: int = Field(ge=1, le=5)  # cada afirmación sale del contexto
     relevancia: int = Field(ge=1, le=5)
     completitud: int = Field(ge=1, le=5)
     afirmaciones_sin_soporte: list[str]
     razonamiento: str
+
 
 class Metrica(BaseModel):
     nombre: str
     valor: float
     umbral: float
     aprobado: bool
+
 
 class ResultadoEvaluacion(BaseModel):
     escenario_id: str

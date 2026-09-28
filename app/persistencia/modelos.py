@@ -1,0 +1,69 @@
+"""Modelos Pydantic de roles, documentos registrados y conversaciones."""
+
+from typing import Literal
+
+from pydantic import BaseModel, Field, field_validator
+
+from app.models.schemas import Cita, Hallazgo
+
+PATRON_ROL = r"^[a-z0-9][a-z0-9_\-]{0,63}$"
+Permiso = Literal["gestionar_documentos", "administrar_roles"]
+EstadoDocumento = Literal["activo", "bloqueado", "pendiente"]
+
+
+class Rol(BaseModel):
+    id: str = Field(pattern=PATRON_ROL)
+    nombre: str = Field(min_length=1, max_length=80)
+    descripcion: str = Field(default="", max_length=300)
+    activo: bool = True
+    permisos: list[Permiso] = Field(default_factory=list)
+    publica_para: list[str] = Field(
+        default_factory=list, description="Roles a los que puede asignar documentos"
+    )
+    creado_en: str = ""
+
+    @field_validator("permisos", "publica_para")
+    @classmethod
+    def _ordenado_sin_duplicados(cls, v: list[str]) -> list[str]:
+        return sorted(set(v))
+
+    def puede(self, permiso: Permiso) -> bool:
+        return self.activo and permiso in self.permisos
+
+
+class DocumentoRegistrado(BaseModel):
+    """Fuente de verdad de los permisos de un documento (se contrasta con el índice)."""
+
+    doc_id: str
+    titulo: str
+    roles: list[str] = Field(min_length=1)
+    doc_hash: str
+    chunks: int = Field(ge=0)
+    estado: EstadoDocumento = "activo"
+    motivo_estado: str | None = None
+    subido_por: str | None = None
+    indexado_en: str = ""
+
+    @field_validator("roles")
+    @classmethod
+    def _roles_ordenados(cls, v: list[str]) -> list[str]:
+        return sorted(set(v))
+
+
+class MensajeGuardado(BaseModel):
+    id: int | None = None
+    pregunta: str = Field(description="Tal como la procesó el agente (PII enmascarada)")
+    respuesta: str
+    sin_contexto: bool
+    citas: list[Cita] = Field(default_factory=list)
+    documentos_consultados: list[str] = Field(default_factory=list)
+    fragmentos_descartados: int = 0
+    hallazgos: list[Hallazgo] = Field(default_factory=list)
+    creado_en: str = ""
+
+
+class Conversacion(BaseModel):
+    id: str
+    rol_id: str
+    creada_en: str
+    mensajes: list[MensajeGuardado] = Field(default_factory=list)

@@ -22,6 +22,9 @@ services:
       GESTION_DOCUMENTOS: "true" # /documentos (editores: X-Usuario-Grupos: editores,<grupo>)
       # Usuario local (sin Entra ID): editor de "public". No pertenece a "rrhh".
       DEFAULT_GROUPS: '["public", "editores"]'
+      DATABASE_URL: sqlite:////data/app.db
+    volumes:
+      - app_data:/data
     ports:
       # Solo este equipo: con IDENTIDAD_DEBUG la cabecera X-Usuario-Grupos elige los grupos.
       - "127.0.0.1:8000:8000"
@@ -53,3 +56,4 @@ services:
 
 volumes:
   qdrant_data:
+  app_data:

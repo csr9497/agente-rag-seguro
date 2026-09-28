@@ -42,7 +42,7 @@ requires-dist = [
     { name = "pydantic-settings" },
     { name = "python-multipart" },
     { name = "qdrant-client" },
-    { name = "sqlalchemy", specifier = ">=2.1.1" },
+    { name = "sqlalchemy" },
     { name = "uvicorn", extras = ["standard"] },
 ]
 

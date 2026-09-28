@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     azure_storage_account_url: str = ""
     azure_storage_container: str = "documentos"
 
+    # Roles, registro de documentos y conversaciones. PostgreSQL en Azure (misma interfaz).
+    database_url: str = "sqlite:///data/app.db"
+
     retrieval_top_k: int = 4
     min_score: float | None = None
     max_iteraciones: int = 3
