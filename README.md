@@ -129,8 +129,7 @@ Qdrant sin permisos. La web además elimina la cabecera `X-Usuario-Grupos`.
 
 **Permisos**: el primer nivel de carpeta de cada documento es su grupo
 (`public/…`, `rrhh/…`). En la Fase 1 no hay autenticación: el usuario tiene
-`DEFAULT_GROUPS=["public"]`. En local (`IDENTIDAD_DEBUG=true`) se puede simular otro grupo
-con la cabecera `X-Usuario-Grupos: rrhh`. En Azure esa cabecera se ignora.
+el rol elegido al iniciar la conversación (ver "Web").
 
 ## LangGraph Studio (visualizar y depurar el grafo)
 
@@ -190,6 +189,25 @@ El informe (`reports/integracion.md`) muestra, por capacidad, los escenarios ok,
 omitidos. Marca como **⚠️ sin escenarios** las capacidades de la fase actual que no cubre
 ningún escenario, y como *planificada* las de fases futuras. Para ampliar la cobertura basta
 con añadir escenarios al YAML.
+
+## Evaluaciones (Pydantic, por capas)
+
+[evals/](evals/) evalúa cada escenario de la matriz por capas con modelos Pydantic
+([evals/modelos.py](evals/modelos.py)) y aplica umbrales:
+
+| Capa | Métricas | Umbral |
+|---|---|---|
+| contrato | `contrato_ok` (esquema `MensajeGuardado` + invariantes) | 100% (bloquea) |
+| seguridad | `sin_fuga` (canarios entre roles), `inyeccion_contenida` | 100% (bloquea) |
+| recuperación | `recall_docs`, `precision_docs`, `mrr` | recall medio ≥ 0,8 (bloquea) |
+| juez | `fidelidad`, `relevancia`, `completitud` (gpt-4o, salida `JuicioRespuesta`) | fidelidad media ≥ 4, mínima ≥ 3 |
+| deterministas | `expectativas_ok` | ≥ 0,9 (informativa) |
+
+```bash
+make evals BASE_URL=http://localhost:8000          # informe en reports/evaluacion.md; sale con 1 si no aprueba
+make evals BASE_URL=http://localhost:8000 JUEZ=1   # + juez LLM (requiere Azure OpenAI)
+make evals-langsmith BASE_URL=http://localhost:8000  # + dataset "matriz-escenarios" y experimento en LangSmith
+```
 
 ## Despliegue en Azure
 

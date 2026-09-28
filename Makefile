@@ -1,7 +1,7 @@
 CONDA_ENV ?= agente-rag
 BASE_URL  ?= http://localhost:8000
 
-.PHONY: help setup sync lint fmt test integration matriz up down ingest studio env-from-azure tf-validate
+.PHONY: help setup sync lint fmt test integration matriz evals evals-langsmith up down ingest studio env-from-azure tf-validate
 
 help: ## Lista los comandos
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-16s %s\n", $$1, $$2}'
@@ -26,6 +26,12 @@ test: ## Tests unitarios
 
 integration: ## Matriz de escenarios contra BASE_URL (informe en reports/integracion.md)
 	INTEGRATION_BASE_URL=$(BASE_URL) uv run pytest -m integration
+
+evals: ## Evaluaciones por capas contra BASE_URL (umbrales bloqueantes; JUEZ=1 añade gpt-4o)
+	uv run python -m evals.ejecutar --base-url $(BASE_URL) $(if $(JUEZ),--juez,)
+
+evals-langsmith: ## Igual que evals + dataset y experimento en LangSmith
+	uv run python -m evals.ejecutar --base-url $(BASE_URL) --langsmith $(if $(JUEZ),--juez,)
 
 matriz: ## Informe de cobertura de la matriz sin ejecutar nada
 	uv run python -m tests.integration.evaluador
