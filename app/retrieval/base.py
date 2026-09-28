@@ -1,9 +1,9 @@
 """Interfaces de infraestructura: permiten pasar de local (Qdrant) a Azure (AI Search)
-sin tocar el pipeline."""
+y cambiar de proveedor de modelos sin tocar el grafo del agente."""
 
-from typing import Protocol
+from typing import Any, Protocol
 
-from app.models.schemas import Chunk, ChunkRecuperado, RespuestaLLM
+from app.models.schemas import Chunk, ChunkRecuperado, DecisionSupervisor, RespuestaLLM
 
 
 class Embedder(Protocol):
@@ -12,6 +12,14 @@ class Embedder(Protocol):
 
 class LLM(Protocol):
     def responder(self, system: str, user: str) -> RespuestaLLM: ...
+
+
+class Supervisor(Protocol):
+    """LLM con tool-calling que decide qué herramientas invocar."""
+
+    def decidir(
+        self, mensajes: list[dict[str, Any]], herramientas: list[dict[str, Any]]
+    ) -> DecisionSupervisor: ...
 
 
 class Retriever(Protocol):

@@ -1,5 +1,7 @@
 """Esquemas Pydantic v2 de todo el I/O del asistente."""
 
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -64,3 +66,18 @@ class RegistroAuditoria(BaseModel):
     fuentes: list[str]
     respuesta: str
     sin_contexto: bool
+
+
+class ToolCall(BaseModel):
+    """Llamada a herramienta decidida por el supervisor."""
+
+    id: str
+    nombre: str
+    argumentos: str = Field(description="JSON crudo; lo valida el args_model de la herramienta")
+
+
+class DecisionSupervisor(BaseModel):
+    tool_calls: list[ToolCall]
+    mensaje_asistente: dict[str, Any] = Field(
+        description="Mensaje del asistente tal cual, para mantener el historial de tool-calling"
+    )

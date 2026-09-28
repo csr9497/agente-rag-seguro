@@ -1,8 +1,10 @@
+from typing import Any
+
 from azure.identity import DefaultAzureCredential, get_bearer_token_provider
 from openai import AzureOpenAI
 
 from app.config import Settings
-from app.models.schemas import RespuestaLLM
+from app.models.schemas import DecisionSupervisor, RespuestaLLM, ToolCall
 
 _SCOPE_COGNITIVE = "https://cognitiveservices.azure.com/.default"
 
@@ -32,6 +34,32 @@ class AzureOpenAIEmbedder:
     def embed(self, textos: list[str]) -> list[list[float]]:
         resp = self._client.embeddings.create(model=self._deployment, input=textos)
         return [d.embedding for d in sorted(resp.data, key=lambda d: d.index)]
+
+
+class AzureOpenAISupervisor:
+    def __init__(self, client: AzureOpenAI, deployment: str) -> None:
+        self._client = client
+        self._deployment = deployment
+
+    def decidir(
+        self, mensajes: list[dict[str, Any]], herramientas: list[dict[str, Any]]
+    ) -> DecisionSupervisor:
+        completion = self._client.chat.completions.create(
+            model=self._deployment,
+            messages=mensajes,  # type: ignore[arg-type]
+            tools=herramientas,  # type: ignore[arg-type]
+            tool_choice="auto",
+            temperature=0,
+        )
+        mensaje = completion.choices[0].message
+        return DecisionSupervisor(
+            tool_calls=[
+                ToolCall(id=tc.id, nombre=tc.function.name, argumentos=tc.function.arguments)
+                for tc in mensaje.tool_calls or []
+                if tc.type == "function"
+            ],
+            mensaje_asistente=mensaje.model_dump(exclude_none=True),
+        )
 
 
 class AzureOpenAILLM:

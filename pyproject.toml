@@ -14,6 +14,7 @@ dependencies = [
     "qdrant-client",           # vector store local
     "azure-search-documents",  # vector store en Azure (security trimming)
     "azure-storage-blob",      # origen de documentos para la ingesta en Azure
+    "langgraph>=1.2.12",
 ]
 
 [dependency-groups]
