@@ -13,3 +13,4 @@ reports/
 crash.log
 .terraform.tfstate.lock.info
 .qdrant/
+.langgraph_api/

@@ -70,6 +70,30 @@ indicando qué falta; el resto del grafo (permisos, auditoría, validación) fun
 `DEFAULT_GROUPS=["public"]`. En local (`IDENTIDAD_DEBUG=true`) se puede simular otro grupo
 con la cabecera `X-Usuario-Grupos: rrhh`. En Azure esa cabecera se ignora.
 
+## LangGraph Studio (visualizar y depurar el grafo)
+
+```bash
+make up        # Qdrant (y la app) en Docker
+make studio    # langgraph dev --allow-blocking
+```
+
+| Qué | URL |
+|---|---|
+| Studio (grafo interactivo, ejecución paso a paso, estado de cada nodo) | https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024 |
+| API del servidor LangGraph | http://127.0.0.1:2024/docs |
+
+Studio requiere iniciar sesión con una cuenta gratuita de LangSmith; el grafo y los datos
+se ejecutan en local (el navegador se conecta a `127.0.0.1:2024`). El grafo que carga es el
+mismo que usa la API ([app/graph/studio.py](app/graph/studio.py), [langgraph.json](langgraph.json)).
+Entrada de ejemplo:
+
+```json
+{"pregunta": "¿Cuántos días de vacaciones tengo?", "usuario": {"id": "studio", "groups": ["public"]}, "top_k": 4}
+```
+
+Sin cuenta de LangSmith, la topología también está en http://localhost:8000/grafo
+(Mermaid, solo con `EXPONER_TOPOLOGIA=true`, activo en docker-compose).
+
 ## Pruebas de integración (matriz de escenarios)
 
 Los escenarios están en [tests/integration/escenarios.yaml](tests/integration/escenarios.yaml).

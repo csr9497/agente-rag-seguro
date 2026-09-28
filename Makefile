@@ -1,7 +1,7 @@
 CONDA_ENV ?= agente-rag
 BASE_URL  ?= http://localhost:8000
 
-.PHONY: help setup sync lint fmt test integration matriz up down ingest env-from-azure tf-validate
+.PHONY: help setup sync lint fmt test integration matriz up down ingest studio env-from-azure tf-validate
 
 help: ## Lista los comandos
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-16s %s\n", $$1, $$2}'
@@ -39,6 +39,9 @@ down:
 
 ingest: ## Indexa ingestor/sample_docs en el Qdrant local
 	docker compose run --rm ingest
+
+studio: ## LangGraph Studio: servidor de desarrollo del grafo en http://127.0.0.1:2024
+	uv run langgraph dev --allow-blocking
 
 env-from-azure: ## Rellena .env con endpoint y clave de Azure OpenAI (desde Key Vault)
 	./scripts/env_from_azure.sh

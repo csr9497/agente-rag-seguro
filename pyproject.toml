@@ -23,6 +23,7 @@ dev = [
     "httpx",   # TestClient de FastAPI y cliente de las pruebas de integración
     "pyyaml",  # matriz de escenarios de integración
     "ruff",
+    "langgraph-cli[inmem]>=0.4.32",
 ]
 
 [tool.uv]
