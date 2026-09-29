@@ -45,7 +45,8 @@ function icono(id, clase = "icon") {
 }
 const nombreRol = (id) =>
   (estado.todos.find((r) => r.id === id) || estado.roles.find((r) => r.id === id) || { nombre: id }).nombre;
-const tituloDoc = (id) => (estado.docs.find((d) => d.doc_id === id) || { titulo: id.split("/").pop() }).titulo;
+const tituloDoc = (id) => (id.startsWith("datos:") ? `Datos internos: ${id.slice(6)}`
+  : (estado.docs.find((d) => d.doc_id === id) || { titulo: id.split("/").pop() }).titulo);
 const puede = (permiso) => !!estado.rol && estado.rol.permisos.includes(permiso);
 const hora = (iso) => (iso ? new Date(iso).toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" }) : "");
 function guardar(k, v) {
