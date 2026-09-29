@@ -19,17 +19,23 @@ from app.graph.prompts import SUPERVISOR_PROMPT
 from app.rag.prompts import SYSTEM_PROMPT
 from app.security.content_safety import GuardrailPromptShields
 from app.security.guardrails import Guardrail, GuardrailEntrada, GuardrailPermisivo, GuardrailSalida
+from app.security.politicas import GuardrailPoliticas, GuardrailSalidaSensibles
 
-VersionEntrada = Literal["v1-heuristico", "v2-prompt-shields", "sin-guardrail"]
-VersionSalida = Literal["v1-fuga-prompt", "sin-guardrail"]
+VersionEntrada = Literal[
+    "v1-heuristico", "v2-prompt-shields", "v3-politicas", "v4-politicas-shields", "sin-guardrail"
+]
+VersionSalida = Literal["v1-fuga-prompt", "v2-fuga-sensibles", "sin-guardrail"]
 
 DESCRIPCION_ENTRADA = (
     "v1-heuristico: inyección, texto oculto y PII con reglas locales · "
     "v2-prompt-shields: v1 + Azure AI Content Safety · "
+    "v3-politicas: v1 + daño a personas, autolesión, acoso y datos sensibles · "
+    "v4-politicas-shields: v3 + Azure AI Content Safety · "
     "sin-guardrail: desactivado (solo fuera de producción, para comparar)"
 )
 DESCRIPCION_SALIDA = (
     "v1-fuga-prompt: fugas del prompt de sistema, etiquetas y PII · "
+    "v2-fuga-sensibles: v1 + datos sensibles (cuentas, contraseñas, PIN) · "
     "sin-guardrail: desactivado (solo fuera de producción, para comparar)"
 )
 
@@ -48,10 +54,15 @@ class ContextoAgente(BaseModel):
 
 
 def catalogo_entrada(settings: Settings, shields: Any | None) -> dict[str, Guardrail]:
-    catalogo: dict[str, Guardrail] = {"v1-heuristico": GuardrailEntrada()}
+    catalogo: dict[str, Guardrail] = {
+        "v1-heuristico": GuardrailEntrada(),
+        "v3-politicas": GuardrailPoliticas(),
+    }
     if shields is not None:
-        catalogo["v2-prompt-shields"] = GuardrailPromptShields(
-            GuardrailEntrada(), shields, settings.content_safety_fallo
+        fallo = settings.content_safety_fallo
+        catalogo["v2-prompt-shields"] = GuardrailPromptShields(GuardrailEntrada(), shields, fallo)
+        catalogo["v4-politicas-shields"] = GuardrailPromptShields(
+            GuardrailPoliticas(), shields, fallo
         )
     if settings.entorno != "prod":
         catalogo["sin-guardrail"] = GuardrailPermisivo()
@@ -59,8 +70,10 @@ def catalogo_entrada(settings: Settings, shields: Any | None) -> dict[str, Guard
 
 
 def catalogo_salida(settings: Settings) -> dict[str, Guardrail]:
+    protegidos = [SYSTEM_PROMPT, SUPERVISOR_PROMPT]
     catalogo: dict[str, Guardrail] = {
-        "v1-fuga-prompt": GuardrailSalida([SYSTEM_PROMPT, SUPERVISOR_PROMPT])
+        "v1-fuga-prompt": GuardrailSalida(protegidos),
+        "v2-fuga-sensibles": GuardrailSalidaSensibles(protegidos),
     }
     if settings.entorno != "prod":
         catalogo["sin-guardrail"] = GuardrailPermisivo()
@@ -68,7 +81,7 @@ def catalogo_salida(settings: Settings) -> dict[str, Guardrail]:
 
 
 def version_por_defecto(settings: Settings, shields: Any | None) -> str:
-    """GUARDRAIL_ENTRADA=auto: Prompt Shields si está configurado; si no, heurístico."""
+    """GUARDRAIL_ENTRADA=auto: políticas de uso (+ Prompt Shields si está configurado)."""
     if settings.guardrail_entrada != "auto":
         return settings.guardrail_entrada
-    return "v2-prompt-shields" if shields is not None else "v1-heuristico"
+    return "v4-politicas-shields" if shields is not None else "v3-politicas"

@@ -16,7 +16,8 @@ import openai
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.runtime import Runtime
-from langsmith import Client
+from langsmith import Client, traceable
+from langsmith.run_helpers import get_tracing_context
 from pydantic import BaseModel, Field, ValidationError
 
 from app.acciones.modelos import PropuestaAccion
@@ -31,7 +32,7 @@ from app.rag.prompts import build_historial, neutralizar
 from app.retrieval.base import LLM, Embedder, Supervisor
 from app.security.acceso import PREFIJO_DATOS, VerificadorAcceso, VerificadorPermisivo
 from app.security.audit import registrar_consulta
-from app.security.guardrails import MENSAJE_BLOQUEO, Guardrail
+from app.security.guardrails import MENSAJE_BLOQUEO, Guardrail, Veredicto
 from app.security.versiones import ContextoAgente
 from app.tools.base import SIN_ACCESO, Herramienta, ResultadoHerramienta, schema_openai
 from app.tools.conversacion import PLANTILLAS
@@ -54,8 +55,8 @@ class ResultadoAgente(BaseModel):
     consultas: list[str] = Field(default_factory=list, description="Consultas curadas enviadas")
 
 
-def _bloqueada() -> RespuestaConsulta:
-    return RespuestaConsulta(respuesta=MENSAJE_BLOQUEO, citas=[], sin_contexto=True)
+def _bloqueada(mensaje: str | None = None) -> RespuestaConsulta:
+    return RespuestaConsulta(respuesta=mensaje or MENSAJE_BLOQUEO, citas=[], sin_contexto=True)
 
 
 class Agente:
@@ -135,6 +136,8 @@ class Agente:
             self._trazas, self._settings, roles=usuario.groups, conversacion_id=conversacion_id
         ) as config:
             config["metadata"]["usuario"] = usuario_seudonimo(usuario.id)
+            config["metadata"]["guardrail_entrada"] = self._version_entrada
+            config["metadata"]["guardrail_salida"] = self._version_salida
             config["run_id"] = traza_id
             final = EstadoAgente.model_validate(self.grafo.invoke(inicial, config=config))
         consultados = _documentos_consultados(final)
@@ -251,14 +254,14 @@ class Agente:
 
     def _input_guardrail(self, estado: EstadoAgente, runtime: Runtime[ContextoAgente]) -> Update:
         version, guardrail = self._elegir_guardrail("entrada", runtime)
-        veredicto = guardrail.revisar(estado.pregunta)
+        veredicto = _revisar_con_traza("entrada", version, guardrail, estado.pregunta)
         update: Update = {
             "pregunta": veredicto.texto,
             "hallazgos": [*estado.hallazgos, *veredicto.hallazgos],
             "versiones_guardrails": {**estado.versiones_guardrails, "entrada": version},
         }
         if not veredicto.permitido:
-            update["respuesta"] = _bloqueada()
+            update["respuesta"] = _bloqueada(veredicto.mensaje)
         return update
 
     def _supervisor_node(self, estado: EstadoAgente) -> Update:
@@ -472,7 +475,7 @@ class Agente:
     def _output_guardrail(self, estado: EstadoAgente, runtime: Runtime[ContextoAgente]) -> Update:
         respuesta = _requerir_respuesta(estado)
         version, guardrail = self._elegir_guardrail("salida", runtime)
-        veredicto = guardrail.revisar(respuesta.respuesta)
+        veredicto = _revisar_con_traza("salida", version, guardrail, respuesta.respuesta)
         return {
             "versiones_guardrails": {**estado.versiones_guardrails, "salida": version},
             "respuesta": (
@@ -496,6 +499,21 @@ class Agente:
             guardrails=estado.versiones_guardrails,
         )
         return {}
+
+
+def _revisar_con_traza(tipo: str, version: str, guardrail: Guardrail, texto: str) -> Veredicto:
+    """Cada guardrail es un paso propio en LangSmith («guardrail_entrada · v3-politicas»), con
+    etiqueta y versión para filtrar. Usa el cliente de la consulta (enmascarado en prod)."""
+    contexto = get_tracing_context()
+    if not contexto.get("enabled") or not isinstance(contexto.get("client"), Client):
+        return guardrail.revisar(texto)  # sin traza activa: la revisión nunca depende de ella
+    revisar = traceable(
+        name=f"guardrail_{tipo} · {version}",
+        run_type="chain",
+        tags=["guardrail", f"guardrail_{tipo}:{version}"],
+        metadata={"guardrail": tipo, "version": version},
+    )(guardrail.revisar)
+    return revisar(texto)
 
 
 def _es_filtro_de_contenido(exc: openai.BadRequestError) -> bool:

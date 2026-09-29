@@ -7,6 +7,13 @@ const MOTIVO_BLOQUEO = {
   texto_oculto: "Texto oculto en la pregunta",
   fuga_prompt: "La respuesta revelaba instrucciones internas",
 };
+// Políticas de uso: el servidor ya envía el mensaje adecuado en m.respuesta.
+const POLITICA = {
+  autolesion: ["info", "i-info", "Estamos para ayudarte"],
+  dano_a_personas: ["danger", "i-ban", "No puedo ayudarte con eso"],
+  acoso: ["warn", "i-ban", "Mensaje contrario al código de conducta"],
+  dato_sensible: ["warn", "i-lock", "Dato sensible ocultado"],
+};
 
 const estado = {
   roles: [],           // roles disponibles para el usuario
@@ -197,6 +204,7 @@ function pintarChat() {
 
   const mensajes = (estado.conversacion ? estado.conversacion.mensajes : []).flatMap((m, i) => [
     el("div", { class: "msg-user" }, el("div", { class: "msg-meta" }, `Tú · ${hora(m.creado_en)}`), m.pregunta),
+    ...(m.hallazgos.some((h) => h.accion === "bloquear") ? [] : [avisoOcultados(m)].filter(Boolean)),
     pintarRespuesta(m, i),
   ]);
   if (estado.pendiente) {
@@ -300,8 +308,20 @@ async function decidir(m, a, aprobar) {
   pintarChat();
 }
 
+// Aviso cuando se ocultaron datos personales o sensibles de la pregunta (no se guardaron).
+function avisoOcultados(m) {
+  const tipos = new Set(m.hallazgos.filter((h) => h.accion === "enmascarar" && ["pii", "dato_sensible"].includes(h.tipo)).map((h) => h.tipo));
+  if (!tipos.size) return null;
+  return notice("warn", "i-lock", "Hemos ocultado datos de tu mensaje",
+    "No se guardan ni se envían al asistente. Evita compartir datos personales, bancarios o contraseñas en el chat.");
+}
+
 function pintarRespuesta(m, i) {
   const bloqueo = m.hallazgos.find((h) => h.accion === "bloquear");
+  if (bloqueo && POLITICA[bloqueo.tipo]) {
+    const [tipo, ic, titulo] = POLITICA[bloqueo.tipo];
+    return notice(tipo, ic, titulo, m.respuesta);
+  }
   if (bloqueo) {
     const motivo = MOTIVO_BLOQUEO[bloqueo.tipo] || "La consulta infringe la política de uso";
     return notice("warn", "i-ban", "Consulta bloqueada por la política de uso", `${motivo}. No se ha consultado ningún documento.`);

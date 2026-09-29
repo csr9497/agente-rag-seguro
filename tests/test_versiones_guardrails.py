@@ -67,8 +67,8 @@ def test_v2_solo_con_prompt_shields_configurado() -> None:
     s = Settings()
     assert "v2-prompt-shields" not in catalogo_entrada(s, shields=None)
     assert "v2-prompt-shields" in catalogo_entrada(s, shields=object())
-    assert version_por_defecto(s, shields=None) == "v1-heuristico"
-    assert version_por_defecto(s, shields=object()) == "v2-prompt-shields"
+    assert version_por_defecto(s, shields=None) == "v3-politicas"
+    assert version_por_defecto(s, shields=object()) == "v4-politicas-shields"
 
 
 def test_la_auditoria_registra_las_versiones(agente, caplog) -> None:

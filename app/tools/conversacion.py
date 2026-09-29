@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict
 from app.models.schemas import Usuario
 from app.tools.base import ResultadoHerramienta
 
-TipoConversacion = Literal["saludo", "agradecimiento", "despedida", "ayuda"]
+TipoConversacion = Literal["saludo", "agradecimiento", "despedida", "ayuda", "fuera_de_ambito"]
 
 PLANTILLAS: dict[str, str] = {
     "saludo": (
@@ -21,6 +21,11 @@ PLANTILLAS: dict[str, str] = {
     ),
     "agradecimiento": "¡De nada! Si tienes otra pregunta sobre los documentos, aquí estoy.",
     "despedida": "¡Hasta luego! Tus conversaciones quedan guardadas en «Tus conversaciones».",
+    "fuera_de_ambito": (
+        "Solo puedo ayudarte con la documentación y los datos internos de la empresa: "
+        "políticas, procedimientos, beneficios, calendario… Esa consulta queda fuera de mi "
+        "ámbito. ¿Hay algo de la empresa en lo que te pueda ayudar?"
+    ),
     "ayuda": (
         "Puedo responder preguntas sobre los documentos visibles para tu rol, siempre citando "
         "la fuente; decirte qué documentos puedes consultar; consultar datos internos como los "
@@ -38,8 +43,9 @@ class ConversacionArgs(BaseModel):
 class ResponderConversacion:
     nombre = "conversacion"
     descripcion = (
-        "Respuesta de cortesía para saludos, agradecimientos, despedidas o preguntas sobre qué "
-        "puede hacer el asistente. NUNCA para preguntas sobre contenido de documentos o datos."
+        "Respuesta fija para saludos, agradecimientos, despedidas, «¿qué puedes hacer?» o "
+        "mensajes sin relación con la empresa (fuera_de_ambito). NUNCA para preguntas sobre "
+        "contenido de documentos o datos."
     )
     args_model = ConversacionArgs
 

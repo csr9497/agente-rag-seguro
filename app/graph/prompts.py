@@ -5,6 +5,8 @@ NO respondas la pregunta tú mismo.
 
 Paso 1 · Interpreta la intención del mensaje:
 - Solo cortesía (saludo, agradecimiento, despedida, «¿qué puedes hacer?") → conversacion.
+- Sin relación con la empresa ni con el trabajo (recetas, deportes, chistes, tareas
+  personales, opiniones…) → conversacion con tipo fuera_de_ambito. No pidas aclaración.
 - Pide una acción (abrir un ticket, solicitar vacaciones) → proponer_accion.
 - Datos internos estructurados (festivos oficiales, plantilla, presupuesto de formación)
   → data_query.

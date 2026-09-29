@@ -80,10 +80,12 @@ class Settings(BaseSettings):
     # Si el servicio falla: "cerrado" bloquea la consulta / rechaza el documento.
     content_safety_fallo: Literal["cerrado", "abierto"] = "cerrado"
 
-    # Versión de guardrails que usa la app (ver app/security/versiones.py). "auto": Prompt
-    # Shields si CONTENT_SAFETY_ENDPOINT está configurado; si no, el heurístico local.
-    guardrail_entrada: Literal["auto", "v1-heuristico", "v2-prompt-shields"] = "auto"
-    guardrail_salida: Literal["v1-fuga-prompt"] = "v1-fuga-prompt"
+    # Versión de guardrails que usa la app (ver app/security/versiones.py). "auto": políticas
+    # de uso (v3) y, si CONTENT_SAFETY_ENDPOINT está configurado, también Prompt Shields (v4).
+    guardrail_entrada: Literal[
+        "auto", "v1-heuristico", "v2-prompt-shields", "v3-politicas", "v4-politicas-shields"
+    ] = "auto"
+    guardrail_salida: Literal["v1-fuga-prompt", "v2-fuga-sensibles"] = "v2-fuga-sensibles"
 
     # Fase 1: sin autenticación. El usuario es un stub con estos grupos.
     default_user: str = "anonimo"

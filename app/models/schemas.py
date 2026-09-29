@@ -100,6 +100,10 @@ class Hallazgo(BaseModel):
         "etiqueta_estructural",
         "acceso_no_autorizado",
         "servicio_no_disponible",
+        "dano_a_personas",
+        "autolesion",
+        "acoso",
+        "dato_sensible",
     ]
     detalle: str
     accion: Literal["bloquear", "enmascarar", "eliminar", "registrar"]

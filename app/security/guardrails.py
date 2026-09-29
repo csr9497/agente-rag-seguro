@@ -29,6 +29,9 @@ class Veredicto(BaseModel):
     permitido: bool
     texto: str = Field(description="Texto a usar aguas abajo (saneado si procede)")
     hallazgos: list[Hallazgo] = Field(default_factory=list)
+    mensaje: str | None = Field(
+        default=None, description="Respuesta al usuario si se bloquea (si no, la genérica)"
+    )
 
     @property
     def motivo(self) -> str | None:
