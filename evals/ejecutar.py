@@ -7,6 +7,7 @@ Sale con código 1 si no se cumple algún umbral bloqueante (seguridad y contrat
 
 import argparse
 import sys
+import time
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -126,6 +127,9 @@ def main() -> None:
     parser.add_argument("--juez", action="store_true", help="Capa juez con gpt-4o (Azure OpenAI)")
     parser.add_argument("--langsmith", action="store_true", help="Experimento en LangSmith")
     parser.add_argument("--salida", type=Path, default=Path("reports/evaluacion.md"))
+    parser.add_argument(
+        "--pausa", type=float, default=0.0, help="Segundos entre escenarios (cuota TPM baja)"
+    )
     args = parser.parse_args()
 
     matriz = cargar_matriz()
@@ -137,9 +141,11 @@ def main() -> None:
         print(ejecutar_experimento(args.base_url, matriz, juez))
 
     with httpx.Client(base_url=args.base_url.rstrip("/"), timeout=120) as http:
-        resultados = [
-            evaluar_respuesta(e, *llamar(http, e), matriz, juez) for e in matriz.escenarios
-        ]
+        resultados = []
+        for i, e in enumerate(matriz.escenarios):
+            if i and args.pausa:
+                time.sleep(args.pausa)
+            resultados.append(evaluar_respuesta(e, *llamar(http, e), matriz, juez))
     informe = InformeEvaluacion(
         destino=args.base_url,
         resultados=resultados,

@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     azure_openai_api_version: str = "2024-10-21"
     azure_openai_chat_deployment: str = "gpt-4o"
     azure_openai_embedding_deployment: str = "text-embedding-ada-002"
+    # Con poca cuota (TPM) Azure responde 429 con Retry-After: el SDK espera ese tiempo y
+    # reintenta con backoff exponencial hasta este número de veces.
+    azure_openai_max_reintentos: int = 6
+    azure_openai_timeout_s: float = 60.0
     embedding_dimensions: int = 1536
 
     vector_store: Literal["qdrant", "azure_search"] = "qdrant"

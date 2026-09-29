@@ -23,6 +23,8 @@ def _cliente_base(settings: Settings) -> AzureOpenAI:
             azure_endpoint=settings.azure_openai_endpoint,
             api_key=settings.azure_openai_api_key.get_secret_value(),
             api_version=settings.azure_openai_api_version,
+            max_retries=settings.azure_openai_max_reintentos,
+            timeout=settings.azure_openai_timeout_s,
         )
     return AzureOpenAI(
         azure_endpoint=settings.azure_openai_endpoint,
@@ -30,6 +32,8 @@ def _cliente_base(settings: Settings) -> AzureOpenAI:
             DefaultAzureCredential(), _SCOPE_COGNITIVE
         ),
         api_version=settings.azure_openai_api_version,
+        max_retries=settings.azure_openai_max_reintentos,
+        timeout=settings.azure_openai_timeout_s,
     )
 
 

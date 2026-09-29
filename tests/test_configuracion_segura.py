@@ -55,3 +55,17 @@ def test_compose_no_contiene_contrasenas() -> None:
     """Regla 3: las credenciales vienen de .env, nunca escritas en el compose."""
     postgres = _compose()["services"]["postgres"]["environment"]
     assert postgres["POSTGRES_PASSWORD"].startswith("${POSTGRES_PASSWORD")
+
+
+def test_cliente_azure_openai_reintenta_429_con_backoff() -> None:
+    from app.config import Settings
+    from app.retrieval.azure_openai import _cliente_base
+
+    s = Settings(
+        azure_openai_endpoint="https://x.openai.azure.com/",
+        azure_openai_api_key="k",
+        azure_openai_max_reintentos=4,
+        azure_openai_timeout_s=30,
+    )
+    c = _cliente_base(s)
+    assert c.max_retries == 4 and c.timeout == 30
