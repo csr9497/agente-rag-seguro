@@ -144,9 +144,10 @@ resource "azurerm_container_app" "backend" {
         port      = 8000
       }
 
+      # /ready: base de datos y modelos configurados (/health solo indica que el proceso vive).
       readiness_probe {
         transport = "HTTP"
-        path      = "/health"
+        path      = "/ready"
         port      = 8000
       }
     }

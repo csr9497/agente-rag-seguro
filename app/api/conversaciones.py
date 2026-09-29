@@ -8,7 +8,12 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.api.dependencias import ServiciosDep, UsuarioDep
-from app.persistencia.modelos import Conversacion, Feedback, MensajeGuardado
+from app.persistencia.modelos import (
+    Conversacion,
+    Feedback,
+    MensajeGuardado,
+    ResumenConversacion,
+)
 from app.retrieval.no_configurado import ProveedorNoConfiguradoError
 
 router = APIRouter(prefix="/conversaciones", tags=["conversaciones"])
@@ -28,6 +33,14 @@ class NuevaPregunta(BaseModel):
 @router.post("", response_model=Conversacion, status_code=status.HTTP_201_CREATED)
 def iniciar(body: NuevaConversacion, usuario: UsuarioDep, servicios: ServiciosDep) -> Conversacion:
     return servicios.conversaciones.iniciar(usuario, body.rol_id)
+
+
+@router.get("", response_model=list[ResumenConversacion])
+def historial(
+    rol_id: str, usuario: UsuarioDep, servicios: ServiciosDep
+) -> list[ResumenConversacion]:
+    """Mis conversaciones con este rol (las más recientes primero)."""
+    return servicios.conversaciones.listar(usuario, rol_id)
 
 
 @router.get("/{conversacion_id}", response_model=Conversacion)

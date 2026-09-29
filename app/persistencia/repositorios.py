@@ -9,7 +9,18 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
-from sqlalchemy import Engine, create_engine, delete, event, insert, select, update
+from sqlalchemy import (
+    Engine,
+    create_engine,
+    delete,
+    event,
+    func,
+    insert,
+    inspect,
+    select,
+    text,
+    update,
+)
 from sqlalchemy.pool import StaticPool
 
 from app.persistencia import tablas as t
@@ -19,6 +30,7 @@ from app.persistencia.modelos import (
     EstadoDocumento,
     Feedback,
     MensajeGuardado,
+    ResumenConversacion,
     Rol,
 )
 
@@ -56,8 +68,11 @@ class RepositorioDocumentos(Protocol):
 
 
 class RepositorioConversaciones(Protocol):
-    def crear(self, rol_id: str) -> Conversacion: ...
+    def crear(self, rol_id: str, usuario_id: str | None = None) -> Conversacion: ...
     def obtener(self, conversacion_id: str) -> Conversacion | None: ...
+    def listar(
+        self, usuario_id: str, rol_id: str, limite: int = 20
+    ) -> list[ResumenConversacion]: ...
     def agregar_mensaje(
         self, conversacion_id: str, mensaje: MensajeGuardado
     ) -> MensajeGuardado: ...
@@ -110,9 +125,19 @@ ROLES_INICIALES = [
 ]
 
 
+def _migrar(motor: Engine) -> None:
+    """Migraciones aditivas e idempotentes para bases creadas con un esquema anterior
+    (create_all no altera tablas existentes)."""
+    columnas = {c["name"] for c in inspect(motor).get_columns("conversaciones")}
+    if "usuario_id" not in columnas:
+        with motor.begin() as c:
+            c.execute(text("ALTER TABLE conversaciones ADD COLUMN usuario_id VARCHAR(128)"))
+
+
 def inicializar(motor: Engine) -> None:
     """Crea las tablas y, si no hay roles, carga los iniciales."""
     t.metadata.create_all(motor)
+    _migrar(motor)
     from app.datos.catalogo import sembrar_datos_ejemplo
 
     sembrar_datos_ejemplo(motor)
@@ -228,11 +253,48 @@ class SqlRepositorioConversaciones:
     def __init__(self, motor: Engine) -> None:
         self._motor = motor
 
-    def crear(self, rol_id: str) -> Conversacion:
-        conv = Conversacion(id=str(uuid.uuid4()), rol_id=rol_id, creada_en=ahora())
+    def crear(self, rol_id: str, usuario_id: str | None = None) -> Conversacion:
+        conv = Conversacion(
+            id=str(uuid.uuid4()), rol_id=rol_id, creada_en=ahora(), usuario_id=usuario_id
+        )
         with self._motor.begin() as c:
-            c.execute(insert(t.conversaciones).values(**conv.model_dump(exclude={"mensajes"})))
+            c.execute(
+                insert(t.conversaciones).values(
+                    id=conv.id, rol_id=rol_id, creada_en=conv.creada_en, usuario_id=usuario_id
+                )
+            )
         return conv
+
+    def listar(self, usuario_id: str, rol_id: str, limite: int = 20) -> list[ResumenConversacion]:
+        """Conversaciones con al menos un mensaje, la más reciente primero."""
+        n = func.count(t.mensajes.c.id).label("n")
+        primero = func.min(t.mensajes.c.id).label("primero")
+        consulta = (
+            select(t.conversaciones.c.id, t.conversaciones.c.creada_en, n, primero)
+            .join(t.mensajes, t.mensajes.c.conversacion_id == t.conversaciones.c.id)
+            .where(t.conversaciones.c.usuario_id == usuario_id, t.conversaciones.c.rol_id == rol_id)
+            .group_by(t.conversaciones.c.id, t.conversaciones.c.creada_en)
+            .order_by(func.max(t.mensajes.c.id).desc())
+            .limit(limite)
+        )
+        with self._motor.connect() as c:
+            filas = c.execute(consulta).all()
+            ids = [f.primero for f in filas]
+            preguntas = dict(
+                c.execute(
+                    select(t.mensajes.c.id, t.mensajes.c.pregunta).where(t.mensajes.c.id.in_(ids))
+                ).all()
+            )
+        return [
+            ResumenConversacion(
+                id=f.id,
+                rol_id=rol_id,
+                creada_en=f.creada_en,
+                mensajes=f.n,
+                titulo=preguntas.get(f.primero, "")[:80],
+            )
+            for f in filas
+        ]
 
     def obtener(self, conversacion_id: str) -> Conversacion | None:
         with self._motor.connect() as c:

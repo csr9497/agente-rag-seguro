@@ -64,6 +64,8 @@ conversaciones = Table(
     Column("id", String(36), primary_key=True),
     Column("rol_id", ForeignKey("roles.id"), nullable=False),
     Column("creada_en", String(32), nullable=False),
+    # Propietario: solo esa persona ve la conversación (además de necesitar el rol).
+    Column("usuario_id", String(128), nullable=True, index=True),
 )
 
 mensajes = Table(

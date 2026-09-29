@@ -102,17 +102,20 @@ class Agente:
         conversacion_id: str | None = None,
         historial: list[Turno] | None = None,
     ) -> ResultadoAgente:
+        traza_id = uuid.uuid4()
         inicial = EstadoAgente(
             pregunta=pregunta,
             usuario=usuario,
             top_k=top_k or self._top_k,
             historial=historial or [],
+            traza_id=str(traza_id),
+            conversacion_id=conversacion_id,
         )
         with traza_consulta(
             self._trazas, self._settings, roles=usuario.groups, conversacion_id=conversacion_id
         ) as config:
             config["metadata"]["usuario"] = usuario_seudonimo(usuario.id)
-            config["run_id"] = traza_id = uuid.uuid4()
+            config["run_id"] = traza_id
             final = EstadoAgente.model_validate(self.grafo.invoke(inicial, config=config))
         consultados = _documentos_consultados(final)
         return ResultadoAgente(
@@ -359,7 +362,14 @@ class Agente:
 
     def _audit(self, estado: EstadoAgente) -> Update:
         registrar_consulta(
-            estado.usuario, estado.pregunta, _requerir_respuesta(estado), estado.hallazgos
+            estado.usuario,
+            estado.pregunta,
+            _requerir_respuesta(estado),
+            estado.hallazgos,
+            traza_id=estado.traza_id,
+            conversacion_id=estado.conversacion_id,
+            documentos_consultados=_documentos_consultados(estado),
+            desde_cache=estado.desde_cache,
         )
         return {}
 

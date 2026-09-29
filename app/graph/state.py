@@ -25,6 +25,9 @@ class EstadoAgente(BaseModel):
     pregunta: str  # tras input_guardrail: versión saneada (PII enmascarada)
     usuario: Usuario
     top_k: int
+    # Correlación de la auditoría con la traza de LangSmith y la conversación.
+    traza_id: str | None = None
+    conversacion_id: str | None = None
     # Turnos previos de la misma conversación (mismo rol); solo para resolver referencias.
     historial: list[Turno] = Field(default_factory=list)
 

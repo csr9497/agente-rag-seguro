@@ -379,3 +379,89 @@ def test_conversacion_nueva_sin_historial(client, servicios) -> None:
     conv = client.post("/conversaciones", json={"rol_id": "public"}).json()["id"]
     client.post(f"/conversaciones/{conv}/mensajes", json={"pregunta": "Hola"})
     assert capturado["historial"] == []
+
+
+# ------------------------------------------------------------ propiedad e historial
+def _como(usuario: str) -> None:
+    app.dependency_overrides[get_settings] = lambda: _settings(default_user=usuario)
+
+
+def test_otra_persona_con_el_mismo_rol_no_ve_mi_conversacion(client) -> None:
+    conv = client.post("/conversaciones", json={"rol_id": "public"}).json()
+    client.post(f"/conversaciones/{conv['id']}/mensajes", json={"pregunta": "hola"})
+    _como("otra-persona")
+    assert client.get(f"/conversaciones/{conv['id']}").status_code == 404
+    r = client.post(f"/conversaciones/{conv['id']}/mensajes", json={"pregunta": "hola"})
+    assert r.status_code == 404
+    assert client.get("/conversaciones", params={"rol_id": "public"}).json() == []
+
+
+def test_historial_lista_solo_mis_conversaciones_del_rol(client) -> None:
+    a = client.post("/conversaciones", json={"rol_id": "public"}).json()
+    client.post(f"/conversaciones/{a['id']}/mensajes", json={"pregunta": "Vacaciones"})
+    client.post(f"/conversaciones/{a['id']}/mensajes", json={"pregunta": "Y teletrabajo"})
+    client.post("/conversaciones", json={"rol_id": "public"})  # vacía: no aparece
+    otra_rol = client.post("/conversaciones", json={"rol_id": "rrhh"}).json()
+    client.post(f"/conversaciones/{otra_rol['id']}/mensajes", json={"pregunta": "Nóminas"})
+    _como("otra-persona")
+    ajena = client.post("/conversaciones", json={"rol_id": "public"}).json()
+    client.post(f"/conversaciones/{ajena['id']}/mensajes", json={"pregunta": "Ajena"})
+    _como("anonimo")
+
+    [resumen] = client.get("/conversaciones", params={"rol_id": "public"}).json()
+    assert resumen["id"] == a["id"] and resumen["mensajes"] == 2
+    assert resumen["titulo"] == "Vacaciones"
+
+
+def test_historial_con_rol_no_disponible(client) -> None:
+    assert client.get("/conversaciones", params={"rol_id": "fantasma"}).status_code == 403
+
+
+def test_migracion_anade_propietario_a_bases_existentes(tmp_path) -> None:
+    from sqlalchemy import create_engine, inspect, text
+
+    from app.persistencia.repositorios import inicializar
+
+    motor = create_engine(f"sqlite:///{tmp_path / 'vieja.db'}")
+    with motor.begin() as c:  # esquema anterior, sin usuario_id
+        c.execute(text("create table conversaciones (id varchar(36) primary key, "
+                       "rol_id varchar(64) not null, creada_en varchar(32) not null)"))  # fmt: skip
+        c.execute(text("insert into conversaciones values ('c1', 'public', '2026-01-01')"))
+    inicializar(motor)
+    inicializar(motor)  # idempotente
+    columnas = {c["name"] for c in inspect(motor).get_columns("conversaciones")}
+    assert "usuario_id" in columnas
+
+
+# ------------------------------------------------------------------ readiness
+def test_ready_sin_modelos_configurados_no_esta_listo(client) -> None:
+    r = client.get("/ready")
+    assert r.status_code == 503
+    cuerpo = r.json()
+    assert cuerpo["checks"]["base_de_datos"]["ok"] and not cuerpo["checks"]["modelos"]["ok"]
+
+
+def test_ready_con_modelos_y_base_de_datos(client) -> None:
+    app.dependency_overrides[get_settings] = lambda: _settings(
+        azure_openai_endpoint="https://x.openai.azure.com/"
+    )
+    r = client.get("/ready")
+    assert r.status_code == 200 and r.json()["status"] == "ok"
+    assert set(r.json()["checks"]) == {"base_de_datos", "modelos", "indice"}
+
+
+def test_ready_con_la_base_de_datos_caida(client, servicios, monkeypatch) -> None:
+    app.dependency_overrides[get_settings] = lambda: _settings(
+        azure_openai_endpoint="https://x.openai.azure.com/"
+    )
+
+    def caida(*_a, **_k):
+        raise RuntimeError("conexión rechazada")
+
+    monkeypatch.setattr(servicios.repo_roles, "listar", caida)
+    r = client.get("/ready")
+    assert r.status_code == 503 and "RuntimeError" in r.json()["checks"]["base_de_datos"]["detalle"]
+
+
+def test_health_no_depende_de_nada(client) -> None:
+    assert client.get("/health").json() == {"status": "ok"}

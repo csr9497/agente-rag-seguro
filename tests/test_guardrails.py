@@ -152,3 +152,14 @@ def test_grafo_bloquea_fuga_del_prompt_en_la_respuesta(agente_real, caplog) -> N
         r = agente_real(llm=llm).consultar("vacaciones", PUBLIC)
     assert r.respuesta == MENSAJE_BLOQUEO and r.citas == []
     assert _auditoria(caplog)["hallazgos"][0]["tipo"] == "fuga_prompt"
+
+
+def test_auditoria_correlacionable_con_langsmith(agente_real, caplog) -> None:
+    with caplog.at_level(logging.INFO, logger="audit"):
+        r = agente_real().consultar_detallado(
+            "¿Días de vacaciones?", PUBLIC, conversacion_id="conv-1"
+        )
+    audit = _auditoria(caplog)
+    assert audit["traza_id"] == r.traza_id and audit["conversacion_id"] == "conv-1"
+    assert audit["fecha"].endswith("+00:00") and audit["desde_cache"] is False
+    assert audit["documentos_consultados"] == r.documentos_consultados

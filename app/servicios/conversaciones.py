@@ -5,7 +5,12 @@ import logging
 
 from app.graph.agente import Agente
 from app.models.schemas import Turno, Usuario
-from app.persistencia.modelos import Conversacion, Feedback, MensajeGuardado
+from app.persistencia.modelos import (
+    Conversacion,
+    Feedback,
+    MensajeGuardado,
+    ResumenConversacion,
+)
 from app.persistencia.repositorios import RepositorioConversaciones
 from app.security.deteccion import TIPOS_PII, enmascarar_pii
 from app.servicios.errores import NoEncontradoError, PermisoDenegadoError
@@ -29,11 +34,17 @@ class ServicioConversaciones:
 
     def iniciar(self, usuario: Usuario, rol_id: str) -> Conversacion:
         rol = self._roles.actuar_como(usuario, rol_id)
-        return self._repo.crear(rol.id)
+        return self._repo.crear(rol.id, usuario.id)
+
+    def listar(self, usuario: Usuario, rol_id: str) -> list[ResumenConversacion]:
+        """Historial propio con un rol que el usuario puede usar ahora."""
+        rol = self._roles.actuar_como(usuario, rol_id)
+        return self._repo.listar(usuario.id, rol.id)
 
     def obtener(self, usuario: Usuario, conversacion_id: str) -> Conversacion:
         conv = self._repo.obtener(conversacion_id)
-        if conv is None:
+        # Ajena (otra persona, aunque tenga el mismo rol): igual que inexistente.
+        if conv is None or (conv.usuario_id is not None and conv.usuario_id != usuario.id):
             raise NoEncontradoError("Conversación no encontrada")
         try:
             self._roles.actuar_como(usuario, conv.rol_id)

@@ -71,6 +71,37 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+def _comprobar(fn) -> dict[str, object]:  # noqa: ANN001
+    try:
+        return {"ok": True, "detalle": fn() or ""}
+    except Exception as exc:  # noqa: BLE001 — la sonda informa, no propaga
+        return {"ok": False, "detalle": f"{type(exc).__name__}: {str(exc)[:200]}"}
+
+
+@app.get("/ready")
+def ready(request: Request, settings: Annotated[Settings, Depends(get_settings)]) -> JSONResponse:
+    """Readiness: 503 si no se pueden atender consultas (sin base de datos o sin modelos). El
+    índice se informa pero no bloquea: un despliegue nuevo aún no lo tiene hasta la primera
+    subida. /health es la sonda de vida (el proceso responde)."""
+    servicios = request.app.state.servicios
+
+    def modelos() -> str:
+        if not settings.azure_openai_endpoint:
+            raise ProveedorNoConfiguradoError("falta AZURE_OPENAI_ENDPOINT")
+        return settings.azure_openai_chat_deployment
+
+    checks = {
+        "base_de_datos": _comprobar(lambda: f"{len(servicios.repo_roles.listar())} roles"),
+        "modelos": _comprobar(modelos),
+        "indice": _comprobar(lambda: servicios.retriever.document_hash("__ready__") or "accesible"),
+    }
+    listo = checks["base_de_datos"]["ok"] and checks["modelos"]["ok"]
+    return JSONResponse(
+        {"status": "ok" if listo else "no_listo", "checks": checks},
+        status_code=200 if listo else 503,
+    )
+
+
 @app.post("/consultar", response_model=RespuestaConsulta)
 def consultar(
     body: ConsultaRequest,

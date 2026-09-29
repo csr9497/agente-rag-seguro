@@ -77,4 +77,15 @@ class Conversacion(BaseModel):
     id: str
     rol_id: str
     creada_en: str
+    usuario_id: str | None = Field(default=None, exclude=True)  # no se expone en la API
     mensajes: list[MensajeGuardado] = Field(default_factory=list)
+
+
+class ResumenConversacion(BaseModel):
+    """Entrada del historial: sin respuestas ni fragmentos."""
+
+    id: str
+    rol_id: str
+    creada_en: str
+    mensajes: int
+    titulo: str = Field(description="Primera pregunta (PII enmascarada), recortada")

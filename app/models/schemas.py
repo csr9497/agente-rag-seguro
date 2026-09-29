@@ -90,12 +90,17 @@ class Hallazgo(BaseModel):
 
 
 class RegistroAuditoria(BaseModel):
+    fecha: str = Field(description="UTC, ISO 8601")
+    traza_id: str | None = Field(default=None, description="run_id en LangSmith (correlación)")
+    conversacion_id: str | None = None
     usuario: str
     grupos: list[str]
     pregunta: str = Field(description="Tal como la procesó el agente (PII enmascarada)")
     fuentes: list[str]
     respuesta: str
     sin_contexto: bool
+    documentos_consultados: list[str] = Field(default_factory=list)
+    desde_cache: bool = False
     hallazgos: list[Hallazgo] = Field(default_factory=list)
 
 

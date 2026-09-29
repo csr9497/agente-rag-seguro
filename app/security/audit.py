@@ -2,6 +2,7 @@
 En la fase de PostgreSQL se persistirá en tabla."""
 
 import logging
+from datetime import UTC, datetime
 
 from app.models.schemas import Hallazgo, RegistroAuditoria, RespuestaConsulta, Usuario
 
@@ -13,14 +14,24 @@ def registrar_consulta(
     pregunta: str,
     respuesta: RespuestaConsulta,
     hallazgos: list[Hallazgo] | None = None,
+    *,
+    traza_id: str | None = None,
+    conversacion_id: str | None = None,
+    documentos_consultados: list[str] | None = None,
+    desde_cache: bool = False,
 ) -> None:
     registro = RegistroAuditoria(
+        fecha=datetime.now(UTC).isoformat(timespec="seconds"),
+        traza_id=traza_id,
+        conversacion_id=conversacion_id,
         usuario=usuario.id,
         grupos=usuario.groups,
         pregunta=pregunta,
         fuentes=sorted({c.chunk_id for c in respuesta.citas}),
         respuesta=respuesta.respuesta,
         sin_contexto=respuesta.sin_contexto,
+        documentos_consultados=documentos_consultados or [],
+        desde_cache=desde_cache,
         hallazgos=hallazgos or [],
     )
     logger.info(registro.model_dump_json())
