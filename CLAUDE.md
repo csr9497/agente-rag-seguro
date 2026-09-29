@@ -83,7 +83,7 @@ El agente es un grafo LangGraph:
 **Local completo; pendiente despliegue en Azure.** Hecho: agente LangGraph con roles y
 permisos gestionados desde la UI, access_guardrail contra el registro, integridad
 índice↔registro, guardrails, caché semántica con permisos (memoria/Redis), memoria de
-conversación, feedback, data_query, acciones con aprobación humana, Entra ID (JWT), trazas
+conversación, feedback, Prompt Shields (Content Safety), data_query, acciones con aprobación humana, Entra ID (JWT), trazas
 LangSmith, evaluaciones por capas y CI (GitHub Actions). Terraform listo (`alcance`,
 `vector_store`, Managed Redis, PostgreSQL) pero **no aplicado**: no tocar Azure sin indicación
 explícita del usuario. El deploy de CI está desactivado hasta `DEPLOY_AZURE=true`.

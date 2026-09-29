@@ -8,7 +8,7 @@ auditoría, trazas en LangSmith y evaluaciones por capas. Reglas del proyecto en
 
 | | |
 |---|---|
-| Estado | Funcional en local (330 tests). Terraform para Azure listo y probado con mocks, **sin aplicar** |
+| Estado | Funcional en local (351 tests). Terraform para Azure listo y probado con mocks, **sin aplicar** |
 | Stack | Python 3.12 · LangGraph · FastAPI · Azure OpenAI · AI Search / Qdrant · SQLite / PostgreSQL · Redis · Terraform · GitHub Actions |
 | Pendiente | Primer despliegue en Azure (etapa A: modelos + Storage + AI Search) y respuestas reales del LLM |
 
@@ -40,7 +40,7 @@ authorize / input_guardrail ──(sin rol / bloqueada)────────�
 | Nodo | Qué hace |
 |---|---|
 | `authorize` | Deny by default: sin rol no hay contexto |
-| `input_guardrail` | Bloquea inyección de prompt y texto oculto; enmascara PII (email, teléfono, IBAN, tarjeta con Luhn, DNI/NIE) |
+| `input_guardrail` | Bloquea inyección de prompt y texto oculto; enmascara PII (email, teléfono, IBAN, tarjeta con Luhn, DNI/NIE). Con `CONTENT_SAFETY_ENDPOINT`, además **Prompt Shields** sobre el texto ya enmascarado |
 | `cache_lookup` / `cache_store` | Caché semántica; clave = rol + huella de sus documentos visibles + modelo/versión |
 | `supervisor` | gpt-4o con tool-calling; decide qué tools usar (hasta 3 iteraciones) |
 | `tools` | Ejecuta las tools (abajo); los roles salen del estado, nunca de los argumentos del LLM |
@@ -76,7 +76,11 @@ Además:
   lo inconsistente y reactivación automática.
 - **Ingesta segura** ([ingestor/validacion.py](ingestor/validacion.py)): solo `.md`/`.txt`
   UTF-8 ≤ 1 MB, sin symlinks ni rutas ocultas; rechaza texto invisible e instrucciones
-  dirigidas al modelo (también dentro de comentarios HTML).
+  dirigidas al modelo (también dentro de comentarios HTML) y, con Content Safety, ataques
+  indirectos detectados por Prompt Shields.
+- **Prompt Shields** ([app/security/content_safety.py](app/security/content_safety.py)): se suma
+  a las heurísticas locales, no las sustituye. Sin claves (Managed Identity). Si el servicio
+  falla, `CONTENT_SAFETY_FALLO=cerrado` (defecto) bloquea; `abierto` deja pasar y lo audita.
 - **Prompts delimitados**: `<historial>`, `<contexto>` con `<fragmento>` y `<pregunta>`;
   cualquier intento de cerrar esas etiquetas desde un documento se neutraliza.
 - **Caché con permisos** (regla 2): nunca se sirve a otro rol; subir, borrar o poner en
@@ -147,12 +151,12 @@ Key Vault) y `make ingest`.
 
 | Nivel | Comando | Qué cubre |
 |---|---|---|
-| Unitarios | `make test` | 327 tests: permisos, guardrails, tools, caché, Entra ID, API, persistencia |
+| Unitarios | `make test` | 348 tests: permisos, guardrails, Prompt Shields, tools, caché, Entra ID, API, persistencia |
 | PostgreSQL | `make test-postgres` | 3 tests: repositorios y flujo completo contra PostgreSQL 16 |
 | Matriz de integración | `make integration BASE_URL=…` | 28 escenarios por HTTP (incl. caché entre roles) ([escenarios.yaml](tests/integration/escenarios.yaml)); canarios entre roles; cobertura por capacidad con `make matriz` |
 | Evaluaciones por capas | `make evals BASE_URL=…` (`JUEZ=1` con gpt-4o) | Contrato, seguridad, recuperación (recall, MRR), juez LLM; umbrales bloqueantes ([evals/](evals/)) |
 | LangSmith | `make evals-langsmith BASE_URL=…` | Dataset `matriz-escenarios` + experimento |
-| Terraform | `make tf-validate` | fmt, validate y 9 tests de flags con providers simulados |
+| Terraform | `make tf-validate` | fmt, validate y 11 tests de flags con providers simulados |
 
 Umbrales bloqueantes: contrato 100 %, **cero fugas entre roles**, inyección contenida 100 %,
 recall medio ≥ 0,8 y (con juez) fidelidad media ≥ 4.
@@ -181,6 +185,7 @@ Terraform en dos stacks ([infra/](infra/)) con flags:
 | `alcance` | `modelos` · `completo` | Etapa A (OpenAI, Storage, Key Vault, vector store; app en local) · etapa B (+ VNet, ACR, Container Apps, PostgreSQL, Managed Redis) |
 | `vector_store` | `azure_search` · `qdrant` | AI Search (`search_sku`: free/basic) o Qdrant (`qdrant_modo`: local, cloud, container_efimero) |
 | `search_auth` | `api_key` · `rbac` | Clave en Key Vault (dev con Docker) o Managed Identity |
+| `content_safety` | bool | Azure AI Content Safety (Prompt Shields), sin claves; `true` por defecto |
 | `cache_redis` | bool | Azure Managed Redis (Azure Cache for Redis no admite altas desde el 1-oct-2026) |
 
 ```bash
