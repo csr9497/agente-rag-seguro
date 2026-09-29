@@ -20,8 +20,8 @@ def _rag(consulta: str) -> tuple[str, str]:
 def test_grafo_tiene_los_nodos_del_diseno(agente) -> None:
     nodos = set(agente.grafo.get_graph().nodes)
     assert {
-        "authorize", "input_guardrail", "supervisor", "tools", "access_guardrail",
-        "generate", "output_guardrail", "audit",
+        "authorize", "input_guardrail", "cache_lookup", "supervisor", "tools", "access_guardrail",
+        "generate", "output_guardrail", "cache_store", "audit",
     } <= nodos  # fmt: skip
 
 

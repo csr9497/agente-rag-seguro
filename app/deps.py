@@ -1,11 +1,13 @@
 """Composición de dependencias según configuración."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from azure.identity import DefaultAzureCredential
 from qdrant_client import QdrantClient
 
+from app.cache.semantica import CacheMemoria, CacheSemantica, alcance_de_permisos
 from app.config import Settings
 from app.graph.agente import Agente
 from app.graph.prompts import SUPERVISOR_PROMPT
@@ -121,7 +123,17 @@ def build_servicios(
     inicializar(motor)
     repo_roles = SqlRepositorioRoles(motor)
     registro = SqlRepositorioDocumentos(motor)
-    agente = _agente(settings, embedder, llm, supervisor, retriever, registro)
+    cache, alcance = None, None
+    if settings.cache_semantica:
+        version = f"{settings.azure_openai_chat_deployment}:{settings.app_version}"
+        cache = CacheMemoria(umbral=settings.cache_umbral)
+
+        def alcance(roles: list[str]) -> str:
+            return alcance_de_permisos(registro, roles, version)
+
+    agente = _agente(
+        settings, embedder, llm, supervisor, retriever, registro, cache=cache, alcance_cache=alcance
+    )
     roles = ServicioRoles(repo_roles, settings.seleccion_libre_de_rol)
     return Servicios(
         agente=agente,
@@ -155,6 +167,8 @@ def _agente(
     supervisor: Supervisor,
     retriever: Retriever,
     registro: RepositorioDocumentos | None = None,
+    cache: CacheSemantica | None = None,
+    alcance_cache: Callable[[list[str]], str] | None = None,
 ) -> Agente:
     return Agente(
         trazas=configurar_trazas(settings),
@@ -173,4 +187,7 @@ def _agente(
         max_iteraciones=settings.max_iteraciones,
         max_contexto=settings.max_fragmentos_contexto,
         verificador=VerificadorRegistro(registro) if registro else None,
+        cache=cache,
+        embedder_cache=embedder if cache is not None else None,
+        alcance_cache=alcance_cache,
     )

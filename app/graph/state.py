@@ -43,5 +43,10 @@ class EstadoAgente(BaseModel):
     # Hallazgos de los guardrails de entrada y salida (van a la auditoría).
     hallazgos: list[Hallazgo] = Field(default_factory=list)
 
+    # Caché semántica: embedding de la pregunta y, si hubo acierto, lo recuperado de la caché.
+    vector_pregunta: list[float] | None = None
+    desde_cache: bool = False
+    documentos_cache: list[str] = Field(default_factory=list)
+
     # Se fija al generar o al cortar el flujo (sin permisos, guardrail).
     respuesta: RespuestaConsulta | None = None

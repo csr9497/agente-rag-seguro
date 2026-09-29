@@ -60,6 +60,7 @@ class ServicioConversaciones:
             fragmentos_descartados=resultado.fragmentos_descartados,
             hallazgos=resultado.hallazgos,
             traza_id=resultado.traza_id,
+            desde_cache=resultado.desde_cache,
         )
         return self._repo.agregar_mensaje(conv.id, mensaje)
 

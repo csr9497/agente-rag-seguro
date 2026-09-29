@@ -32,6 +32,11 @@ authorize → input_guardrail → supervisor ⇄ tools → generate → output_g
   Un documento ajeno y uno inexistente reciben la misma respuesta (no se revela qué existe).
   El contexto acumulado tiene un tope (`MAX_FRAGMENTOS_CONTEXTO`, 12 por defecto).
 - **generate**: respuesta con citas `[n]` y salida estructurada; sin contexto, no llama al LLM.
+- **caché semántica** ([app/cache/semantica.py](app/cache/semantica.py)): antes del
+  supervisor. La clave incluye el rol y una huella de los documentos visibles para ese rol
+  (ids, hashes, estados) más modelo/versión: nunca se sirve a otro rol y cualquier cambio de
+  documentos la invalida. No se usa con historial ni para consultas bloqueadas; los aciertos
+  pasan igualmente por el guardrail de salida y la auditoría.
 - **guardrails** ([app/security/guardrails.py](app/security/guardrails.py)): devuelven un
   `Veredicto` estructurado (permitido, texto saneado, hallazgos con tipo/detalle/acción).
   - entrada: bloquea inyección de prompt y texto oculto; enmascara PII (email, teléfono,

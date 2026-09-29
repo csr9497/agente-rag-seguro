@@ -121,8 +121,13 @@ capacidades:
     descripcion: Azure AI Content Safety (Prompt Shields) detrás de la interfaz de guardrails
     fase: 4
   cache_semantica:
-    descripcion: Caché con clave que incluye el scope de permisos
-    fase: 5
+    descripcion: Caché semántica; clave = rol + huella de documentos visibles + versión
+    fase: 3
+    tests_unitarios:
+      - tests/test_cache.py::test_nunca_se_sirve_a_otro_rol
+      - tests/test_cache.py::test_nuevo_documento_invalida
+      - tests/test_cache.py::test_cuarentena_invalida
+      - tests/test_cache.py::test_un_acierto_pasa_por_el_guardrail_de_salida
 
 escenarios:
   # --- Respuesta citada ---------------------------------------------------------------

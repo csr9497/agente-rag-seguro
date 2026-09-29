@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     max_iteraciones: int = 3
     max_fragmentos_contexto: int = 12
     max_turnos_historial: int = 3
+    # Caché semántica con permisos (clave = roles + huella de documentos visibles + versión).
+    cache_semantica: bool = True
+    cache_umbral: float = 0.95
 
     # Observabilidad (LangSmith). Ver app/observabilidad.py.
     entorno: Literal["local", "dev", "prod"] = "local"

@@ -29,6 +29,7 @@ _CAMPOS_DATOS = {
     "hallazgos",
     "traza_id",
     "feedback",
+    "desde_cache",
 }
 
 

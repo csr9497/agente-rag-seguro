@@ -268,7 +268,9 @@ function pintarRespuesta(m, i) {
       el("span", { class: "source-name" }, tituloDoc(c.doc_id), " ", el("span", { class: "mono hint" }, c.doc_id)),
       el("span", { class: "source-frag" }, c.fragmento))));
   return el("article", { class: "msg-bot", "aria-label": `Respuesta de las ${hora(m.creado_en)}` },
-    el("div", { class: "msg-meta" }, `Asistente · ${hora(m.creado_en)}`), answer, fuentes, consultados(m), feedback(m));
+    el("div", { class: "msg-meta" }, `Asistente · ${hora(m.creado_en)}`,
+      m.desde_cache ? el("span", { class: "badge", title: "Respuesta reutilizada: mismos documentos visibles para tu rol" }, " desde caché") : null),
+    answer, fuentes, consultados(m), feedback(m));
 }
 
 async function preguntar(texto) {

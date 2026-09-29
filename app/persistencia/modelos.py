@@ -66,6 +66,7 @@ class MensajeGuardado(BaseModel):
     fragmentos_descartados: int = 0
     hallazgos: list[Hallazgo] = Field(default_factory=list)
     traza_id: str | None = Field(default=None, description="run_id de la ejecución (LangSmith)")
+    desde_cache: bool = False
     feedback: Feedback | None = None
     creado_en: str = ""
 

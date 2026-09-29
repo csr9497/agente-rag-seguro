@@ -84,7 +84,11 @@ def test_topologia_muestra_el_grafo(client) -> None:
         "tools --> access_guardrail",
         "access_guardrail --> supervisor",
         "supervisor -.-> generate",
-        "output_guardrail --> audit",
+        "input_guardrail -.-> cache_lookup",
+        "cache_lookup -.-> supervisor",
+        "cache_lookup -.-> output_guardrail",
+        "output_guardrail --> cache_store",
+        "cache_store --> audit",
     ]:
         assert arista in mmd
     assert 'class="mermaid"' in client.get("/grafo").text
