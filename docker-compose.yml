@@ -48,7 +48,9 @@ services:
       # Sin az login en el contenedor: solo guardrails locales (Prompt Shields, fuera de Docker).
       CONTENT_SAFETY_ENDPOINT: ""
     volumes:
-      - app_data:/data
+      # Carpeta del proyecto (no volumen): LangGraph Studio (`make studio`, en el host) usa la
+      # misma base de datos y registro de permisos que la app.
+      - ./data:/data
     ports:
       # Solo este equipo: con IDENTIDAD_DEBUG la cabecera X-Usuario-Grupos elige los grupos.
       - "127.0.0.1:8000:8000"
@@ -81,5 +83,4 @@ services:
 
 volumes:
   qdrant_data:
-  app_data:
   postgres_data:

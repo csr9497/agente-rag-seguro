@@ -118,6 +118,13 @@ make down
 | Topología del grafo | http://localhost:8000/grafo |
 | LangGraph Studio (`make studio`, en Chrome) | https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024 |
 
+**LangGraph Studio.** `make studio` arranca el grafo en `127.0.0.1:2024` con la misma
+configuración, base de datos (`data/`, compartida con Docker) y registro de permisos que la
+app. Ábrelo en **Chrome o Edge** (Safari bloquea que una web https llame a `http://127.0.0.1`;
+alternativa: `uv run langgraph dev --tunnel`). Entrada de ejemplo:
+`{"pregunta": "¿Puedo aceptar un regalo?", "usuario": {"id": "studio", "groups": ["public"]}, "top_k": 4}`
+(`groups` es el rol de la conversación: prueba `public`, `rrhh` o `finanzas`).
+
 Sin Azure OpenAI configurado la app arranca y responde **503** en lo que necesita el LLM; los
 permisos, guardrails de entrada, roles, subida (validación) y auditoría funcionan. Para
 respuestas reales: `make env-from-azure` tras desplegar la etapa A (rellena `.env` desde
