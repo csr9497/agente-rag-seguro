@@ -6,9 +6,11 @@ from pathlib import Path
 
 from azure.identity import DefaultAzureCredential
 from qdrant_client import QdrantClient
+from sqlalchemy import Engine
 
 from app.cache.semantica import CacheMemoria, CacheSemantica, alcance_de_permisos
 from app.config import Settings
+from app.datos.catalogo import permisos_por_consulta
 from app.graph.agente import Agente
 from app.graph.prompts import SUPERVISOR_PROMPT
 from app.observabilidad import configurar_trazas
@@ -36,6 +38,7 @@ from app.security.guardrails import GuardrailEntrada, GuardrailSalida
 from app.servicios.conversaciones import ServicioConversaciones
 from app.servicios.integridad import InformeIntegridad, verificar_integridad
 from app.servicios.roles import ServicioRoles
+from app.tools.datos import DataQuery
 from app.tools.documentos import BuscarEnDocumento, LeerDocumento, ListarDocumentos
 from app.tools.rag_retrieve import RagRetrieve
 from ingestor.gestor import GestorDocumentos
@@ -132,8 +135,9 @@ def build_servicios(
             return alcance_de_permisos(registro, roles, version)
 
     agente = _agente(
-        settings, embedder, llm, supervisor, retriever, registro, cache=cache, alcance_cache=alcance
-    )
+        settings, embedder, llm, supervisor, retriever, registro,
+        cache=cache, alcance_cache=alcance, motor=motor,
+    )  # fmt: skip
     roles = ServicioRoles(repo_roles, settings.seleccion_libre_de_rol)
     return Servicios(
         agente=agente,
@@ -169,6 +173,7 @@ def _agente(
     registro: RepositorioDocumentos | None = None,
     cache: CacheSemantica | None = None,
     alcance_cache: Callable[[list[str]], str] | None = None,
+    motor: Engine | None = None,
 ) -> Agente:
     return Agente(
         trazas=configurar_trazas(settings),
@@ -180,13 +185,14 @@ def _agente(
             ListarDocumentos(retriever, registro),
             BuscarEnDocumento(embedder, retriever),
             LeerDocumento(retriever),
+            *([DataQuery(motor)] if motor is not None else []),
         ],
         guardrail_entrada=GuardrailEntrada(),
         guardrail_salida=GuardrailSalida([SYSTEM_PROMPT, SUPERVISOR_PROMPT]),
         top_k=settings.retrieval_top_k,
         max_iteraciones=settings.max_iteraciones,
         max_contexto=settings.max_fragmentos_contexto,
-        verificador=VerificadorRegistro(registro) if registro else None,
+        verificador=VerificadorRegistro(registro, permisos_por_consulta()) if registro else None,
         cache=cache,
         embedder_cache=embedder if cache is not None else None,
         alcance_cache=alcance_cache,

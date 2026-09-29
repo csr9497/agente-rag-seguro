@@ -82,3 +82,35 @@ mensajes = Table(
     Column("datos", JSON, nullable=False),  # citas, consultados, descartados, hallazgos
     Column("creado_en", String(32), nullable=False),
 )
+
+# ------------------------------------------------------------------ datos internos (data_query)
+festivos = Table(
+    "festivos",
+    metadata,
+    Column("fecha", String(10), primary_key=True),
+    Column("nombre", String(120), nullable=False),
+)
+
+departamentos = Table(
+    "departamentos",
+    metadata,
+    Column("id", String(40), primary_key=True),
+    Column("nombre", String(120), nullable=False),
+    Column("plantilla", Integer, nullable=False),
+    Column("presupuesto_formacion_eur", Integer, nullable=False),
+)
+
+# ------------------------------------------------------------------ acciones (action_tool)
+acciones = Table(
+    "acciones",
+    metadata,
+    Column("id", String(36), primary_key=True),
+    Column("tipo", String(40), nullable=False),
+    Column("rol_id", ForeignKey("roles.id"), nullable=False),
+    Column("usuario", String(120), nullable=False),
+    Column("datos", JSON, nullable=False),
+    Column("estado", String(16), nullable=False),  # pendiente | ejecutada | rechazada | error
+    Column("resultado", Text),
+    Column("creada_en", String(32), nullable=False),
+    Column("decidida_en", String(32)),
+)

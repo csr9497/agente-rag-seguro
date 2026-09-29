@@ -112,6 +112,9 @@ ROLES_INICIALES = [
 def inicializar(motor: Engine) -> None:
     """Crea las tablas y, si no hay roles, carga los iniciales."""
     t.metadata.create_all(motor)
+    from app.datos.catalogo import sembrar_datos_ejemplo
+
+    sembrar_datos_ejemplo(motor)
     roles = SqlRepositorioRoles(motor)
     if not roles.listar():
         # Primero todos los roles (sin relaciones) para que publica_para no rompa las FK.

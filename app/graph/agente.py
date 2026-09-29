@@ -24,7 +24,7 @@ from app.observabilidad import traza_consulta, usuario_seudonimo
 from app.rag.generacion import generar_respuesta, respuesta_sin_contexto
 from app.rag.prompts import build_historial, neutralizar
 from app.retrieval.base import LLM, Embedder, Supervisor
-from app.security.acceso import VerificadorAcceso, VerificadorPermisivo
+from app.security.acceso import PREFIJO_DATOS, VerificadorAcceso, VerificadorPermisivo
 from app.security.audit import registrar_consulta
 from app.security.guardrails import MENSAJE_BLOQUEO, Guardrail
 from app.tools.base import SIN_ACCESO, Herramienta, ResultadoHerramienta, schema_openai
@@ -303,10 +303,13 @@ class Agente:
 
     def _cache_store(self, estado: EstadoAgente) -> Update:
         bloqueada = any(h.accion == "bloquear" for h in estado.hallazgos)
+        # Los datos internos no forman parte de la huella de la caché: no se cachean.
+        usa_datos = any(r.chunk.doc_id.startswith(PREFIJO_DATOS) for r in estado.recuperados)
         if (
             not self._cachear(estado)
             or estado.desde_cache
             or bloqueada
+            or usa_datos
             or not estado.vector_pregunta
         ):
             return {}

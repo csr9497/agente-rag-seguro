@@ -12,6 +12,7 @@ from app.persistencia.modelos import DocumentoRegistrado
 from app.persistencia.repositorios import RepositorioDocumentos
 
 DOC_CATALOGO = "catalogo"
+PREFIJO_DATOS = "datos:"
 
 
 class VerificadorAcceso(Protocol):
@@ -28,14 +29,22 @@ class VerificadorPermisivo:
 
 
 class VerificadorRegistro:
-    def __init__(self, registro: RepositorioDocumentos) -> None:
+    def __init__(
+        self, registro: RepositorioDocumentos, permisos_datos: dict[str, list[str]] | None = None
+    ) -> None:
         self._registro = registro
+        self._permisos_datos = permisos_datos or {}
 
     def motivo_rechazo(self, chunk: Chunk, roles_usuario: list[str]) -> str | None:
         roles = set(roles_usuario)
         if chunk.doc_id == DOC_CATALOGO:
             # Sintético, construido desde el registro con los roles del propio usuario.
             return None if set(chunk.acl_groups) <= roles else "rol_no_autorizado_indice"
+        if chunk.doc_id.startswith(PREFIJO_DATOS):
+            # Resultado de data_query: se contrasta con el catálogo, no con el índice.
+            autorizados = set(self._permisos_datos.get(chunk.doc_id, []))
+            ok = roles & autorizados and set(chunk.acl_groups) <= roles & autorizados
+            return None if ok else "consulta_no_autorizada"
         doc: DocumentoRegistrado | None = self._registro.obtener(chunk.doc_id)
         if doc is None:
             return "no_registrado"

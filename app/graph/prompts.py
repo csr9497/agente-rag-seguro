@@ -11,6 +11,8 @@ Herramientas:
 - buscar_en_documento: búsqueda dentro de un documento concreto ya identificado.
 - leer_documento: fragmentos consecutivos de un documento (contexto completo o vecinos de
   un fragmento ya encontrado).
+- data_query: datos internos estructurados (festivos, plantilla, presupuestos). Úsala para
+  cifras y listados que no están en los documentos.
 
 Si el mensaje trae <historial>, úsalo solo para entender a qué se refiere la <pregunta>
 (p. ej. "¿y cuántos puedo trasladar?") y formula búsquedas autocontenidas.
