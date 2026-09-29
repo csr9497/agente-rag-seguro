@@ -25,7 +25,7 @@ class EstadoAgente(BaseModel):
 
     pregunta: str  # tras input_guardrail: versión saneada (PII enmascarada)
     usuario: Usuario
-    top_k: int
+    top_k: int = 4
     # Correlación de la auditoría con la traza de LangSmith y la conversación.
     traza_id: str | None = None
     conversacion_id: str | None = None
@@ -44,6 +44,8 @@ class EstadoAgente(BaseModel):
 
     # Tipo de respuesta de cortesía pedida por la herramienta `conversacion` (saludo, ayuda…).
     conversacion: str | None = None
+    # Versiones de guardrails aplicadas en esta ejecución ({"entrada": ..., "salida": ...}).
+    versiones_guardrails: dict[str, str] = Field(default_factory=dict)
     # Pregunta de aclaración al usuario (herramienta pedir_aclaracion).
     aclaracion: Aclaracion | None = None
     # Consultas curadas que el supervisor envió a las búsquedas (se muestran al usuario).

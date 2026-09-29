@@ -117,6 +117,7 @@ class RegistroAuditoria(BaseModel):
     sin_contexto: bool
     documentos_consultados: list[str] = Field(default_factory=list)
     desde_cache: bool = False
+    guardrails: dict[str, str] = Field(default_factory=dict, description="Versiones aplicadas")
     hallazgos: list[Hallazgo] = Field(default_factory=list)
 
 

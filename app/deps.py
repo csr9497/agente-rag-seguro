@@ -13,7 +13,6 @@ from app.cache.semantica import CacheMemoria, CacheRedis, CacheSemantica, alcanc
 from app.config import Settings
 from app.datos.catalogo import permisos_por_consulta
 from app.graph.agente import Agente
-from app.graph.prompts import SUPERVISOR_PROMPT
 from app.observabilidad import configurar_trazas
 from app.persistencia.almacen import AlmacenBlob, AlmacenDocumentos, AlmacenLocal
 from app.persistencia.repositorios import (
@@ -25,7 +24,6 @@ from app.persistencia.repositorios import (
     crear_motor,
     inicializar,
 )
-from app.rag.prompts import SYSTEM_PROMPT
 from app.retrieval.azure_openai import (
     AzureOpenAIEmbedder,
     AzureOpenAILLM,
@@ -39,9 +37,8 @@ from app.security.content_safety import SCOPE as SCOPE_CONTENT_SAFETY
 from app.security.content_safety import (
     ClientePromptShields,
     ClienteShields,
-    GuardrailPromptShields,
 )
-from app.security.guardrails import Guardrail, GuardrailEntrada, GuardrailSalida
+from app.security.versiones import catalogo_entrada, catalogo_salida, version_por_defecto
 from app.servicios.conversaciones import ServicioConversaciones
 from app.servicios.integridad import InformeIntegridad, verificar_integridad
 from app.servicios.roles import ServicioRoles
@@ -219,9 +216,9 @@ def _agente(
     motor: Engine | None = None,
     shields: ClienteShields | None = None,
 ) -> Agente:
-    entrada: Guardrail = GuardrailEntrada()
-    if shields is not None:
-        entrada = GuardrailPromptShields(entrada, shields, settings.content_safety_fallo)
+    versiones_entrada = catalogo_entrada(settings, shields)
+    versiones_salida = catalogo_salida(settings)
+    version_entrada = version_por_defecto(settings, shields)
     return Agente(
         trazas=configurar_trazas(settings),
         settings=settings,
@@ -240,8 +237,12 @@ def _agente(
                 else []
             ),
         ],
-        guardrail_entrada=entrada,
-        guardrail_salida=GuardrailSalida([SYSTEM_PROMPT, SUPERVISOR_PROMPT]),
+        guardrail_entrada=versiones_entrada[version_entrada],
+        guardrail_salida=versiones_salida[settings.guardrail_salida],
+        versiones_entrada=versiones_entrada,
+        versiones_salida=versiones_salida,
+        version_entrada=version_entrada,
+        version_salida=settings.guardrail_salida,
         top_k=settings.retrieval_top_k,
         max_iteraciones=settings.max_iteraciones,
         max_contexto=settings.max_fragmentos_contexto,

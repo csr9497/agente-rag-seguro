@@ -19,6 +19,7 @@ def registrar_consulta(
     conversacion_id: str | None = None,
     documentos_consultados: list[str] | None = None,
     desde_cache: bool = False,
+    guardrails: dict[str, str] | None = None,
 ) -> None:
     registro = RegistroAuditoria(
         fecha=datetime.now(UTC).isoformat(timespec="seconds"),
@@ -32,6 +33,7 @@ def registrar_consulta(
         sin_contexto=respuesta.sin_contexto,
         documentos_consultados=documentos_consultados or [],
         desde_cache=desde_cache,
+        guardrails=guardrails or {},
         hallazgos=hallazgos or [],
     )
     logger.info(registro.model_dump_json())

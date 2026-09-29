@@ -83,6 +83,15 @@ Además:
   UTF-8 ≤ 1 MB, sin symlinks ni rutas ocultas; rechaza texto invisible e instrucciones
   dirigidas al modelo (también dentro de comentarios HTML) y, con Content Safety, ataques
   indirectos detectados por Prompt Shields.
+- **Versiones de guardrails** ([app/security/versiones.py](app/security/versiones.py)): entrada
+  `v1-heuristico` | `v2-prompt-shields` | `sin-guardrail`, salida `v1-fuga-prompt` |
+  `sin-guardrail` (desactivar solo fuera de producción). La app usa `GUARDRAIL_ENTRADA`
+  (`auto`: Prompt Shields si está configurado) y `GUARDRAIL_SALIDA`; la API nunca acepta
+  elegirlas. En LangGraph Studio se eligen por ejecución en el contexto del asistente, y la
+  versión aplicada queda en el estado, la traza y la auditoría. Para una versión nueva:
+  implementa `Guardrail`, regístrala en el catálogo y añade su nombre al `Literal`.
+- **Filtro de contenido de Azure OpenAI**: si el modelo rechaza una petición (p. ej. jailbreak
+  que pasó los guardrails), se responde como bloqueada y se audita (`filtro_contenido_azure`).
 - **Prompt Shields** ([app/security/content_safety.py](app/security/content_safety.py)): se suma
   a las heurísticas locales, no las sustituye. Sin claves (Managed Identity). Si el servicio
   falla, `CONTENT_SAFETY_FALLO=cerrado` (defecto) bloquea; `abierto` deja pasar y lo audita.

@@ -12,8 +12,10 @@ from collections.abc import Callable
 from datetime import date
 from typing import Any, Literal
 
+import openai
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
+from langgraph.runtime import Runtime
 from langsmith import Client
 from pydantic import BaseModel, Field, ValidationError
 
@@ -30,6 +32,7 @@ from app.retrieval.base import LLM, Embedder, Supervisor
 from app.security.acceso import PREFIJO_DATOS, VerificadorAcceso, VerificadorPermisivo
 from app.security.audit import registrar_consulta
 from app.security.guardrails import MENSAJE_BLOQUEO, Guardrail
+from app.security.versiones import ContextoAgente
 from app.tools.base import SIN_ACCESO, Herramienta, ResultadoHerramienta, schema_openai
 from app.tools.conversacion import PLANTILLAS
 
@@ -72,6 +75,10 @@ class Agente:
         cache: CacheSemantica | None = None,
         embedder_cache: Embedder | None = None,
         alcance_cache: Callable[[list[str]], str] | None = None,
+        versiones_entrada: dict[str, Guardrail] | None = None,
+        versiones_salida: dict[str, Guardrail] | None = None,
+        version_entrada: str = "configurado",
+        version_salida: str = "configurado",
     ) -> None:
         self._supervisor = supervisor
         self._llm = llm
@@ -79,6 +86,12 @@ class Agente:
         self._schemas = [schema_openai(h) for h in herramientas]
         self._guardrail_entrada = guardrail_entrada
         self._guardrail_salida = guardrail_salida
+        # Versiones seleccionables (Studio). Sin catálogo, solo la instancia configurada.
+        self._version_entrada, self._version_salida = version_entrada, version_salida
+        self._versiones = {
+            "entrada": versiones_entrada or {version_entrada: guardrail_entrada},
+            "salida": versiones_salida or {version_salida: guardrail_salida},
+        }
         self._top_k = top_k
         self._max_iteraciones = max_iteraciones
         self._max_contexto = max_contexto
@@ -138,8 +151,12 @@ class Agente:
         )
 
     # ------------------------------------------------------------------ construcción
-    def _construir(self) -> CompiledStateGraph:
-        g = StateGraph(EstadoAgente)
+    def grafo_con_entrada(self, input_schema: type[BaseModel]) -> CompiledStateGraph:
+        """Mismo grafo con otro esquema de entrada (Studio: rol como desplegable)."""
+        return self._construir(input_schema)
+
+    def _construir(self, input_schema: type[BaseModel] | None = None) -> CompiledStateGraph:
+        g = StateGraph(EstadoAgente, context_schema=ContextoAgente, input_schema=input_schema)
         g.add_node("authorize", self._authorize)
         g.add_node("input_guardrail", self._input_guardrail)
         g.add_node("supervisor", self._supervisor_node)
@@ -199,11 +216,28 @@ class Agente:
             return {"respuesta": respuesta_sin_contexto()}
         return {}
 
-    def _input_guardrail(self, estado: EstadoAgente) -> Update:
-        veredicto = self._guardrail_entrada.revisar(estado.pregunta)
+    def _elegir_guardrail(
+        self, tipo: Literal["entrada", "salida"], runtime: Runtime[ContextoAgente] | None
+    ) -> tuple[str, Guardrail]:
+        """Versión pedida en el contexto (Studio) o la configurada."""
+        contexto = runtime.context if runtime is not None else None
+        pedida = getattr(contexto, f"guardrail_{tipo}", None) if contexto else None
+        nombre = pedida or (self._version_entrada if tipo == "entrada" else self._version_salida)
+        catalogo = self._versiones[tipo]
+        if nombre not in catalogo:
+            raise ValueError(
+                f"Guardrail de {tipo} '{nombre}' no disponible en este entorno. "
+                f"Disponibles: {', '.join(catalogo)}"
+            )
+        return nombre, catalogo[nombre]
+
+    def _input_guardrail(self, estado: EstadoAgente, runtime: Runtime[ContextoAgente]) -> Update:
+        version, guardrail = self._elegir_guardrail("entrada", runtime)
+        veredicto = guardrail.revisar(estado.pregunta)
         update: Update = {
             "pregunta": veredicto.texto,
             "hallazgos": [*estado.hallazgos, *veredicto.hallazgos],
+            "versiones_guardrails": {**estado.versiones_guardrails, "entrada": version},
         }
         if not veredicto.permitido:
             update["respuesta"] = _bloqueada()
@@ -219,9 +253,14 @@ class Agente:
         ]
         # Primer turno: obligatorio usar una herramienta (con gpt-4o y tool_choice=auto, a veces
         # respondía "no encuentro" sin haber buscado).
-        decision = self._supervisor.decidir(
-            mensajes, self._schemas, obligar_herramienta=estado.iteraciones == 0
-        )
+        try:
+            decision = self._supervisor.decidir(
+                mensajes, self._schemas, obligar_herramienta=estado.iteraciones == 0
+            )
+        except openai.BadRequestError as exc:
+            if not _es_filtro_de_contenido(exc):
+                raise
+            return {**_bloqueo_por_filtro(estado), "pendientes": []}
         return {
             "mensajes": [*mensajes, decision.mensaje_asistente],
             "pendientes": decision.tool_calls,
@@ -376,6 +415,8 @@ class Agente:
         return {}
 
     def _generate(self, estado: EstadoAgente) -> Update:
+        if estado.respuesta is not None:  # ya bloqueada por el filtro de contenido del modelo
+            return {}
         acciones = estado.acciones_propuestas
         if estado.aclaracion and not estado.recuperados and not acciones:
             # Consulta imprecisa: se pregunta al usuario en lugar de buscar a ciegas.
@@ -400,16 +441,22 @@ class Agente:
             lista = "; ".join(a.resumen for a in acciones)
             texto = f"He preparado lo siguiente para que lo revises y apruebes: {lista}."
             return {"respuesta": RespuestaConsulta(respuesta=texto, citas=[], sin_contexto=True)}
-        return {
-            "respuesta": generar_respuesta(
+        try:
+            respuesta = generar_respuesta(
                 self._llm, estado.pregunta, estado.recuperados, estado.historial
             )
-        }
+        except openai.BadRequestError as exc:
+            if not _es_filtro_de_contenido(exc):
+                raise
+            return _bloqueo_por_filtro(estado)
+        return {"respuesta": respuesta}
 
-    def _output_guardrail(self, estado: EstadoAgente) -> Update:
+    def _output_guardrail(self, estado: EstadoAgente, runtime: Runtime[ContextoAgente]) -> Update:
         respuesta = _requerir_respuesta(estado)
-        veredicto = self._guardrail_salida.revisar(respuesta.respuesta)
+        version, guardrail = self._elegir_guardrail("salida", runtime)
+        veredicto = guardrail.revisar(respuesta.respuesta)
         return {
+            "versiones_guardrails": {**estado.versiones_guardrails, "salida": version},
             "respuesta": (
                 respuesta.model_copy(update={"respuesta": veredicto.texto})
                 if veredicto.permitido
@@ -428,8 +475,21 @@ class Agente:
             conversacion_id=estado.conversacion_id,
             documentos_consultados=_documentos_consultados(estado),
             desde_cache=estado.desde_cache,
+            guardrails=estado.versiones_guardrails,
         )
         return {}
+
+
+def _es_filtro_de_contenido(exc: openai.BadRequestError) -> bool:
+    """Azure OpenAI rechaza la petición por su filtro de contenido (p. ej. jailbreak)."""
+    return getattr(exc, "code", None) == "content_filter" or "content_filter" in str(exc)
+
+
+def _bloqueo_por_filtro(estado: EstadoAgente) -> Update:
+    """Otra capa de defensa (la del proveedor): se trata como una consulta bloqueada y se
+    audita, en lugar de acabar en un error 502."""
+    hallazgo = Hallazgo(tipo="inyeccion", detalle="filtro_contenido_azure", accion="bloquear")
+    return {"respuesta": _bloqueada(), "hallazgos": [*estado.hallazgos, hallazgo]}
 
 
 def _documentos_consultados(estado: EstadoAgente) -> list[str]:
