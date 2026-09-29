@@ -42,6 +42,11 @@ instalar() {
 
   paso ".env"
   if [[ -f .env ]]; then echo "ya existe"; else cp .env.example .env && echo "creado desde .env.example"; fi
+  if ! grep -q '^POSTGRES_PASSWORD=.\+' .env; then # la pide docker-compose (perfil postgres)
+    sed -i.bak '/^POSTGRES_PASSWORD=/d' .env && rm -f .env.bak
+    echo "POSTGRES_PASSWORD=$(openssl rand -hex 16)" >> .env
+    echo "✅ POSTGRES_PASSWORD local generada"
+  fi
   grep -q '^LANGSMITH_API_KEY=.\+' .env && echo "✅ LANGSMITH_API_KEY definida" \
     || echo "ℹ️  opcional: añade LANGSMITH_API_KEY en .env para trazas y evaluaciones en LangSmith"
 
