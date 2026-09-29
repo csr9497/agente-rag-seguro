@@ -7,6 +7,8 @@ alcance      = "modelos"
 vector_store = "azure_search" # "qdrant" + qdrant_modo = "local" usa el Qdrant de docker-compose
 search_sku   = "free"         # 0 €, 50 MB
 search_auth  = "api_key"      # la app en Docker no tiene az login; la clave va a Key Vault → .env
+# eastus2 sin capacidad para nuevos servicios de AI Search (InsufficientResourcesAvailable).
+search_location = "southcentralus"
 
 # dev: acceso público (con RBAC) para desarrollar en local contra Azure.
 private_endpoints_enabled = false

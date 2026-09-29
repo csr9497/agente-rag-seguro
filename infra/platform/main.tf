@@ -97,7 +97,7 @@ module "search" {
   count                         = local.search ? 1 : 0
   source                        = "../modules/search"
   name                          = "srch-${local.flat}"
-  location                      = var.location
+  location                      = coalesce(var.search_location, var.location)
   resource_group_name           = azurerm_resource_group.this.name
   sku                           = var.search_sku
   auth                          = var.search_auth

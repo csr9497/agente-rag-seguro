@@ -140,8 +140,9 @@ def main() -> int:
         )
         cliente = SearchIndexClient(tf["search_endpoint"], credencial)
         indices = list(cliente.list_index_names())
-        stats = cliente.get_service_statistics()
-        cuota = stats["counters"]["storage_size"]["quota"]
+        contadores = cliente.get_service_statistics().as_dict()["counters"]
+        almacen = contadores.get("storage_size_counter") or contadores.get("storageSize") or {}
+        cuota = almacen.get("quota") or 0
         return f"índices={indices} · cuota={cuota // 1_000_000} MB"
 
     def blob() -> str:

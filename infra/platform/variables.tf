@@ -75,6 +75,12 @@ variable "embedding_dimensions" {
   default = 1536
 }
 
+variable "search_location" {
+  type        = string
+  description = "Región de AI Search si difiere de location (p. ej. sin capacidad para nuevos servicios allí)"
+  default     = null
+}
+
 variable "search_sku" {
   type        = string
   description = "free (50 MB, 3 índices, uno por suscripción, puede borrarse por inactividad) | basic | standard"
