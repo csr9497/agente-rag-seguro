@@ -72,6 +72,19 @@ def cliente_langsmith() -> Client:
     return Client(api_key=settings.langsmith_api_key.get_secret_value())
 
 
+def escenario_desde_inputs(inputs: dict[str, Any]) -> Escenario:
+    """Reconstruye la petición del ejemplo. Un cuerpo con más campos que `pregunta` (p. ej.
+    top_k inválido) se envía tal cual como payload: la API debe rechazarlo."""
+    cuerpo = inputs["cuerpo"]
+    peticion = (
+        {"pregunta": cuerpo["pregunta"]} if set(cuerpo) == {"pregunta"} else {"payload": cuerpo}
+    )
+    return Escenario(
+        id="ls", descripcion="ls", capacidades=["x"], rol=inputs["rol"], esperado={},
+        turnos_previos=inputs.get("turnos_previos", []), **peticion,
+    )  # fmt: skip
+
+
 def respuesta_fundamentada(outputs: dict[str, Any]) -> bool:
     cuerpo = outputs.get("cuerpo") or {}
     return (
@@ -134,13 +147,7 @@ def ejecutar_experimento(
     def objetivo(inputs: dict[str, Any]) -> dict[str, Any]:
         if pausa:
             time.sleep(pausa)
-        escenario = Escenario(
-            id="ls", descripcion="ls", capacidades=["x"], rol=inputs["rol"], esperado={},
-            turnos_previos=inputs.get("turnos_previos", []),
-            **({"payload": inputs["cuerpo"]} if "pregunta" not in inputs["cuerpo"]
-               else {"pregunta": inputs["cuerpo"]["pregunta"]}),
-        )  # fmt: skip
-        status, cuerpo = llamar(http, escenario)
+        status, cuerpo = llamar(http, escenario_desde_inputs(inputs))
         return {"status": status, "cuerpo": cuerpo}
 
     def por_capas(

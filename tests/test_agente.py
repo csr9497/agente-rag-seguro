@@ -232,3 +232,21 @@ def test_historial_no_puede_romper_la_estructura_del_prompt(agente, llm) -> None
     agente.consultar_detallado("vacaciones", PUBLIC, historial=[malicioso])
     _, user = llm.llamadas[0]
     assert user.count("</historial>") == 1 and user.count("<contexto>") == 1
+
+
+# ------------------------------------------------ hallazgos de la prueba con modelos reales
+def test_primer_turno_obliga_a_usar_una_herramienta(agente, supervisor) -> None:
+    """gpt-4o a veces respondía sin buscar ('No encuentro…' sin consultar nada)."""
+    agente.consultar("¿Cuántos días de vacaciones tengo?", Usuario(id="u", groups=["public"]))
+    assert supervisor.obligaciones[:2] == [True, False]
+
+
+def test_texto_sin_marcas_recibe_las_citas_al_final(crear_agente) -> None:
+    llm = FakeLLM(RespuestaLLM(respuesta="Son 23 días.", citas_usadas=[1], encontrado=True))
+    r = crear_agente(llm=llm).consultar("vacaciones", Usuario(id="u", groups=["public"]))
+    assert r.respuesta == "Son 23 días. [1]" and not r.sin_contexto
+
+
+def test_texto_con_marcas_no_se_toca(agente) -> None:
+    r = agente.consultar("vacaciones", Usuario(id="u", groups=["public"]))
+    assert r.respuesta == "Según la política, son 23 días [1]."

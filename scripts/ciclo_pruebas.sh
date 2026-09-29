@@ -56,9 +56,17 @@ from app.config import get_settings
 from app.deps import build_servicios
 from ingestor.sources import LocalFolderSource
 s = build_servicios(get_settings())
+import time
 informe = s.gestor.sincronizar(LocalFolderSource(Path("ingestor/sample_docs")))
 print(f"chunks={informe.chunks} estados={informe.por_estado()}")
-print(f"integridad_ok={s.verificar_integridad().ok}")
+# AI Search publica los documentos con ~1 s de retraso: se espera antes de dar por buena
+# la integridad (si no, lo recién indexado aparece como "falta en el índice").
+for intento in range(10):
+    integridad = s.verificar_integridad()
+    if integridad.ok:
+        break
+    time.sleep(3)
+print(f"integridad_ok={integridad.ok} (intentos={intento + 1})")
 EOF
   paso "probar: app en 127.0.0.1:$PUERTO"
   uv run uvicorn app.main:app --host 127.0.0.1 --port "$PUERTO" > "$RUN/app.log" 2>&1 &
@@ -87,7 +95,11 @@ import json, sqlite3, sys
 run = sys.argv[1]
 con = sqlite3.connect(f"{run}/app.db")
 tablas = [t for (t,) in con.execute("select name from sqlite_master where type='table'")]
-volcado = {t: [dict(zip([c[0] for c in cur.description], fila)) for fila in (cur := con.execute(f"select * from {t}")).fetchall()] for t in tablas}
+volcado = {}
+for t in tablas:
+    cur = con.execute(f"select * from {t}")
+    columnas = [c[0] for c in cur.description]
+    volcado[t] = [dict(zip(columnas, fila)) for fila in cur.fetchall()]
 json.dump(volcado, open(f"{run}/base-de-datos.json", "w"), indent=2, ensure_ascii=False, default=str)
 print({t: len(v) for t, v in volcado.items()})
 EOF
@@ -100,6 +112,9 @@ apagar() {
   terraform -chdir=infra/platform destroy -input=false -auto-approve -var-file="$TFVARS" \
     > "$RUN/terraform-destroy.log" 2>&1
   grep -E "Destroy complete|Error" "$RUN/terraform-destroy.log" | tee -a "$RUN/pasos.log"
+  paso "apagar: .env sin los valores de los recursos eliminados (endpoints y claves)"
+  sed -i.bak -E '/^(AZURE_OPENAI_(ENDPOINT|API_KEY|CHAT_DEPLOYMENT|EMBEDDING_DEPLOYMENT)|VECTOR_STORE|AZURE_SEARCH_(ENDPOINT|API_KEY)|CONTENT_SAFETY_ENDPOINT|AZURE_STORAGE_(ACCOUNT_URL|CONTAINER)|QDRANT_(URL|API_KEY))=/d' .env
+  rm -f .env.bak
 }
 
 informe() {
@@ -110,7 +125,8 @@ informe() {
 case "${1:-}" in
   prender | probar | guardar | apagar | informe) "$1" ;;
   todo)
-    trap 'guardar; apagar; informe' EXIT # se apaga aunque falle un paso
+    # Se apaga aunque falle cualquier paso (también guardar): sin set -e dentro de la trampa.
+    trap 'set +e; guardar; apagar; informe' EXIT
     prender
     probar
     ;;

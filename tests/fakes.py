@@ -48,11 +48,16 @@ class FakeSupervisor:
     def __init__(self, turnos: list[list[tuple[str, str]]] | None = None) -> None:
         self.turnos = turnos
         self.llamadas: list[list[dict[str, Any]]] = []
+        self.obligaciones: list[bool] = []
 
     def decidir(
-        self, mensajes: list[dict[str, Any]], herramientas: list[dict[str, Any]]
+        self,
+        mensajes: list[dict[str, Any]],
+        herramientas: list[dict[str, Any]],
+        obligar_herramienta: bool = False,
     ) -> DecisionSupervisor:
         self.llamadas.append(mensajes)
+        self.obligaciones.append(obligar_herramienta)
         # Sin estado entre consultas (como un LLM real): el turno sale del historial.
         i = sum(m["role"] == "assistant" for m in mensajes)
         turnos = self.turnos

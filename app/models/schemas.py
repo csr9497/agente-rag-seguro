@@ -63,7 +63,10 @@ class RespuestaLLM(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    respuesta: str
+    respuesta: str = Field(
+        description="Respuesta con la marca [n] del fragmento tras cada afirmación, p. ej. "
+        "'Son 23 días [1].'"
+    )
     citas_usadas: list[int] = Field(description="Números [n] de los fragmentos citados")
     encontrado: bool = Field(description="False si la respuesta no está en el contexto")
 

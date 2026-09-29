@@ -69,3 +69,28 @@ def test_cliente_azure_openai_reintenta_429_con_backoff() -> None:
     )
     c = _cliente_base(s)
     assert c.max_retries == 4 and c.timeout == 30
+
+
+def test_supervisor_azure_obliga_herramienta_solo_si_se_pide() -> None:
+    from types import SimpleNamespace
+
+    from app.retrieval.azure_openai import AzureOpenAISupervisor
+
+    enviados = []
+
+    def create(**kw):
+        enviados.append(kw["tool_choice"])
+        mensaje = SimpleNamespace(tool_calls=None, model_dump=lambda **_: {"role": "assistant"})
+        return SimpleNamespace(choices=[SimpleNamespace(message=mensaje)])
+
+    cliente = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    sup = AzureOpenAISupervisor(cliente, "gpt-4o")
+    sup.decidir([], [{"type": "function"}], obligar_herramienta=True)
+    sup.decidir([], [{"type": "function"}])
+    assert enviados == ["required", "auto"]
+
+
+def test_umbral_de_cache_estricto_para_ada() -> None:
+    from app.config import Settings
+
+    assert Settings().cache_umbral >= 0.97

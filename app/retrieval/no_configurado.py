@@ -23,5 +23,10 @@ class ModelosNoConfigurados:
     def responder(self, system: str, user: str) -> Any:
         self._fallar()
 
-    def decidir(self, mensajes: list[dict[str, Any]], herramientas: list[dict[str, Any]]) -> Any:
+    def decidir(
+        self,
+        mensajes: list[dict[str, Any]],
+        herramientas: list[dict[str, Any]],
+        obligar_herramienta: bool = False,
+    ) -> Any:
         self._fallar()

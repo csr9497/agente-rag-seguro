@@ -198,7 +198,11 @@ class Agente:
             {"role": "system", "content": SUPERVISOR_PROMPT},
             {"role": "user", "content": _pregunta_supervisor(estado)},
         ]
-        decision = self._supervisor.decidir(mensajes, self._schemas)
+        # Primer turno: obligatorio usar una herramienta (con gpt-4o y tool_choice=auto, a veces
+        # respondía "no encuentro" sin haber buscado).
+        decision = self._supervisor.decidir(
+            mensajes, self._schemas, obligar_herramienta=estado.iteraciones == 0
+        )
         return {
             "mensajes": [*mensajes, decision.mensaje_asistente],
             "pendientes": decision.tool_calls,

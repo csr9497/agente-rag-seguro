@@ -9,13 +9,18 @@ os.environ["LANGSMITH_TRACING"] = "false"
 import pytest
 from qdrant_client import QdrantClient
 
-from app.graph.agente import Agente
-from app.retrieval.qdrant_retriever import QdrantRetriever
-from app.security.guardrails import GuardrailPermisivo
-from app.tools.rag_retrieve import RagRetrieve
-from ingestor.ingest import ingestar
-from ingestor.sources import LocalFolderSource
-from tests.fakes import DIM, FakeEmbedder, FakeLLM, FakeSupervisor
+from app.config import Settings
+
+# Tests herméticos: nunca leen .env (tras un ciclo en Azure contiene endpoints y claves reales).
+Settings.model_config["env_file"] = None
+
+from app.graph.agente import Agente  # noqa: E402
+from app.retrieval.qdrant_retriever import QdrantRetriever  # noqa: E402
+from app.security.guardrails import GuardrailPermisivo  # noqa: E402
+from app.tools.rag_retrieve import RagRetrieve  # noqa: E402
+from ingestor.ingest import ingestar  # noqa: E402
+from ingestor.sources import LocalFolderSource  # noqa: E402
+from tests.fakes import DIM, FakeEmbedder, FakeLLM, FakeSupervisor  # noqa: E402
 
 SAMPLE_DOCS = Path(__file__).parents[1] / "ingestor" / "sample_docs"
 

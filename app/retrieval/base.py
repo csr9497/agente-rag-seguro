@@ -24,8 +24,14 @@ class Supervisor(Protocol):
     """LLM con tool-calling que decide qué herramientas invocar."""
 
     def decidir(
-        self, mensajes: list[dict[str, Any]], herramientas: list[dict[str, Any]]
-    ) -> DecisionSupervisor: ...
+        self,
+        mensajes: list[dict[str, Any]],
+        herramientas: list[dict[str, Any]],
+        obligar_herramienta: bool = False,
+    ) -> DecisionSupervisor:
+        """`obligar_herramienta`: el modelo debe llamar a alguna herramienta (primer turno:
+        nunca se responde sin haber consultado nada)."""
+        ...
 
 
 class Retriever(Protocol):

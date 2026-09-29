@@ -28,7 +28,7 @@ RAIZ = Path(__file__).parents[2]
 class SupervisorPorPalabras:
     """Elige la tool por palabras de la pregunta actual (no del historial)."""
 
-    def decidir(self, mensajes, herramientas) -> DecisionSupervisor:  # noqa: ANN001
+    def decidir(self, mensajes, herramientas, obligar_herramienta=False) -> DecisionSupervisor:  # noqa: ANN001
         if any(m["role"] == "assistant" for m in mensajes):
             return DecisionSupervisor(
                 tool_calls=[], mensaje_asistente={"role": "assistant", "content": "LISTO"}

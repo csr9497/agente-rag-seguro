@@ -53,13 +53,16 @@ class AzureOpenAISupervisor:
         self._deployment = deployment
 
     def decidir(
-        self, mensajes: list[dict[str, Any]], herramientas: list[dict[str, Any]]
+        self,
+        mensajes: list[dict[str, Any]],
+        herramientas: list[dict[str, Any]],
+        obligar_herramienta: bool = False,
     ) -> DecisionSupervisor:
         completion = self._client.chat.completions.create(
             model=self._deployment,
             messages=mensajes,  # type: ignore[arg-type]
             tools=herramientas,  # type: ignore[arg-type]
-            tool_choice="auto",
+            tool_choice="required" if obligar_herramienta and herramientas else "auto",
             temperature=0,
         )
         mensaje = completion.choices[0].message

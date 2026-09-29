@@ -212,3 +212,12 @@ def test_umbral_groundedness_bloquea() -> None:
     )
     [u] = [u for u in aplicar_umbrales([r], UMBRALES) if u.umbral.metrica == "rag_groundedness"]
     assert u.umbral.bloqueante and not u.aprobado
+
+
+def test_langsmith_envia_el_payload_completo_si_hay_campos_extra() -> None:
+    from evals.langsmith import escenario_desde_inputs
+
+    solo = escenario_desde_inputs({"rol": "public", "cuerpo": {"pregunta": "hola"}})
+    assert solo.cuerpo() == {"pregunta": "hola"}
+    extra = escenario_desde_inputs({"rol": "public", "cuerpo": {"pregunta": "v", "top_k": 0}})
+    assert extra.cuerpo() == {"pregunta": "v", "top_k": 0}

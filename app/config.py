@@ -53,7 +53,9 @@ class Settings(BaseSettings):
     max_turnos_historial: int = 3
     # Caché semántica con permisos (clave = roles + huella de documentos visibles + versión).
     cache_semantica: bool = True
-    cache_umbral: float = 0.95
+    # ada-002 puntúa ~0.95 preguntas distintas pero cercanas (p. ej. una pregunta compuesta y
+    # una de sus partes): 0.97 evita servir la respuesta de la vecina (prueba en Azure).
+    cache_umbral: float = 0.97
     cache_backend: Literal["memoria", "redis"] = "memoria"
     redis_url: SecretStr = SecretStr("redis://localhost:6379/0")
     cache_ttl_s: int = 86400
