@@ -51,9 +51,9 @@ def test_es_postgres(motor) -> None:
 
 def test_roles_documentos_y_conversaciones(motor) -> None:
     roles = SqlRepositorioRoles(motor)
-    assert {r.id for r in roles.listar()} == {"administrador", "rrhh", "public"}
-    roles.guardar(Rol(id="finanzas", nombre="Finanzas", publica_para=["public"]))
-    assert roles.obtener("finanzas").publica_para == ["public"]
+    assert {r.id for r in roles.listar()} == {"administrador", "rrhh", "finanzas", "public"}
+    roles.guardar(Rol(id="compras", nombre="Compras", publica_para=["public"]))
+    assert roles.obtener("compras").publica_para == ["public"]
 
     docs = SqlRepositorioDocumentos(motor)
     docs.registrar(

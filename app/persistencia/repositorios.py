@@ -117,14 +117,21 @@ ROLES_INICIALES = [
     Rol(
         id="rrhh",
         nombre="Recursos Humanos",
-        descripcion="Nóminas, bandas salariales y procesos de RRHH.",
+        descripcion="Contratación, bandas salariales y procesos de personas.",
         permisos=["gestionar_documentos"],
         publica_para=["public", "rrhh"],
     ),
     Rol(
+        id="finanzas",
+        nombre="Finanzas",
+        descripcion="Nóminas, presupuestos y facturación.",
+        permisos=["gestionar_documentos"],
+        publica_para=["public"],
+    ),
+    Rol(
         id="public",
         nombre="Empleado general",
-        descripcion="Políticas generales: vacaciones, teletrabajo, onboarding.",
+        descripcion="Políticas de la empresa: vacaciones, teletrabajo, conducta, beneficios.",
     ),
 ]
 
@@ -139,19 +146,20 @@ def _migrar(motor: Engine) -> None:
 
 
 def inicializar(motor: Engine) -> None:
-    """Crea las tablas y, si no hay roles, carga los iniciales."""
+    """Crea las tablas y los roles iniciales que falten (sin tocar los existentes)."""
     t.metadata.create_all(motor)
     _migrar(motor)
     from app.datos.catalogo import sembrar_datos_ejemplo
 
     sembrar_datos_ejemplo(motor)
     roles = SqlRepositorioRoles(motor)
-    if not roles.listar():
-        # Primero todos los roles (sin relaciones) para que publica_para no rompa las FK.
-        for rol in ROLES_INICIALES:
-            roles.guardar(rol.model_copy(update={"publica_para": []}))
-        for rol in ROLES_INICIALES:
-            roles.guardar(rol)
+    # Solo los que faltan: nunca se modifican roles existentes (los gestiona el administrador).
+    faltan = [r for r in ROLES_INICIALES if roles.obtener(r.id) is None]
+    # Primero todos los roles (sin relaciones) para que publica_para no rompa las FK.
+    for rol in faltan:
+        roles.guardar(rol.model_copy(update={"publica_para": []}))
+    for rol in faltan:
+        roles.guardar(rol)
 
 
 # ------------------------------------------------------------------ roles

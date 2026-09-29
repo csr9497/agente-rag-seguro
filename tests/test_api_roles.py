@@ -61,7 +61,7 @@ def _subir(client, nombre="vacaciones.md", datos=TEXTO, roles=("public",), heade
 # ------------------------------------------------------------------ roles
 def test_roles_disponibles_con_seleccion_libre(client) -> None:
     ids = {r["id"] for r in client.get("/roles").json()}
-    assert ids == {"administrador", "rrhh", "public"}
+    assert ids == {"administrador", "rrhh", "finanzas", "public"}
 
 
 def test_sin_seleccion_libre_solo_los_roles_de_la_identidad(client) -> None:
@@ -77,7 +77,7 @@ def test_sin_seleccion_libre_solo_los_roles_de_la_identidad(client) -> None:
 
 
 def test_admin_crea_y_asigna_permisos(client, caplog) -> None:
-    nuevo = {"id": "finanzas", "nombre": "Finanzas", "permisos": ["gestionar_documentos"],
+    nuevo = {"id": "compras", "nombre": "Compras", "permisos": ["gestionar_documentos"],
              "publica_para": ["public"]}  # fmt: skip
     with caplog.at_level(logging.INFO, logger="audit"):
         r = client.post("/roles", json=nuevo, headers=ADMIN)
@@ -85,10 +85,10 @@ def test_admin_crea_y_asigna_permisos(client, caplog) -> None:
     registro = json.loads(next(x for x in caplog.records if x.name == "audit").getMessage())
     assert registro["accion"] == "rol_creado" and registro["actor"] == "administrador"
 
-    r = client.patch("/roles/finanzas", json={"permisos": [], "activo": False}, headers=ADMIN)
+    r = client.patch("/roles/compras", json={"permisos": [], "activo": False}, headers=ADMIN)
     assert r.status_code == 200 and r.json()["activo"] is False
-    assert "finanzas" not in {x["id"] for x in client.get("/roles").json()}
-    assert "finanzas" in {x["id"] for x in client.get("/roles/todos", headers=ADMIN).json()}
+    assert "compras" not in {x["id"] for x in client.get("/roles").json()}
+    assert "compras" in {x["id"] for x in client.get("/roles/todos", headers=ADMIN).json()}
 
 
 @pytest.mark.parametrize("headers", [RRHH, PUBLIC, {}], ids=["rrhh", "public", "sin_rol"])

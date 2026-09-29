@@ -49,7 +49,10 @@ function icono(id, clase = "icon") {
 const nombreRol = (id) =>
   (estado.todos.find((r) => r.id === id) || estado.roles.find((r) => r.id === id) || { nombre: id }).nombre;
 const tituloDoc = (id) => (id.startsWith("datos:") ? `Datos internos: ${id.slice(6)}`
+  : id === "catalogo" ? "Listado de documentos de tu rol"
   : (estado.docs.find((d) => d.doc_id === id) || { titulo: id.split("/").pop() }).titulo);
+// El listado de documentos y los datos internos se citan, pero no son documentos que abrir.
+const esDocumento = (id) => id !== "catalogo" && !id.startsWith("datos:");
 const puede = (permiso) => !!estado.rol && estado.rol.permisos.includes(permiso);
 const hora = (iso) => (iso ? new Date(iso).toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" }) : "");
 // Hoy: solo la hora; otro día: fecha corta.
@@ -342,8 +345,9 @@ function pintarRespuesta(m, i) {
     if (n && numeros.has(Number(n[1]))) {
       const b = el("button", { class: "cite", type: "button", "aria-label": `Fuente ${n[1]}` }, n[1]);
       const cita = m.citas.find((c) => c.numero === Number(n[1]));
-      b.setAttribute("aria-label", `Fuente ${n[1]}: ver ${tituloDoc(cita.doc_id)}`);
-      b.addEventListener("click", () => abrirDocumento(cita.doc_id, cita.chunk_id));
+      b.setAttribute("aria-label", `Fuente ${n[1]}: ${tituloDoc(cita.doc_id)}`);
+      if (esDocumento(cita.doc_id)) b.addEventListener("click", () => abrirDocumento(cita.doc_id, cita.chunk_id));
+      else b.disabled = true;
       answer.append(b);
     } else answer.append(parte);
   }
@@ -363,15 +367,21 @@ function fuentesPlegadas(m, id) {
   }
   if (!docs.length) return null;
   const panelId = `${id}-fuentes`;
-  const texto = `${docs.length} ${docs.length === 1 ? "fuente" : "fuentes"}`;
+  const n = docs.length;
+  const texto = `${n} ${n === 1 ? "fuente" : "fuentes"}`;
   const boton = el("button", { class: "sources-toggle", type: "button", "aria-expanded": "false", "aria-controls": panelId },
     icono("i-file"), texto, icono("i-chevron", "icon chevron"));
   const panel = el("div", { class: "sources-panel", id: panelId, hidden: true },
     docs.map((d) => {
+      const refs = el("span", { class: "source-refs" }, d.citas.map((c) => `[${c.numero}]`).join(" "));
+      if (!esDocumento(d.doc_id)) {
+        return el("div", { class: "source-doc info" }, icono("i-info"),
+          el("span", { class: "source-name" }, tituloDoc(d.doc_id)), refs, el("span"));
+      }
       const b = el("button", { class: "source-doc", type: "button" },
         icono("i-file"),
         el("span", { class: "source-name" }, tituloDoc(d.doc_id)),
-        el("span", { class: "source-refs" }, d.citas.map((c) => `[${c.numero}]`).join(" ")),
+        refs,
         el("span", { class: "source-open" }, "Ver documento"));
       b.addEventListener("click", () => abrirDocumento(d.doc_id, d.citas[0].chunk_id));
       return b;

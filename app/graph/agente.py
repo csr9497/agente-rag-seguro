@@ -35,6 +35,9 @@ from app.tools.conversacion import PLANTILLAS
 
 Update = dict[str, Any]
 
+# Herramientas que ya deciden la respuesta: tras ellas no hace falta otro turno del supervisor.
+HERRAMIENTAS_TERMINALES = {"conversacion", "pedir_aclaracion", "proponer_accion"}
+
 
 class ResultadoAgente(BaseModel):
     respuesta: RespuestaConsulta
@@ -161,7 +164,9 @@ class Agente:
         )
         g.add_conditional_edges("supervisor", self._tras_supervisor, ["tools", "generate"])
         g.add_edge("tools", "access_guardrail")
-        g.add_edge("access_guardrail", "supervisor")
+        g.add_conditional_edges(
+            "access_guardrail", self._tras_access_guardrail, ["supervisor", "generate"]
+        )
         g.add_edge("generate", "output_guardrail")
         g.add_edge("output_guardrail", "cache_store")
         g.add_edge("cache_store", "audit")
@@ -178,6 +183,14 @@ class Agente:
     @staticmethod
     def _tras_supervisor(estado: EstadoAgente) -> Literal["tools", "generate"]:
         return "tools" if estado.pendientes else "generate"
+
+    @staticmethod
+    def _tras_access_guardrail(estado: EstadoAgente) -> Literal["supervisor", "generate"]:
+        """Si el último turno solo usó herramientas terminales (saludo, aclaración, propuesta
+        de acción), el supervisor no tiene nada más que buscar: se ahorra una llamada al LLM."""
+        ultimo = next((m for m in reversed(estado.mensajes) if m.get("role") == "assistant"), {})
+        nombres = {tc["function"]["name"] for tc in ultimo.get("tool_calls", [])}
+        return "generate" if nombres and nombres <= HERRAMIENTAS_TERMINALES else "supervisor"
 
     # ------------------------------------------------------------------ nodos
     def _authorize(self, estado: EstadoAgente) -> Update:

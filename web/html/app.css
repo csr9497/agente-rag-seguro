@@ -410,3 +410,7 @@ select:disabled { opacity: .5; cursor: not-allowed; }
 .visor-frag .badge { width: fit-content; }
 @media (max-width: 640px) { .visor { width: 100vw; border-left: 0; } }
 @media (prefers-reduced-motion: reduce) { .visor[open] { animation: none; } }
+.source-doc.info { cursor: default; }
+.source-doc.info:hover { background: none; }
+.source-doc.info > .icon { color: var(--fg-2); }
+.cite:disabled { cursor: default; }

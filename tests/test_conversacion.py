@@ -53,3 +53,20 @@ def test_el_supervisor_conoce_la_herramienta() -> None:
     from app.graph.prompts import SUPERVISOR_PROMPT
 
     assert "conversacion" in SUPERVISOR_PROMPT
+
+
+def test_tras_una_herramienta_terminal_no_se_vuelve_al_supervisor(crear_agente) -> None:
+    """Latencia: saludo o aclaración no necesitan un segundo turno del supervisor («LISTO»)."""
+    sup = _supervisor("saludo")
+    crear_agente(supervisor=sup, herramientas=[ResponderConversacion()]).consultar("hola", PUBLIC)
+    assert len(sup.llamadas) == 1
+
+
+def test_tras_una_busqueda_si_se_vuelve_al_supervisor(crear_agente, embedder, retriever_con_docs):
+    from app.tools.rag_retrieve import RagRetrieve
+
+    sup = FakeSupervisor([[("rag_retrieve", '{"consulta": "vacaciones"}')]])
+    crear_agente(
+        supervisor=sup, herramientas=[RagRetrieve(embedder, retriever_con_docs, None)]
+    ).consultar("vacaciones", PUBLIC)
+    assert len(sup.llamadas) == 2  # puede pedir más contexto antes de responder

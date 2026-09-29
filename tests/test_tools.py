@@ -33,7 +33,10 @@ def test_rag_retrieve_filtra_por_grupos_del_usuario(retriever_con_docs, embedder
     public = tool.ejecutar(args, PUBLIC, top_k=10).chunks
     rrhh = tool.ejecutar(args, RRHH, top_k=10).chunks
     assert public and all(r.chunk.doc_id.startswith("public/") for r in public)
-    assert {r.chunk.doc_id for r in rrhh} == {"rrhh/bandas-salariales.md"}
+    assert {r.chunk.doc_id for r in rrhh} == {
+        "rrhh/bandas-salariales.md",
+        "rrhh/proceso-contratacion.md",
+    }
 
 
 def test_rag_retrieve_respeta_top_k(retriever_con_docs, embedder) -> None:

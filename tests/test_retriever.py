@@ -20,7 +20,7 @@ def test_usuario_public_no_ve_documentos_de_rrhh(retriever_con_docs, embedder) -
 
 def test_usuario_rrhh_ve_sus_documentos(retriever_con_docs, embedder) -> None:
     docs = _buscar(retriever_con_docs, embedder, "bandas salariales", ["rrhh"])
-    assert docs == {"rrhh/bandas-salariales.md"}
+    assert docs == {"rrhh/bandas-salariales.md", "rrhh/proceso-contratacion.md"}
 
 
 def test_varios_grupos_suman_visibilidad(retriever_con_docs, embedder) -> None:
