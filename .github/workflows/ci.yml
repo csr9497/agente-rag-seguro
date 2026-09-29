@@ -18,10 +18,11 @@ env:
 jobs:
   python:
     name: Lint y tests unitarios
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
         with:
           enable-cache: true
       - run: uv sync --frozen
@@ -33,6 +34,7 @@ jobs:
 
   postgres:
     name: Paridad con PostgreSQL
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -46,8 +48,8 @@ jobs:
           --health-cmd "pg_isready -U agente_app -d agente"
           --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
         with:
           enable-cache: true
       - run: uv sync --frozen
@@ -57,29 +59,37 @@ jobs:
 
   evaluaciones:
     name: Gate de evaluaciones (seguridad, contrato, recuperación)
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
         with:
           enable-cache: true
       - run: uv sync --frozen
       - name: App con composición real y modelos simulados
+        # Con el Python de la .venv (no `uv run`): un `uv run` en segundo plano retiene el
+        # candado de la caché de uv y bloquea el post-step de setup-uv.
         run: |
-          uv run uvicorn tests.integration.servidor_simulado:app --port 8767 > servidor.log 2>&1 &
+          .venv/bin/python -m uvicorn tests.integration.servidor_simulado:app --port 8767 > servidor.log 2>&1 &
+          echo $! > servidor.pid
           for i in $(seq 1 30); do curl -sf localhost:8767/api/health && break; sleep 1; done
       - name: Evaluaciones por capas (falla si hay fugas entre roles o contrato roto)
         run: uv run python -m evals.ejecutar --base-url http://localhost:8767/api --salida reports/evaluacion.md
       - name: Informe
         if: always()
         run: cat reports/evaluacion.md >> "$GITHUB_STEP_SUMMARY" || true
+      - name: Parar la app
+        if: always()
+        run: kill "$(cat servidor.pid)" || true
 
   terraform:
     name: Terraform (fmt, validate, test con providers simulados)
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
       - run: terraform fmt -check -recursive infra
       - name: validate
         run: |
@@ -92,15 +102,16 @@ jobs:
 
   docker:
     name: Build de imágenes
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v6
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
         with:
           context: .
           push: false
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: web
           push: false

@@ -40,14 +40,15 @@ jobs:
   platform:
     if: vars.DEPLOY_AZURE == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     environment: dev
     outputs:
       alcance: ${{ steps.out.outputs.alcance }}
       acr_name: ${{ steps.out.outputs.acr_name }}
       acr_login_server: ${{ steps.out.outputs.acr_login_server }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
         with:
           terraform_wrapper: false
       - name: terraform apply (platform)
@@ -68,22 +69,23 @@ jobs:
     needs: platform
     if: vars.DEPLOY_AZURE == 'true' && needs.platform.outputs.alcance == 'completo'
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     environment: dev
     steps:
-      - uses: actions/checkout@v4
-      - uses: azure/login@v2
+      - uses: actions/checkout@v7
+      - uses: azure/login@v3
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
       - run: az acr login --name ${{ needs.platform.outputs.acr_name }}
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v6
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
         with:
           context: .
           push: true
           tags: ${{ needs.platform.outputs.acr_login_server }}/backend:${{ github.sha }}
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: web
           push: true
@@ -93,10 +95,11 @@ jobs:
     needs: [platform, images]
     if: vars.DEPLOY_AZURE == 'true' && needs.platform.outputs.alcance == 'completo'
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     environment: dev
     steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
         with:
           terraform_wrapper: false
       - name: terraform apply (apps)
@@ -112,7 +115,7 @@ jobs:
             -var="app_version=${GITHUB_SHA}" \
             -var='platform_state={resource_group_name="${{ vars.TFSTATE_RG }}",storage_account_name="${{ vars.TFSTATE_ACCOUNT }}",container_name="${{ vars.TFSTATE_CONTAINER }}",key="dev/platform.tfstate"}'
           echo "### Web: $(terraform output -raw web_url)" >> "$GITHUB_STEP_SUMMARY"
-      - uses: azure/login@v2
+      - uses: azure/login@v3
         if: ${{ inputs.run_ingest }}
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
