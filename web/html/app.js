@@ -206,6 +206,38 @@ function consultados(m) {
   return fila;
 }
 
+function feedback(m) {
+  const cont = el("div", { class: "feedback" }, el("span", {}, "¿Te ha sido útil?"));
+  const actual = m.feedback ? m.feedback.valoracion : null;
+  const boton = (valoracion, ic, clase, etiqueta) => {
+    const b = el("button", { class: `btn btn-icon ${clase}`, type: "button", "aria-label": etiqueta,
+      "aria-pressed": String(actual === valoracion), title: etiqueta }, icono(ic));
+    b.addEventListener("click", () => (valoracion === "negativa" ? pedirComentario(m, cont) : valorar(m, "positiva")));
+    return b;
+  };
+  cont.append(boton("positiva", "i-up", "up", "Útil"), boton("negativa", "i-down", "down", "No útil"));
+  if (m.feedback) cont.append(el("span", { class: "gracias" }, "Gracias, valoración registrada."));
+  return cont;
+}
+
+function pedirComentario(m, cont) {
+  if (cont.querySelector("form")) return;
+  const input = el("input", { type: "text", maxLength: 500, placeholder: "¿Qué falló? (opcional)", "aria-label": "Comentario" });
+  const form = el("form", {}, input, el("button", { class: "btn btn-secondary", type: "submit" }, "Enviar"));
+  form.addEventListener("submit", (ev) => { ev.preventDefault(); valorar(m, "negativa", input.value.trim() || null); });
+  cont.append(form);
+  input.focus();
+}
+
+async function valorar(m, valoracion, comentario = null) {
+  const r = await api(`conversaciones/${encodeURIComponent(estado.conversacion.id)}/mensajes/${m.id}/feedback`,
+    { metodo: "POST", json: { valoracion, comentario }, conRol: false });
+  if (!r.ok) { alert(mensajeError(r)); return; }
+  const i = estado.conversacion.mensajes.findIndex((x) => x.id === m.id);
+  estado.conversacion.mensajes[i] = r.cuerpo;
+  pintarChat();
+}
+
 function pintarRespuesta(m, i) {
   const bloqueo = m.hallazgos.find((h) => h.accion === "bloquear");
   if (bloqueo) {
@@ -216,7 +248,7 @@ function pintarRespuesta(m, i) {
     return el("div", { class: "msg-bot" },
       notice("info", "i-info", "No encuentro esa información en tus documentos",
         "Ningún documento visible para tu rol responde a esta pregunta. Si crees que debería, pide acceso al rol correspondiente."),
-      consultados(m));
+      consultados(m), feedback(m));
   }
   const id = `m${i}`;
   const answer = el("p", { class: "answer" });
@@ -236,7 +268,7 @@ function pintarRespuesta(m, i) {
       el("span", { class: "source-name" }, tituloDoc(c.doc_id), " ", el("span", { class: "mono hint" }, c.doc_id)),
       el("span", { class: "source-frag" }, c.fragmento))));
   return el("article", { class: "msg-bot", "aria-label": `Respuesta de las ${hora(m.creado_en)}` },
-    el("div", { class: "msg-meta" }, `Asistente · ${hora(m.creado_en)}`), answer, fuentes, consultados(m));
+    el("div", { class: "msg-meta" }, `Asistente · ${hora(m.creado_en)}`), answer, fuentes, consultados(m), feedback(m));
 }
 
 async function preguntar(texto) {

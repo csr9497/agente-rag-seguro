@@ -250,3 +250,97 @@ def test_la_subida_guarda_el_original_con_sus_roles(client) -> None:
     ]
     client.delete("/documentos/rrhh/guardado.md", headers=RRHH)
     assert not original.exists()
+
+
+# ------------------------------------------------------------------ feedback
+def _mensaje(client, pregunta="¿Días de vacaciones?"):
+    _subir(client, "vacaciones.md", roles=["public"])
+    conv = client.post("/conversaciones", json={"rol_id": "public"}).json()
+    msg = client.post(f"/conversaciones/{conv['id']}/mensajes", json={"pregunta": pregunta}).json()
+    return conv["id"], msg
+
+
+def test_cada_mensaje_guarda_su_traza(client) -> None:
+    _, msg = _mensaje(client)
+    assert msg["traza_id"] and len(msg["traza_id"]) == 36 and msg["feedback"] is None
+
+
+def test_valorar_guarda_en_el_historial_y_enmascara_el_comentario(client) -> None:
+    cid, msg = _mensaje(client)
+    r = client.post(
+        f"/conversaciones/{cid}/mensajes/{msg['id']}/feedback",
+        json={"valoracion": "negativa", "comentario": "Mal, escríbeme a ana@empresa.com"},
+    )
+    assert r.status_code == 200 and r.json()["feedback"]["valoracion"] == "negativa"
+    [m] = client.get(f"/conversaciones/{cid}").json()["mensajes"]
+    assert m["feedback"]["comentario"] == "Mal, escríbeme a [EMAIL]" and m["feedback"]["creado_en"]
+    assert m["traza_id"] == msg["traza_id"]
+
+
+def test_valorar_se_puede_cambiar(client) -> None:
+    cid, msg = _mensaje(client)
+    url = f"/conversaciones/{cid}/mensajes/{msg['id']}/feedback"
+    client.post(url, json={"valoracion": "negativa"})
+    assert (
+        client.post(url, json={"valoracion": "positiva"}).json()["feedback"]["valoracion"]
+        == "positiva"
+    )
+
+
+@pytest.mark.parametrize(
+    "cuerpo",
+    [
+        {"valoracion": "meh"},
+        {"valoracion": "positiva", "extra": 1},
+        {"valoracion": "negativa", "comentario": "x" * 501},
+    ],
+)
+def test_valoracion_invalida(client, cuerpo) -> None:
+    cid, msg = _mensaje(client)
+    assert (
+        client.post(f"/conversaciones/{cid}/mensajes/{msg['id']}/feedback", json=cuerpo).status_code
+        == 422
+    )
+
+
+def test_valorar_mensaje_de_otra_conversacion_o_inexistente(client) -> None:
+    cid, msg = _mensaje(client)
+    otra = client.post("/conversaciones", json={"rol_id": "public"}).json()["id"]
+    body = {"valoracion": "positiva"}
+    assert (
+        client.post(f"/conversaciones/{otra}/mensajes/{msg['id']}/feedback", json=body).status_code
+        == 404
+    )
+    assert (
+        client.post(f"/conversaciones/{cid}/mensajes/9999/feedback", json=body).status_code == 404
+    )
+
+
+def test_feedback_se_envia_a_langsmith_si_hay_trazas(client, servicios) -> None:
+    enviados = []
+
+    class ClienteFalso:
+        def create_feedback(self, **kw):
+            enviados.append(kw)
+
+    servicios.agente._trazas = ClienteFalso()  # noqa: SLF001
+    cid, msg = _mensaje(client)
+    client.post(
+        f"/conversaciones/{cid}/mensajes/{msg['id']}/feedback", json={"valoracion": "positiva"}
+    )
+    assert enviados == [
+        {"run_id": msg["traza_id"], "key": "valoracion_usuario", "score": 1, "comment": None}
+    ]
+
+
+def test_si_langsmith_falla_la_valoracion_se_guarda(client, servicios) -> None:
+    class ClienteRoto:
+        def create_feedback(self, **kw):
+            raise RuntimeError("caído")
+
+    servicios.agente._trazas = ClienteRoto()  # noqa: SLF001
+    cid, msg = _mensaje(client)
+    r = client.post(
+        f"/conversaciones/{cid}/mensajes/{msg['id']}/feedback", json={"valoracion": "positiva"}
+    )
+    assert r.status_code == 200

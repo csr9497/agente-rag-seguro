@@ -6,6 +6,7 @@ authorize e input_guardrail pueden cortar el flujo directamente hacia audit: tod
 se audita, también las rechazadas.
 """
 
+import uuid
 from typing import Any, Literal
 
 from langgraph.graph import END, START, StateGraph
@@ -34,6 +35,7 @@ class ResultadoAgente(BaseModel):
     documentos_consultados: list[str]
     fragmentos_descartados: int
     hallazgos: list[Hallazgo]
+    traza_id: str
 
 
 def _bloqueada() -> RespuestaConsulta:
@@ -69,6 +71,10 @@ class Agente:
         self._settings = settings or Settings()
         self.grafo = self._construir()
 
+    @property
+    def cliente_trazas(self) -> Client | None:
+        return self._trazas
+
     def consultar(
         self, pregunta: str, usuario: Usuario, top_k: int | None = None
     ) -> RespuestaConsulta:
@@ -86,6 +92,7 @@ class Agente:
             self._trazas, self._settings, roles=usuario.groups, conversacion_id=conversacion_id
         ) as config:
             config["metadata"]["usuario"] = usuario_seudonimo(usuario.id)
+            config["run_id"] = traza_id = uuid.uuid4()
             final = EstadoAgente.model_validate(self.grafo.invoke(inicial, config=config))
         consultados = list(
             dict.fromkeys(r.chunk.doc_id for r in final.recuperados if r.chunk.doc_id != "catalogo")
@@ -96,6 +103,7 @@ class Agente:
             documentos_consultados=consultados,
             fragmentos_descartados=final.fragmentos_descartados,
             hallazgos=final.hallazgos,
+            traza_id=str(traza_id),
         )
 
     # ------------------------------------------------------------------ construcción

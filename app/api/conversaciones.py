@@ -1,13 +1,14 @@
 """Conversaciones con permisos de un rol. El historial muestra qué documentos se consultaron."""
 
 import logging
+from typing import Literal
 
 import openai
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.api.dependencias import ServiciosDep, UsuarioDep
-from app.persistencia.modelos import Conversacion, MensajeGuardado
+from app.persistencia.modelos import Conversacion, Feedback, MensajeGuardado
 from app.retrieval.no_configurado import ProveedorNoConfiguradoError
 
 router = APIRouter(prefix="/conversaciones", tags=["conversaciones"])
@@ -45,3 +46,23 @@ def preguntar(
     except openai.APIError as exc:
         logger.exception("Error del proveedor LLM")
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Error del proveedor de IA") from exc
+
+
+class NuevaValoracion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    valoracion: Literal["positiva", "negativa"]
+    comentario: str | None = Field(default=None, max_length=500)
+
+
+@router.post("/{conversacion_id}/mensajes/{mensaje_id}/feedback", response_model=MensajeGuardado)
+def valorar(
+    conversacion_id: str,
+    mensaje_id: int,
+    body: NuevaValoracion,
+    usuario: UsuarioDep,
+    servicios: ServiciosDep,
+) -> MensajeGuardado:
+    """Valoración 👍/👎 de una respuesta: se guarda en el historial y va a LangSmith."""
+    return servicios.conversaciones.valorar(
+        usuario, conversacion_id, mensaje_id, Feedback(**body.model_dump())
+    )

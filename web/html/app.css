@@ -307,3 +307,13 @@ input[type="text"]:hover, select:hover, textarea:hover { border-color: var(--fg-
 .role-item button.link { background: none; border: 0; padding: 0; color: var(--primary); font: inherit;
   font-size: .8125rem; font-weight: 600; cursor: pointer; min-height: 32px; }
 .form-error { color: var(--danger); font-size: .8125rem; }
+
+/* ------------------------------------------------------------ feedback */
+.feedback { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); font-size: .8125rem; color: var(--fg-2); }
+.feedback .btn-icon { width: 36px; min-height: 36px; border: 1px solid var(--border); background: var(--surface); color: var(--fg-2); }
+.feedback .btn-icon:hover { color: var(--fg); border-color: var(--border-strong); }
+.feedback .btn-icon[aria-pressed="true"].up { color: var(--ok); border-color: var(--ok); background: var(--ok-soft); }
+.feedback .btn-icon[aria-pressed="true"].down { color: var(--danger); border-color: var(--danger); background: var(--danger-soft); }
+.feedback form { display: flex; gap: var(--s2); flex: 1 1 280px; }
+.feedback input { flex: 1; min-height: 36px; }
+.feedback .gracias { color: var(--ok); }

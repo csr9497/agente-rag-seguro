@@ -50,6 +50,12 @@ class DocumentoRegistrado(BaseModel):
         return sorted(set(v))
 
 
+class Feedback(BaseModel):
+    valoracion: Literal["positiva", "negativa"]
+    comentario: str | None = Field(default=None, max_length=500)
+    creado_en: str = ""
+
+
 class MensajeGuardado(BaseModel):
     id: int | None = None
     pregunta: str = Field(description="Tal como la procesó el agente (PII enmascarada)")
@@ -59,6 +65,8 @@ class MensajeGuardado(BaseModel):
     documentos_consultados: list[str] = Field(default_factory=list)
     fragmentos_descartados: int = 0
     hallazgos: list[Hallazgo] = Field(default_factory=list)
+    traza_id: str | None = Field(default=None, description="run_id de la ejecución (LangSmith)")
+    feedback: Feedback | None = None
     creado_en: str = ""
 
 

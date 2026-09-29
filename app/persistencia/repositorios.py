@@ -17,9 +17,19 @@ from app.persistencia.modelos import (
     Conversacion,
     DocumentoRegistrado,
     EstadoDocumento,
+    Feedback,
     MensajeGuardado,
     Rol,
 )
+
+_CAMPOS_DATOS = {
+    "citas",
+    "documentos_consultados",
+    "fragmentos_descartados",
+    "hallazgos",
+    "traza_id",
+    "feedback",
+}
 
 
 def ahora() -> str:
@@ -49,6 +59,9 @@ class RepositorioConversaciones(Protocol):
     def agregar_mensaje(
         self, conversacion_id: str, mensaje: MensajeGuardado
     ) -> MensajeGuardado: ...
+    def registrar_feedback(
+        self, conversacion_id: str, mensaje_id: int, feedback: Feedback
+    ) -> MensajeGuardado | None: ...
 
 
 # ------------------------------------------------------------------ motor
@@ -253,7 +266,7 @@ class SqlRepositorioConversaciones:
         mensaje = mensaje.model_copy(update={"creado_en": mensaje.creado_en or ahora()})
         datos = mensaje.model_dump(
             mode="json",
-            include={"citas", "documentos_consultados", "fragmentos_descartados", "hallazgos"},
+            include=_CAMPOS_DATOS,
         )
         with self._motor.begin() as c:
             resultado = c.execute(
@@ -267,3 +280,20 @@ class SqlRepositorioConversaciones:
                 )
             )
         return mensaje.model_copy(update={"id": resultado.inserted_primary_key[0]})
+
+    def registrar_feedback(
+        self, conversacion_id: str, mensaje_id: int, feedback: Feedback
+    ) -> MensajeGuardado | None:
+        conv = self.obtener(conversacion_id)
+        mensaje = next((m for m in conv.mensajes if m.id == mensaje_id), None) if conv else None
+        if mensaje is None:
+            return None
+        feedback = feedback.model_copy(update={"creado_en": feedback.creado_en or ahora()})
+        actualizado = mensaje.model_copy(update={"feedback": feedback})
+        with self._motor.begin() as c:
+            c.execute(
+                update(t.mensajes)
+                .where(t.mensajes.c.id == mensaje_id)
+                .values(datos=actualizado.model_dump(mode="json", include=_CAMPOS_DATOS))
+            )
+        return actualizado
