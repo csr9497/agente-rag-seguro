@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -57,6 +57,12 @@ class Settings(BaseSettings):
     langsmith_api_key: SecretStr | None = None
     langsmith_project: str = "agente-rag-dev"
     app_version: str = "local"
+
+    # Autenticación: stub (local, sin login) o entra (token de Entra ID validado).
+    auth_modo: Literal["stub", "entra"] = "stub"
+    entra_tenant_id: str = ""
+    entra_audiencia: str = Field(default="", description="Client ID o App ID URI de la API")
+    entra_claim_roles: str = "roles"
 
     # Fase 1: sin autenticación. El usuario es un stub con estos grupos.
     default_user: str = "anonimo"

@@ -1,4 +1,10 @@
 # BACKEND_URL lo inyecta el entrypoint de nginx (envsubst) al arrancar.
+# Token de Easy Auth → Authorization para el backend (vacío si no hay: el backend decide).
+map $http_x_ms_token_aad_id_token $autorizacion_backend {
+    ""      $http_authorization;
+    default "Bearer $http_x_ms_token_aad_id_token";
+}
+
 server {
     listen 8080;
     server_tokens off;
@@ -13,6 +19,8 @@ server {
         proxy_pass ${BACKEND_URL}/documentos;
         proxy_set_header Host $proxy_host;
         proxy_set_header X-Usuario-Grupos "";
+        # Easy Auth (Container Apps) inyecta el id token; el backend lo valida (firma incluida).
+        proxy_set_header Authorization $autorizacion_backend;
         proxy_ssl_server_name on;
         proxy_read_timeout 300s;
         client_max_body_size 2m;
@@ -23,6 +31,8 @@ server {
         proxy_set_header Host $proxy_host;
         # La identidad nunca la elige el cliente: se elimina la cabecera de depuración.
         proxy_set_header X-Usuario-Grupos "";
+        # Easy Auth (Container Apps) inyecta el id token; el backend lo valida (firma incluida).
+        proxy_set_header Authorization $autorizacion_backend;
         proxy_ssl_server_name on;
         proxy_read_timeout 120s;
         client_max_body_size 16k;

@@ -38,3 +38,14 @@ variable "app_version" {
   description = "Versión desplegada (git SHA); va a la metadata de las trazas"
   default     = "desconocida"
 }
+
+variable "entra_tenant_id" {
+  type    = string
+  default = ""
+}
+
+variable "entra_audiencia" {
+  type        = string
+  description = "Client ID de la app registration de la API. Vacío = sin autenticación (no recomendado)."
+  default     = ""
+}

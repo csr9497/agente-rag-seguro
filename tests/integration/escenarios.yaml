@@ -109,8 +109,12 @@ capacidades:
       - tests/test_acceso.py::test_integridad_detecta_y_pone_en_cuarentena
       - tests/test_acceso.py::test_integridad_falta_en_indice_y_reactivacion
   autenticacion_entra:
-    descripcion: Grupos obtenidos del token de Entra ID; sin token → 401
+    descripcion: Roles obtenidos del token de Entra ID validado; sin token o inválido → 401
     fase: 3
+    tests_unitarios:
+      - tests/test_entra.py::test_tokens_invalidos
+      - tests/test_entra.py::test_sin_token_401
+      - tests/test_entra.py::test_no_se_puede_actuar_con_un_rol_que_no_esta_en_el_token
   guardrails_entrada:
     descripcion: Bloqueo de inyección y texto oculto en la pregunta antes de llegar al LLM
     fase: 2

@@ -48,6 +48,10 @@ locals {
     # Sin Entra ID todavía: ni selección libre de rol ni gestión de documentos en Azure.
     SELECCION_LIBRE_DE_ROL = "false"
     GESTION_DOCUMENTOS     = "false"
+    # Entra ID: si hay app registration, la API exige token (roles = app roles de Entra).
+    AUTH_MODO       = var.entra_audiencia != "" ? "entra" : "stub"
+    ENTRA_TENANT_ID = var.entra_tenant_id
+    ENTRA_AUDIENCIA = var.entra_audiencia
   }
 }
 
