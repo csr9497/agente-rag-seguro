@@ -3,7 +3,7 @@ from typing import Annotated, Any, Protocol
 from pydantic import AfterValidator, BaseModel, Field
 
 from app.acciones.modelos import PropuestaAccion
-from app.models.schemas import ChunkRecuperado, Usuario
+from app.models.schemas import Aclaracion, ChunkRecuperado, Usuario
 
 PATRON_GRUPO = r"^[a-z0-9][a-z0-9_\-]{0,63}$"
 PATRON_DOC_ID = r"^[a-z0-9][a-z0-9_\-]{0,63}/[\w\-. /]+$"
@@ -36,6 +36,9 @@ class ResultadoHerramienta(BaseModel):
     )
     conversacion: str | None = Field(
         default=None, description="Tipo de respuesta de cortesía (saludo, ayuda…)"
+    )
+    aclaracion: Aclaracion | None = Field(
+        default=None, description="Pregunta al usuario para concretar su consulta"
     )
 
 

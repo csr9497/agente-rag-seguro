@@ -6,6 +6,7 @@ authorize e input_guardrail pueden cortar el flujo directamente hacia audit: tod
 se audita, también las rechazadas.
 """
 
+import json
 import uuid
 from collections.abc import Callable
 from datetime import date
@@ -44,6 +45,7 @@ class ResultadoAgente(BaseModel):
     traza_id: str
     desde_cache: bool = False
     acciones: list[PropuestaAccion] = Field(default_factory=list)
+    consultas: list[str] = Field(default_factory=list, description="Consultas curadas enviadas")
 
 
 def _bloqueada() -> RespuestaConsulta:
@@ -129,6 +131,7 @@ class Agente:
             traza_id=str(traza_id),
             desde_cache=final.desde_cache,
             acciones=final.acciones_propuestas,
+            consultas=final.consultas,
         )
 
     # ------------------------------------------------------------------ construcción
@@ -221,7 +224,15 @@ class Agente:
             )
             for llamada in estado.pendientes
         ]
-        return {"por_revisar": resultados, "pendientes": []}
+        consultas = list(estado.consultas)
+        for llamada in estado.pendientes:
+            try:
+                consulta = json.loads(llamada.argumentos).get("consulta")
+            except (ValueError, AttributeError):
+                consulta = None
+            if isinstance(consulta, str) and consulta and consulta not in consultas:
+                consultas.append(consulta)
+        return {"por_revisar": resultados, "pendientes": [], "consultas": consultas}
 
     def _access_guardrail(self, estado: EstadoAgente) -> Update:
         """Verifica cada fragmento contra el registro; acumula contexto y compone los mensajes
@@ -233,10 +244,12 @@ class Agente:
         descartados_total = estado.fragmentos_descartados
         acciones = list(estado.acciones_propuestas)
         conversacion = estado.conversacion
+        aclaracion = estado.aclaracion
         for llamada in estado.por_revisar:
             resultado = llamada.resultado
             acciones += [a for a in resultado.acciones if a.rol_id in estado.usuario.groups]
             conversacion = resultado.conversacion or conversacion
+            aclaracion = resultado.aclaracion or aclaracion
             nuevos: list[ChunkRecuperado] = []
             sin_acceso = por_tope = 0
             for r in resultado.chunks:
@@ -284,6 +297,7 @@ class Agente:
             "fragmentos_descartados": descartados_total,
             "acciones_propuestas": acciones,
             "conversacion": conversacion,
+            "aclaracion": aclaracion,
         }
 
     def _ejecutar(self, nombre: str, argumentos: str, estado: EstadoAgente) -> ResultadoHerramienta:
@@ -331,6 +345,7 @@ class Agente:
             or usa_datos
             or estado.acciones_propuestas
             or estado.conversacion
+            or estado.aclaracion
             or _requerir_respuesta(estado).sin_contexto  # un «no encuentro» no se reutiliza
             or not estado.vector_pregunta
         ):
@@ -349,6 +364,16 @@ class Agente:
 
     def _generate(self, estado: EstadoAgente) -> Update:
         acciones = estado.acciones_propuestas
+        if estado.aclaracion and not estado.recuperados and not acciones:
+            # Consulta imprecisa: se pregunta al usuario en lugar de buscar a ciegas.
+            return {
+                "respuesta": RespuestaConsulta(
+                    respuesta=estado.aclaracion.pregunta,
+                    citas=[],
+                    sin_contexto=True,
+                    aclaracion=estado.aclaracion,
+                )
+            }
         if estado.conversacion in PLANTILLAS and not estado.recuperados and not acciones:
             # Saludo, agradecimiento, ayuda…: plantilla fija, sin LLM y sin inventar contenido.
             texto = PLANTILLAS[estado.conversacion]

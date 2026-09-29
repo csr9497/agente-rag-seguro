@@ -46,6 +46,7 @@ from app.servicios.conversaciones import ServicioConversaciones
 from app.servicios.integridad import InformeIntegridad, verificar_integridad
 from app.servicios.roles import ServicioRoles
 from app.tools.acciones import ProponerAccion
+from app.tools.aclaracion import PedirAclaracion
 from app.tools.conversacion import ResponderConversacion
 from app.tools.datos import DataQuery
 from app.tools.documentos import BuscarEnDocumento, LeerDocumento, ListarDocumentos
@@ -229,6 +230,7 @@ def _agente(
         herramientas=[
             RagRetrieve(embedder, retriever, settings.min_score),
             ResponderConversacion(),
+            PedirAclaracion(),
             ListarDocumentos(retriever, registro),
             BuscarEnDocumento(embedder, retriever),
             LeerDocumento(retriever),

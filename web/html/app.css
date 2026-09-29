@@ -351,3 +351,8 @@ select:disabled { opacity: .5; cursor: not-allowed; }
 .badge.warn { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
 .badge.ok { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
 .badge.danger { background: var(--danger-soft); color: var(--danger); border-color: transparent; }
+
+/* ------------------------------------------------------------ aclaración y consultas */
+.opciones { display: flex; flex-wrap: wrap; gap: var(--s2); }
+.opciones .opcion { min-height: 40px; font-weight: 500; text-align: left; }
+.consultas { font-size: .75rem; }

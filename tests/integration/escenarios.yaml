@@ -30,6 +30,9 @@ capacidades:
   conversacion:
     descripcion: Saludos y cortesía con respuesta por plantilla, sin buscar ni inventar
     fase: 3
+  aclaracion:
+    descripcion: Un mensaje impreciso se rebota con una pregunta en vez de buscar a ciegas
+    fase: 3
   permisos_datos:
     descripcion: El retrieval solo devuelve documentos del rol de la conversación
     fase: 1
@@ -298,6 +301,15 @@ escenarios:
     esperado:
       sin_contexto: true
       contiene_alguno: ["Hola", "hola"]
+      no_consultados: [public/, rrhh/]
+
+  - id: ACL-01
+    descripcion: Mensaje sin tema ni contexto previo → pregunta de aclaración, sin buscar
+    capacidades: [aclaracion]
+    pregunta: ¿Y eso cuánto es?
+    esperado:
+      aclaracion: true
+      sin_contexto: true
       no_consultados: [public/, rrhh/]
 
   # --- Caché con permisos (orden importa: RRHH cachea primero, luego public pregunta igual) ---

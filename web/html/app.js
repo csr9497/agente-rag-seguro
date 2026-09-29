@@ -215,7 +215,7 @@ function pintarChat() {
     } else {
       mensajes.push(el("div", { class: "msg-bot", "aria-busy": "true" },
         el("div", { class: "status-line" }, el("span", { class: "spinner", "aria-hidden": "true" }),
-          el("span", {}, "Buscando en los documentos de ", el("strong", {}, estado.rol.nombre), "…")),
+          el("span", {}, "Analizando tu mensaje…")),
         el("div", { class: "skeleton", "aria-hidden": "true" }, el("span"), el("span"), el("span"))));
     }
   }
@@ -336,15 +336,30 @@ function pintarRespuesta(m, i) {
       el("div", { class: "msg-meta" }, `Asistente · ${hora(m.creado_en)}`),
       el("p", { class: "answer" }, m.respuesta), tarjetasAccion(m), feedback(m));
   }
+  if (m.aclaracion) {
+    const opciones = m.aclaracion.opciones.map((o) => {
+      const b = el("button", { class: "btn btn-secondary opcion", type: "button" }, o);
+      b.addEventListener("click", () => { if (!(estado.pendiente && !estado.pendiente.error)) preguntar(o); });
+      return b;
+    });
+    return el("article", { class: "msg-bot" },
+      el("div", { class: "msg-meta" }, `Asistente · ${hora(m.creado_en)}`),
+      el("p", { class: "answer" }, m.aclaracion.pregunta),
+      opciones.length ? el("div", { class: "opciones", role: "group", "aria-label": "Elige una opción o escribe tu pregunta" }, opciones) : null,
+      el("p", { class: "hint" }, "Elige una opción o escribe tu pregunta con más detalle."));
+  }
   if (m.conversacional) {
     return el("article", { class: "msg-bot" },
       el("div", { class: "msg-meta" }, `Asistente · ${hora(m.creado_en)}`),
       el("p", { class: "answer" }, m.respuesta));
   }
   if (m.sin_contexto) {
+    const busque = (m.consultas || []).map((q) => `«${q}»`).join(", ");
+    const texto = busque
+      ? `Busqué ${busque} en los documentos de tu rol y no encontré información. Prueba a concretar el tema o el periodo; si crees que debería estar, pide acceso al rol correspondiente.`
+      : "Ningún documento visible para tu rol responde a esta pregunta. Si crees que debería, pide acceso al rol correspondiente.";
     return el("div", { class: "msg-bot" },
-      notice("info", "i-info", "No encuentro esa información en tus documentos",
-        "Ningún documento visible para tu rol responde a esta pregunta. Si crees que debería, pide acceso al rol correspondiente."),
+      notice("info", "i-info", "No encuentro esa información en tus documentos", texto),
       consultados(m), feedback(m));
   }
   const id = `m${i}`;
@@ -367,7 +382,13 @@ function pintarRespuesta(m, i) {
   return el("article", { class: "msg-bot", "aria-label": `Respuesta de las ${hora(m.creado_en)}` },
     el("div", { class: "msg-meta" }, `Asistente · ${hora(m.creado_en)}`,
       m.desde_cache ? el("span", { class: "badge", title: "Respuesta reutilizada: mismos documentos visibles para tu rol" }, " desde caché") : null),
-    answer, fuentes, consultados(m), tarjetasAccion(m), feedback(m));
+    answer, fuentes, busquedas(m), consultados(m), tarjetasAccion(m), feedback(m));
+}
+
+// Consulta curada por el supervisor: qué se buscó realmente en los documentos.
+function busquedas(m) {
+  const qs = m.consultas || [];
+  return qs.length ? el("p", { class: "consultas hint" }, "Busqué: ", qs.map((q) => `«${q}»`).join(", ")) : null;
 }
 
 async function preguntar(texto) {

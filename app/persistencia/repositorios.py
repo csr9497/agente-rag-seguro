@@ -43,6 +43,8 @@ _CAMPOS_DATOS = {
     "feedback",
     "desde_cache",
     "conversacional",
+    "aclaracion",
+    "consultas",
     "acciones",
 }
 

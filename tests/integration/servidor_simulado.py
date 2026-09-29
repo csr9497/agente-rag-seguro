@@ -37,6 +37,14 @@ class SupervisorPorPalabras:
         pregunta = contenido.split("<pregunta>")[-1].lower()
         if pregunta.strip(" ¡!¿?.").startswith(("hola", "gracias", "adiós", "buenos días")):
             nombre, args = "conversacion", {"tipo": "saludo"}
+        elif pregunta.strip().startswith("¿y eso") and "<historial>" not in contenido:
+            nombre, args = (
+                "pedir_aclaracion",
+                {
+                    "pregunta": "¿A qué te refieres? ¿Sobre qué tema necesitas el dato?",
+                    "opciones": ["Días de vacaciones al año", "Compensación por teletrabajo"],
+                },
+            )
         elif "ticket" in pregunta:
             nombre, args = (
                 "proponer_accion",

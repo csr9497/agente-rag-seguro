@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 
 from app.acciones.modelos import PropuestaAccion
 from app.models.schemas import (
+    Aclaracion,
     ChunkRecuperado,
     Hallazgo,
     RespuestaConsulta,
@@ -43,6 +44,10 @@ class EstadoAgente(BaseModel):
 
     # Tipo de respuesta de cortesía pedida por la herramienta `conversacion` (saludo, ayuda…).
     conversacion: str | None = None
+    # Pregunta de aclaración al usuario (herramienta pedir_aclaracion).
+    aclaracion: Aclaracion | None = None
+    # Consultas curadas que el supervisor envió a las búsquedas (se muestran al usuario).
+    consultas: list[str] = Field(default_factory=list)
 
     # Acciones propuestas por las tools, pendientes de aprobación humana.
     acciones_propuestas: list[PropuestaAccion] = Field(default_factory=list)

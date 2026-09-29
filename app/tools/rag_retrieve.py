@@ -11,7 +11,8 @@ class RagRetrieveArgs(BaseModel):
     consulta: str = Field(
         min_length=1,
         max_length=500,
-        description="Consulta de búsqueda autocontenida sobre los documentos de la empresa",
+        description="Consulta curada: autocontenida, con el tema y los términos del documento, "
+        "sin saludos ni datos personales",
     )
 
 

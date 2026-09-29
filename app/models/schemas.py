@@ -21,6 +21,13 @@ class Cita(BaseModel):
     score: float
 
 
+class Aclaracion(BaseModel):
+    """Pregunta al usuario cuando su mensaje no permite una consulta precisa."""
+
+    pregunta: str
+    opciones: list[str] = Field(default_factory=list)
+
+
 class RespuestaConsulta(BaseModel):
     respuesta: str
     citas: list[Cita]
@@ -29,6 +36,9 @@ class RespuestaConsulta(BaseModel):
     )
     conversacional: bool = Field(
         default=False, description="Respuesta de cortesía por plantilla (saludo, ayuda…)"
+    )
+    aclaracion: Aclaracion | None = Field(
+        default=None, description="Si se pide al usuario que concrete (sin buscar)"
     )
 
 

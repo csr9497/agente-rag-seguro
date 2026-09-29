@@ -46,6 +46,9 @@ class Expectativa(BaseModel):
     )
     contiene_alguno: list[str] = []
     no_contiene: list[str] = []
+    aclaracion: bool | None = Field(
+        default=None, description="True: debe pedir aclaración en vez de buscar"
+    )
 
 
 class Escenario(BaseModel):
@@ -171,6 +174,8 @@ def _expectativas(r: MensajeGuardado, e: Expectativa) -> list[str]:
     texto = r.respuesta.lower()
     if e.sin_contexto is not None and r.sin_contexto != e.sin_contexto:
         fallos.append(f"sin_contexto={r.sin_contexto}, esperado {e.sin_contexto}")
+    if e.aclaracion is not None and (r.aclaracion is not None) != e.aclaracion:
+        fallos.append(f"aclaración={r.aclaracion is not None}, esperado {e.aclaracion}")
     if len(r.citas) < e.min_citas:
         fallos.append(f"{len(r.citas)} citas < mínimo {e.min_citas}")
     if e.alguna_fuente_de and not fuentes & set(e.alguna_fuente_de):
