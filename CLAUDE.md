@@ -13,7 +13,7 @@ Agente LangGraph + RAG con permisos + guardrails, en Azure, con Terraform y CI/C
 - LLM + embeddings: **Azure OpenAI** (SDK `openai` con `AzureOpenAI`)
 - Retrieval / vector store: **Azure AI Search** (híbrido + security trimming)
 - API: **FastAPI**
-- Estado + auditoría + checkpointer del agente: **PostgreSQL**
+- Estado + auditoría: **PostgreSQL** (sin checkpointer de LangGraph: ver docs/diseno-fase-3.md §4)
 - Caché semántica: **Azure Cache for Redis** (permission-aware)
 - Identidad: **Entra ID** (roles/grupos en el token)
 - Guardrails: **Azure AI Content Safety** (prompt shields) + detección de PII

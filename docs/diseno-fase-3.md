@@ -215,6 +215,12 @@ el rol que publica se incluye siempre en el documento.
 - **Límite de SQLite**: un solo proceso escritor. Sirve para local y una réplica, pero no
   para Container Apps con varias réplicas: al desplegar la app en Azure se pasa a PostgreSQL
   Flexible Server.
+- **Sin checkpointer de LangGraph** (decisión 2026-09-28). El checkpointer guardaría el
+  estado de entrada *antes* de `input_guardrail` (la pregunta con la PII sin enmascarar) y
+  los fragmentos confidenciales recuperados: datos en reposo que hoy ni la auditoría guarda.
+  La memoria de conversación vive en `RepositorioConversaciones` (PII enmascarada) y la
+  aprobación humana de acciones no necesita reanudar el grafo. Si hiciera falta en el futuro
+  (p. ej. `interrupt` en el grafo), solo con serializador cifrado (clave en Key Vault).
 
 ---
 
