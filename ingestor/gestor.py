@@ -12,6 +12,7 @@ import hashlib
 import logging
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -20,6 +21,11 @@ from app.persistencia.almacen import AlmacenDocumentos
 from app.persistencia.modelos import DocumentoRegistrado
 from app.persistencia.repositorios import RepositorioDocumentos, RepositorioRoles
 from app.retrieval.base import Embedder, Retriever
+from app.security.content_safety import (
+    ClienteShields,
+    ContentSafetyError,
+    detectar_ataque_en_documento,
+)
 from ingestor.chunking import chunk_document
 from ingestor.sources import Source
 from ingestor.validacion import validar_documento
@@ -69,13 +75,31 @@ class GestorDocumentos:
         registro: RepositorioDocumentos | None = None,
         roles: RepositorioRoles | None = None,
         almacen: AlmacenDocumentos | None = None,
+        shields: ClienteShields | None = None,
+        shields_fallo: Literal["cerrado", "abierto"] = "cerrado",
     ) -> None:
         self._embedder = embedder
         self._retriever = retriever
         self._registro = registro
         self._roles = roles
         self._almacen = almacen
+        self._shields = shields
+        self._shields_fallo = shields_fallo
         self._indice_listo = False
+
+    def _revisar_shields(self, texto: str) -> tuple[str | None, str | None]:
+        """Inyección indirecta con Prompt Shields, además de las heurísticas locales ya
+        aplicadas. Devuelve (motivo de rechazo, aviso)."""
+        if self._shields is None:
+            return None, None
+        try:
+            if detectar_ataque_en_documento(self._shields, texto):
+                return "inyección de prompt: prompt_shields", None
+        except ContentSafetyError as e:
+            if self._shields_fallo == "cerrado":
+                return f"no se pudo verificar con Prompt Shields ({e})", None
+            return None, f"sin verificar con Prompt Shields ({e})"
+        return None, None
 
     def _asegurar_indice(self) -> None:
         if not self._indice_listo:
@@ -96,6 +120,11 @@ class GestorDocumentos:
         acl = validado.acl_groups
         if motivo := self._roles_no_validos(acl):
             return ResultadoOperacion(doc_id=doc_id, estado="rechazado", motivos=[motivo])
+        motivo, aviso = self._revisar_shields(validado.texto)
+        if motivo:
+            return ResultadoOperacion(doc_id=doc_id, estado="rechazado", motivos=[motivo])
+        if aviso:
+            validado.avisos.append(aviso)
 
         self._asegurar_indice()
         doc_hash = hash_texto(validado.texto)

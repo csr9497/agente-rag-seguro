@@ -15,6 +15,8 @@ output "qdrant_url" { value = var.qdrant_modo == "cloud" ? var.qdrant_cloud_url 
 output "search_endpoint" { value = local.search ? module.search[0].endpoint : "" }
 output "search_auth" { value = var.search_auth }
 
+output "content_safety_endpoint" { value = var.content_safety ? module.content_safety[0].endpoint : "" }
+
 output "storage_blob_endpoint" { value = module.storage.blob_endpoint }
 output "storage_account_name" { value = module.storage.name }
 output "storage_container" { value = module.storage.container_name }

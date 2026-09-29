@@ -83,9 +83,10 @@ class Hallazgo(BaseModel):
         "fuga_prompt",
         "etiqueta_estructural",
         "acceso_no_autorizado",
+        "servicio_no_disponible",
     ]
     detalle: str
-    accion: Literal["bloquear", "enmascarar", "eliminar"]
+    accion: Literal["bloquear", "enmascarar", "eliminar", "registrar"]
 
 
 class RegistroAuditoria(BaseModel):

@@ -165,6 +165,17 @@ variable "cache_redis" {
   default     = true
 }
 
+variable "content_safety" {
+  type        = bool
+  description = "Azure AI Content Safety (Prompt Shields) además de los guardrails locales"
+  default     = true
+}
+
+variable "content_safety_sku" {
+  type    = string
+  default = "S0"
+}
+
 variable "redis_sku" {
   type    = string
   default = "Balanced_B0"

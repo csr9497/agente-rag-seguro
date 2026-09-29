@@ -39,6 +39,8 @@ locals {
     AZURE_SEARCH_ENDPOINT             = local.p.search_endpoint
     AZURE_SEARCH_INDEX                = "documentos"
     QDRANT_URL                        = local.qdrant_url
+    CONTENT_SAFETY_ENDPOINT           = local.p.content_safety_endpoint
+    CONTENT_SAFETY_FALLO              = "cerrado"
     ALMACEN_DOCUMENTOS                = "blob"
     AZURE_STORAGE_ACCOUNT_URL         = local.p.storage_blob_endpoint
     AZURE_STORAGE_CONTAINER           = local.p.storage_container

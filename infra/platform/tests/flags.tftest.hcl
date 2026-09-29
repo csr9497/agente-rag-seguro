@@ -140,3 +140,38 @@ run "completo_sin_redis" {
     error_message = "cache_redis=false no crea Redis ni su secreto"
   }
 }
+
+run "content_safety_con_rbac_y_sin_claves" {
+  command = plan
+  variables {
+    alcance      = "completo"
+    vector_store = "azure_search"
+    search_sku   = "basic"
+  }
+  assert {
+    condition     = length(module.content_safety) == 1
+    error_message = "Content Safety se crea por defecto"
+  }
+  assert {
+    condition     = alltrue([for k in ["backend_cs", "ingest_cs"] : azurerm_role_assignment.this[k].role_definition_name == "Cognitive Services User"])
+    error_message = "Backend e ingesta acceden a Content Safety con Managed Identity"
+  }
+  assert {
+    condition     = !anytrue([for s in output.secretos_en_key_vault : strcontains(s, "content-safety")])
+    error_message = "Content Safety no usa claves: ningún secreto en Key Vault"
+  }
+}
+
+run "sin_content_safety" {
+  command = plan
+  variables {
+    alcance        = "modelos"
+    vector_store   = "qdrant"
+    qdrant_modo    = "local"
+    content_safety = false
+  }
+  assert {
+    condition     = length(module.content_safety) == 0 && output.content_safety_endpoint == ""
+    error_message = "content_safety=false no crea el recurso y deja el endpoint vacío"
+  }
+}

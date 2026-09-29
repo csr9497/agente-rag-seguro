@@ -105,6 +105,17 @@ module "search" {
   tags                          = local.tags
 }
 
+module "content_safety" {
+  count                         = var.content_safety ? 1 : 0
+  source                        = "../modules/content_safety"
+  name                          = "cs-${local.flat}"
+  location                      = var.location
+  resource_group_name           = azurerm_resource_group.this.name
+  sku_name                      = var.content_safety_sku
+  public_network_access_enabled = local.public
+  tags                          = local.tags
+}
+
 # ------------------------------------------------------------------ solo alcance=completo
 module "network" {
   count               = local.completo ? 1 : 0

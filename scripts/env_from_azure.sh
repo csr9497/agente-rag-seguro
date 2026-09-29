@@ -29,6 +29,9 @@ elif [[ "$($TF qdrant_modo)" == "cloud" ]]; then
   set_var QDRANT_API_KEY "$(secreto qdrant-api-key)"
 fi
 
+# Prompt Shields: sin clave (local_auth desactivado); usa tu az login fuera de Docker.
+set_var CONTENT_SAFETY_ENDPOINT "$($TF content_safety_endpoint)"
+
 # Originales en Blob: solo si la app corre fuera de Docker (usa tu az login; las claves de
 # la cuenta de almacenamiento están desactivadas). En Docker se quedan en local.
 set_var AZURE_STORAGE_ACCOUNT_URL "$($TF storage_blob_endpoint)"

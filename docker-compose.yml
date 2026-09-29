@@ -43,6 +43,8 @@ services:
       CACHE_BACKEND: redis
       REDIS_URL: redis://redis:6379/0
       DATABASE_URL: sqlite:////data/app.db
+      # Sin az login en el contenedor: solo guardrails locales (Prompt Shields, fuera de Docker).
+      CONTENT_SAFETY_ENDPOINT: ""
     volumes:
       - app_data:/data
     ports:

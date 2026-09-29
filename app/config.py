@@ -67,6 +67,13 @@ class Settings(BaseSettings):
     entra_audiencia: str = Field(default="", description="Client ID o App ID URI de la API")
     entra_claim_roles: str = "roles"
 
+    # Azure AI Content Safety (Prompt Shields). Sin endpoint, solo guardrails locales.
+    # Sin clave se usa Managed Identity (rol Cognitive Services User sobre el recurso).
+    content_safety_endpoint: str = ""
+    content_safety_api_key: SecretStr | None = None
+    # Si el servicio falla: "cerrado" bloquea la consulta / rechaza el documento.
+    content_safety_fallo: Literal["cerrado", "abierto"] = "cerrado"
+
     # Fase 1: sin autenticación. El usuario es un stub con estos grupos.
     default_user: str = "anonimo"
     default_groups: list[str] = ["public"]

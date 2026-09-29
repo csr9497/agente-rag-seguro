@@ -43,6 +43,10 @@ locals {
       ingest_blob   = { scope = module.storage.id, role = "Storage Blob Data Reader", principal = local.ingest }
       ingest_kv     = { scope = module.keyvault.id, role = "Key Vault Secrets User", principal = local.ingest }
     },
+    var.content_safety ? {
+      backend_cs = { scope = module.content_safety[0].id, role = "Cognitive Services User", principal = local.backend }
+      ingest_cs  = { scope = module.content_safety[0].id, role = "Cognitive Services User", principal = local.ingest }
+    } : {},
     local.search ? {
       backend_search_idx = { scope = module.search[0].id, role = "Search Index Data Contributor", principal = local.backend }
       backend_search_svc = { scope = module.search[0].id, role = "Search Service Contributor", principal = local.backend }
@@ -64,6 +68,9 @@ locals {
         "dev_kv_${pid}"     = { scope = module.keyvault.id, role = "Key Vault Secrets User", principal = pid }
         "dev_openai_${pid}" = { scope = module.openai.id, role = "Cognitive Services OpenAI User", principal = pid }
       },
+      var.content_safety ? {
+        "dev_cs_${pid}" = { scope = module.content_safety[0].id, role = "Cognitive Services User", principal = pid }
+      } : {},
       local.search ? {
         "dev_search_idx_${pid}" = { scope = module.search[0].id, role = "Search Index Data Contributor", principal = pid }
         "dev_search_svc_${pid}" = { scope = module.search[0].id, role = "Search Service Contributor", principal = pid }

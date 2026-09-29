@@ -35,7 +35,13 @@ from app.retrieval.azure_openai import (
 from app.retrieval.base import LLM, Embedder, Retriever, Supervisor
 from app.retrieval.no_configurado import ModelosNoConfigurados
 from app.security.acceso import VerificadorRegistro
-from app.security.guardrails import GuardrailEntrada, GuardrailSalida
+from app.security.content_safety import SCOPE as SCOPE_CONTENT_SAFETY
+from app.security.content_safety import (
+    ClientePromptShields,
+    ClienteShields,
+    GuardrailPromptShields,
+)
+from app.security.guardrails import Guardrail, GuardrailEntrada, GuardrailSalida
 from app.servicios.conversaciones import ServicioConversaciones
 from app.servicios.integridad import InformeIntegridad, verificar_integridad
 from app.servicios.roles import ServicioRoles
@@ -85,6 +91,21 @@ def build_cache(settings: Settings) -> CacheSemantica:
     return CacheMemoria(umbral=settings.cache_umbral)
 
 
+def build_shields(settings: Settings) -> ClienteShields | None:
+    if not settings.content_safety_endpoint:
+        return None
+    if settings.content_safety_api_key:
+        return ClientePromptShields(
+            settings.content_safety_endpoint,
+            api_key=settings.content_safety_api_key.get_secret_value(),
+        )
+    credencial = DefaultAzureCredential()
+    return ClientePromptShields(
+        settings.content_safety_endpoint,
+        obtener_token=lambda: credencial.get_token(SCOPE_CONTENT_SAFETY).token,
+    )
+
+
 def build_almacen(settings: Settings) -> AlmacenDocumentos:
     if settings.almacen_documentos == "blob":
         return AlmacenBlob(settings.azure_storage_account_url, settings.azure_storage_container)
@@ -129,11 +150,13 @@ def build_servicios(
     *,
     modelos: tuple[Embedder, LLM, Supervisor] | None = None,
     retriever: Retriever | None = None,
+    shields: ClienteShields | None = None,
 ) -> Servicios:
     """Composición completa. Agente y gestor comparten embedder, retriever (Qdrant embebido
     solo admite un cliente por proceso) y registro. `modelos`/`retriever` permiten tests."""
     embedder, llm, supervisor = modelos or build_modelos(settings)
     retriever = retriever or build_retriever(settings)
+    shields = shields or build_shields(settings)
     motor = crear_motor(settings.database_url)
     inicializar(motor)
     repo_roles = SqlRepositorioRoles(motor)
@@ -148,7 +171,7 @@ def build_servicios(
 
     agente = _agente(
         settings, embedder, llm, supervisor, retriever, registro,
-        cache=cache, alcance_cache=alcance, motor=motor,
+        cache=cache, alcance_cache=alcance, motor=motor, shields=shields,
     )  # fmt: skip
     roles = ServicioRoles(repo_roles, settings.seleccion_libre_de_rol)
     return Servicios(
@@ -159,6 +182,8 @@ def build_servicios(
             registro=registro,
             roles=repo_roles,
             almacen=build_almacen(settings),
+            shields=shields,
+            shields_fallo=settings.content_safety_fallo,
         ),
         roles=roles,
         conversaciones=ServicioConversaciones(
@@ -174,7 +199,10 @@ def build_servicios(
 def build_agente(settings: Settings) -> Agente:
     """Agente sin registro (LangGraph Studio y /consultar): verificación solo por ACL."""
     embedder, llm, supervisor = build_modelos(settings)
-    return _agente(settings, embedder, llm, supervisor, build_retriever(settings))
+    return _agente(
+        settings, embedder, llm, supervisor, build_retriever(settings),
+        shields=build_shields(settings),
+    )  # fmt: skip
 
 
 def _agente(
@@ -187,7 +215,11 @@ def _agente(
     cache: CacheSemantica | None = None,
     alcance_cache: Callable[[list[str]], str] | None = None,
     motor: Engine | None = None,
+    shields: ClienteShields | None = None,
 ) -> Agente:
+    entrada: Guardrail = GuardrailEntrada()
+    if shields is not None:
+        entrada = GuardrailPromptShields(entrada, shields, settings.content_safety_fallo)
     return Agente(
         trazas=configurar_trazas(settings),
         settings=settings,
@@ -204,7 +236,7 @@ def _agente(
                 else []
             ),
         ],
-        guardrail_entrada=GuardrailEntrada(),
+        guardrail_entrada=entrada,
         guardrail_salida=GuardrailSalida([SYSTEM_PROMPT, SUPERVISOR_PROMPT]),
         top_k=settings.retrieval_top_k,
         max_iteraciones=settings.max_iteraciones,

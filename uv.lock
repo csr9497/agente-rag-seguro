@@ -11,6 +11,7 @@ dependencies = [
     { name = "azure-search-documents" },
     { name = "azure-storage-blob" },
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "langgraph" },
     { name = "langsmith" },
     { name = "openai" },
@@ -28,7 +29,6 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "fakeredis" },
-    { name = "httpx" },
     { name = "langgraph-cli", extra = ["inmem"] },
     { name = "pytest" },
     { name = "pyyaml" },
@@ -41,6 +41,7 @@ requires-dist = [
     { name = "azure-search-documents" },
     { name = "azure-storage-blob" },
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "langgraph", specifier = ">=1.2.12" },
     { name = "langsmith" },
     { name = "openai" },
@@ -58,7 +59,6 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "fakeredis" },
-    { name = "httpx" },
     { name = "langgraph-cli", extras = ["inmem"], specifier = ">=0.4.32" },
     { name = "pytest" },
     { name = "pyyaml" },

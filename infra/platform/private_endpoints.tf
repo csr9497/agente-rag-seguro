@@ -5,6 +5,9 @@ locals {
       blob   = { resource_id = module.storage.id, subresource = "blob", zone = "privatelink.blob.core.windows.net" }
       vault  = { resource_id = module.keyvault.id, subresource = "vault", zone = "privatelink.vaultcore.azure.net" }
     },
+    var.content_safety ? {
+      content_safety = { resource_id = module.content_safety[0].id, subresource = "account", zone = "privatelink.cognitiveservices.azure.com" }
+    } : {},
     local.search ? {
       search = { resource_id = module.search[0].id, subresource = "searchService", zone = "privatelink.search.windows.net" }
     } : {}

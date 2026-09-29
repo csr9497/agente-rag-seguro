@@ -21,12 +21,12 @@ dependencies = [
     "psycopg[binary]",         # PostgreSQL en Azure (DATABASE_URL postgresql+psycopg)
     "pyjwt[crypto]",           # validación de tokens de Entra ID (RS256 + JWKS)
     "redis",                   # caché semántica compartida (Azure Cache for Redis)
+    "httpx",                   # Prompt Shields por REST (ya dependencia de openai; uso directo)
 ]
 
 [dependency-groups]
 dev = [
     "pytest",
-    "httpx",   # TestClient de FastAPI y cliente de las pruebas de integración
     "pyyaml",  # matriz de escenarios de integración
     "ruff",
     "langgraph-cli[inmem]>=0.4.32",
