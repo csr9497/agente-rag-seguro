@@ -152,3 +152,63 @@ def test_dataset_desde_la_matriz() -> None:
         == primero["metadata"]["escenario_id"]
     )
     assert set(primero["inputs"]) == {"rol", "cuerpo", "turnos_previos"}
+
+
+# ---------------------------------------------------------- evaluadores prebuilt (openevals)
+def test_evaluadores_rag_solo_en_respuestas_fundamentadas(monkeypatch) -> None:
+    import evals.langsmith as ls
+
+    llamadas: list[tuple[str, dict]] = []
+
+    def fabrica(*, prompt, feedback_key, judge, model):
+        assert judge == "cliente" and model == "gpt-4o"
+
+        def juzgar(**kw):
+            llamadas.append((feedback_key, kw))
+            return {"key": feedback_key, "score": True, "comment": "ok"}
+
+        return juzgar
+
+    monkeypatch.setattr(ls, "create_llm_as_judge", fabrica)
+    evaluadores = {e.__name__: e for e in ls.evaluadores_rag("cliente", "gpt-4o")}
+    assert set(evaluadores) == set(ls.EVALUADORES_RAG)
+
+    inputs = {"cuerpo": {"pregunta": "¿Vacaciones?"}}
+    fundamentada = {
+        "status": 200,
+        "cuerpo": {
+            "respuesta": "23 días [1].",
+            "sin_contexto": False,
+            "citas": [{"fragmento": "Vacaciones: 23 días."}],
+        },
+    }
+    for e in evaluadores.values():
+        assert e(inputs, fundamentada)["score"] is True
+    por_clave = dict(llamadas)
+    assert por_clave["rag_groundedness"] == {
+        "context": "[1] Vacaciones: 23 días.",
+        "outputs": "23 días [1].",
+    }
+    assert por_clave["rag_helpfulness"] == {"inputs": "¿Vacaciones?", "outputs": "23 días [1]."}
+    assert set(por_clave["rag_retrieval_relevance"]) == {"inputs", "context"}
+
+    llamadas.clear()
+    bloqueada = {"status": 200, "cuerpo": {"respuesta": "No puedo", "sin_contexto": True}}
+    for salida in (bloqueada, {"status": 403, "cuerpo": {"detail": "x"}}):
+        for e in evaluadores.values():
+            assert e(inputs, salida) == {"results": []}
+    assert llamadas == []
+
+
+def test_umbral_groundedness_bloquea() -> None:
+    from evals.ejecutar import UMBRALES, aplicar_umbrales
+    from evals.modelos import Metrica, ResultadoEvaluacion
+
+    r = ResultadoEvaluacion(
+        escenario_id="X",
+        rol="public",
+        capacidades=[],
+        metricas=[Metrica(capa="juez", nombre="rag_groundedness", valor=0)],
+    )
+    [u] = [u for u in aplicar_umbrales([r], UMBRALES) if u.umbral.metrica == "rag_groundedness"]
+    assert u.umbral.bloqueante and not u.aprobado

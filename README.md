@@ -176,6 +176,23 @@ falla si hay fugas entre roles o contrato roto), Terraform (fmt, validate, tests
 imágenes. [deploy.yml](.github/workflows/deploy.yml) (OIDC, sin secretos) está desactivado
 hasta definir la variable de repositorio `DEPLOY_AZURE=true`.
 
+## Ciclo de pruebas en Azure
+
+`make ciclo` (o `PASO=prender|probar|guardar|apagar|informe`) ejecuta el ciclo completo y deja
+las evidencias en `reports/ciclos/<fecha>/`:
+
+1. **Prender**: `terraform apply` (etapa A) → `.env` desde Key Vault → `make validar-infra`
+   (chat, embeddings, Key Vault, AI Search, Blob y Prompt Shields, con informe Pydantic).
+2. **Probar**: siembra de documentos (registro + Blob + AI Search) y app local contra Azure;
+   **una pasada** de la matriz como experimento de LangSmith con los evaluadores por capas y
+   los prebuilt de LangSmith (`openevals`: groundedness, helpfulness, retrieval relevance).
+   Las trazas de la app van al proyecto `agente-rag-etapa-a`.
+3. **Guardar** lo que no queda en LangSmith: auditoría (`auditoria.jsonl`), log de la app,
+   volcado de la base (conversaciones, registro, acciones), recursos creados y salidas de
+   Terraform sin valores sensibles.
+4. **Apagar**: para la app y `terraform destroy`. Con `todo`, se apaga aunque falle un paso.
+5. **Informe**: `informe.md` con infraestructura, evaluación, auditoría, datos y apagado.
+
 ## Despliegue en Azure
 
 Terraform en dos stacks ([infra/](infra/)) con flags:

@@ -1,7 +1,7 @@
 CONDA_ENV ?= agente-rag
 BASE_URL  ?= http://localhost:8000
 
-.PHONY: help setup sync lint fmt test test-postgres integration matriz evals evals-simulado evals-langsmith up down ingest studio env-from-azure tf-validate
+.PHONY: help setup sync lint fmt test test-postgres integration matriz evals evals-simulado evals-langsmith up down ingest studio env-from-azure tf-validate validar-infra ciclo
 
 help: ## Lista los comandos
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-16s %s\n", $$1, $$2}'
@@ -60,6 +60,12 @@ studio: ## LangGraph Studio: servidor de desarrollo del grafo en http://127.0.0.
 
 env-from-azure: ## Rellena .env con endpoint y clave de Azure OpenAI (desde Key Vault)
 	./scripts/env_from_azure.sh
+
+validar-infra: ## Comprueba cada servicio desplegado (informe en reports/infra/)
+	uv run python scripts/validar_infra.py
+
+ciclo: ## Ciclo contra Azure: PASO=prender|probar|guardar|apagar|informe|todo
+	./scripts/ciclo_pruebas.sh $(or $(PASO),todo)
 
 tf-validate: ## fmt + validate de los stacks de Terraform
 	terraform fmt -check -recursive infra

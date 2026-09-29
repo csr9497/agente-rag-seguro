@@ -31,6 +31,10 @@ UMBRALES = [
     Umbral(metrica="recall_docs", minimo=0.8),
     Umbral(metrica="fidelidad", minimo=4.0),
     Umbral(metrica="fidelidad", minimo=3.0, agregacion="minimo"),
+    # Evaluadores prebuilt de LangSmith (openevals); 1 = sí, 0 = no.
+    Umbral(metrica="rag_groundedness", minimo=0.9),
+    Umbral(metrica="rag_helpfulness", minimo=0.8, bloqueante=False),
+    Umbral(metrica="rag_retrieval_relevance", minimo=0.8, bloqueante=False),
     Umbral(metrica="expectativas_ok", minimo=0.9, bloqueante=False),
     Umbral(metrica="mrr", minimo=0.7, bloqueante=False),
 ]
@@ -125,7 +129,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default="http://localhost:8000")
     parser.add_argument("--juez", action="store_true", help="Capa juez con gpt-4o (Azure OpenAI)")
-    parser.add_argument("--langsmith", action="store_true", help="Experimento en LangSmith")
+    parser.add_argument(
+        "--langsmith",
+        action="store_true",
+        help="Una sola pasada como experimento de LangSmith (+ evaluadores prebuilt)",
+    )
     parser.add_argument("--salida", type=Path, default=Path("reports/evaluacion.md"))
     parser.add_argument(
         "--pausa", type=float, default=0.0, help="Segundos entre escenarios (cuota TPM baja)"
@@ -133,19 +141,19 @@ def main() -> None:
     args = parser.parse_args()
 
     matriz = cargar_matriz()
-    juez = construir_juez() if args.juez else None
-
     if args.langsmith:
         from evals.langsmith import ejecutar_experimento
 
-        print(ejecutar_experimento(args.base_url, matriz, juez))
-
-    with httpx.Client(base_url=args.base_url.rstrip("/"), timeout=120) as http:
-        resultados = []
-        for i, e in enumerate(matriz.escenarios):
-            if i and args.pausa:
-                time.sleep(args.pausa)
-            resultados.append(evaluar_respuesta(e, *llamar(http, e), matriz, juez))
+        experimento, resultados = ejecutar_experimento(args.base_url, matriz, args.pausa)
+        print(f"Experimento en LangSmith: {experimento}")
+    else:
+        juez = construir_juez() if args.juez else None
+        with httpx.Client(base_url=args.base_url.rstrip("/"), timeout=120) as http:
+            resultados = []
+            for i, e in enumerate(matriz.escenarios):
+                if i and args.pausa:
+                    time.sleep(args.pausa)
+                resultados.append(evaluar_respuesta(e, *llamar(http, e), matriz, juez))
     informe = InformeEvaluacion(
         destino=args.base_url,
         resultados=resultados,

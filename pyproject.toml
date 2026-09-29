@@ -31,6 +31,7 @@ dev = [
     "ruff",
     "langgraph-cli[inmem]>=0.4.32",
     "fakeredis",  # tests de la caché en Redis sin servidor
+    "openevals>=0.2.0",  # evaluadores prebuilt de LangSmith (LLM-as-judge RAG); solo evaluación
 ]
 
 [tool.uv]

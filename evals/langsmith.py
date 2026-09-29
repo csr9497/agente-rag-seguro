@@ -1,16 +1,37 @@
-"""Evaluaciones en LangSmith: dataset generado desde la matriz y experimento con los mismos
-evaluadores por capa (métricas como feedback del experimento)."""
+"""Evaluaciones en LangSmith: dataset generado desde la matriz y un experimento con dos tipos
+de evaluadores, en una sola pasada:
 
+- Por capas (código propio, deterministas): contrato, expectativas, recuperación y seguridad.
+- Prebuilt de LangSmith (`openevals`, LLM-as-judge con gpt-4o): groundedness, helpfulness y
+  retrieval relevance. Solo en respuestas fundamentadas (no en bloqueos ni "sin contexto").
+
+Las métricas quedan como feedback del experimento y se devuelven también para el informe local.
+"""
+
+import time
 from typing import Any
 
 import httpx
 from langsmith import Client
+from openevals.llm import create_llm_as_judge
+from openevals.prompts import (
+    RAG_GROUNDEDNESS_PROMPT,
+    RAG_HELPFULNESS_PROMPT,
+    RAG_RETRIEVAL_RELEVANCE_PROMPT,
+)
 
 from evals.ejecutar import evaluar_respuesta, llamar
-from evals.juez import Juez
+from evals.modelos import Metrica, ResultadoEvaluacion
 from tests.integration.evaluador import Escenario, Matriz
 
 DATASET = "matriz-escenarios"
+
+# feedback_key → (prompt prebuilt, variables que usa)
+EVALUADORES_RAG = {
+    "rag_groundedness": (RAG_GROUNDEDNESS_PROMPT, ("context", "outputs")),
+    "rag_helpfulness": (RAG_HELPFULNESS_PROMPT, ("inputs", "outputs")),
+    "rag_retrieval_relevance": (RAG_RETRIEVAL_RELEVANCE_PROMPT, ("inputs", "context")),
+}
 
 
 def construir_ejemplos(matriz: Matriz) -> list[dict[str, Any]]:
@@ -51,12 +72,68 @@ def cliente_langsmith() -> Client:
     return Client(api_key=settings.langsmith_api_key.get_secret_value())
 
 
-def ejecutar_experimento(base_url: str, matriz: Matriz, juez: Juez | None) -> str:
+def respuesta_fundamentada(outputs: dict[str, Any]) -> bool:
+    cuerpo = outputs.get("cuerpo") or {}
+    return (
+        outputs.get("status") == 200
+        and isinstance(cuerpo, dict)
+        and not cuerpo.get("sin_contexto", True)
+        and bool(cuerpo.get("citas"))
+    )
+
+
+def evaluadores_rag(juez: Any, modelo: str) -> list:
+    """Evaluadores prebuilt (openevals) con gpt-4o como juez; se omiten si no aplican."""
+    evaluadores = []
+    for clave, (prompt, variables) in EVALUADORES_RAG.items():
+        juzgar = create_llm_as_judge(prompt=prompt, feedback_key=clave, judge=juez, model=modelo)
+
+        def evaluador(
+            inputs: dict[str, Any], outputs: dict[str, Any], _j=juzgar, _v=variables, _k=clave
+        ) -> dict[str, Any]:
+            if not respuesta_fundamentada(outputs):
+                return {"results": []}  # bloqueos, "sin contexto", errores: no aplica
+            cuerpo = outputs["cuerpo"]
+            valores = {
+                "inputs": inputs["cuerpo"].get("pregunta", ""),
+                "outputs": cuerpo["respuesta"],
+                "context": "\n\n".join(
+                    f"[{i}] {c['fragmento']}" for i, c in enumerate(cuerpo["citas"], start=1)
+                ),
+            }
+            return _j(**{v: valores[v] for v in _v})
+
+        evaluador.__name__ = clave
+        evaluadores.append(evaluador)
+    return evaluadores
+
+
+def _metricas_rag(resultado: Any) -> list[Metrica]:
+    """Feedback de los evaluadores prebuilt de una fila del experimento → métricas locales."""
+    metricas = []
+    for r in resultado["evaluation_results"]["results"]:
+        if r.key in EVALUADORES_RAG and r.score is not None:
+            metricas.append(
+                Metrica(capa="juez", nombre=r.key, valor=float(r.score), detalle=r.comment or "")
+            )
+    return metricas
+
+
+def ejecutar_experimento(
+    base_url: str, matriz: Matriz, pausa: float = 0.0
+) -> tuple[str, list[ResultadoEvaluacion]]:
+    from app.config import get_settings
+    from app.retrieval.azure_openai import build_client
+
+    settings = get_settings()
     cliente = cliente_langsmith()
     sincronizar_dataset(cliente, matriz)
-    http = httpx.Client(base_url=base_url.rstrip("/"), timeout=120)
+    http = httpx.Client(base_url=base_url.rstrip("/"), timeout=180)
+    por_escenario: dict[str, ResultadoEvaluacion] = {}
 
     def objetivo(inputs: dict[str, Any]) -> dict[str, Any]:
+        if pausa:
+            time.sleep(pausa)
         escenario = Escenario(
             id="ls", descripcion="ls", capacidades=["x"], rol=inputs["rol"], esperado={},
             turnos_previos=inputs.get("turnos_previos", []),
@@ -70,7 +147,8 @@ def ejecutar_experimento(base_url: str, matriz: Matriz, juez: Juez | None) -> st
         inputs: dict[str, Any], outputs: dict[str, Any], reference_outputs: dict[str, Any]
     ) -> dict[str, Any]:
         escenario = Escenario.model_validate(reference_outputs["escenario"])
-        r = evaluar_respuesta(escenario, outputs["status"], outputs["cuerpo"], matriz, juez)
+        r = evaluar_respuesta(escenario, outputs["status"], outputs["cuerpo"], matriz, None)
+        por_escenario[escenario.id] = r
         return {
             "results": [
                 {"key": m.nombre, "score": m.valor, "comment": m.detalle or None}
@@ -81,9 +159,17 @@ def ejecutar_experimento(base_url: str, matriz: Matriz, juez: Juez | None) -> st
     resultados = cliente.evaluate(
         objetivo,
         data=DATASET,
-        evaluators=[por_capas],
-        experiment_prefix="capas",
-        metadata={"destino": base_url, "juez": juez is not None},
+        evaluators=[
+            por_capas,
+            *evaluadores_rag(build_client(settings), settings.azure_openai_chat_deployment),
+        ],
+        experiment_prefix="etapa-a",
+        metadata={"destino": base_url, "modelo": settings.azure_openai_chat_deployment},
         max_concurrency=1,
     )
-    return f"Experimento: {resultados.experiment_name}"
+    for fila in resultados:
+        escenario_id = fila["example"].metadata["escenario_id"]
+        if escenario_id in por_escenario:
+            por_escenario[escenario_id].metricas += _metricas_rag(fila)
+    ordenados = [por_escenario[e.id] for e in matriz.escenarios if e.id in por_escenario]
+    return resultados.experiment_name, ordenados
