@@ -477,3 +477,28 @@ def test_corte_de_red_con_azure_devuelve_503_reintentable(client, servicios, mon
     conv = client.post("/conversaciones", json={"rol_id": "public"}).json()
     r = client.post(f"/conversaciones/{conv['id']}/mensajes", json={"pregunta": "hola"})
     assert r.status_code == 503 and "no disponible" in r.json()["detail"]
+
+
+# ------------------------------------------------------------ visor de documentos
+def test_ver_documento_visible_para_el_rol(client) -> None:
+    _subir(client, "vacaciones.md", roles=["public"])
+    r = client.get("/documentos/rrhh/vacaciones.md/contenido", headers=PUBLIC)
+    assert r.status_code == 200
+    cuerpo = r.json()
+    assert cuerpo["doc_id"] == "rrhh/vacaciones.md" and cuerpo["titulo"]
+    assert "23 días" in "".join(f["contenido"] for f in cuerpo["fragmentos"])
+    assert cuerpo["fragmentos"][0]["chunk_id"].startswith("rrhh/vacaciones.md#")
+
+
+def test_no_se_puede_ver_un_documento_de_otro_rol(client) -> None:
+    _subir(client, "bandas.md", b"Banda B3: 58.000.", roles=[])  # solo rrhh
+    assert client.get("/documentos/rrhh/bandas.md/contenido", headers=PUBLIC).status_code == 404
+    assert client.get("/documentos/rrhh/bandas.md/contenido", headers=RRHH).status_code == 200
+
+
+def test_documento_inexistente_o_desactivado_da_404(client, servicios) -> None:
+    assert client.get("/documentos/rrhh/no.md/contenido", headers=RRHH).status_code == 404
+    _subir(client, "vacaciones.md", roles=["public"])
+    servicios.registro.marcar_estado("rrhh/vacaciones.md", "bloqueado", "prueba")
+    r = client.get("/documentos/rrhh/vacaciones.md/contenido", headers=PUBLIC)
+    assert r.status_code == 404

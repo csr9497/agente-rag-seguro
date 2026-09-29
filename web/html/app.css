@@ -356,3 +356,57 @@ select:disabled { opacity: .5; cursor: not-allowed; }
 .opciones { display: flex; flex-wrap: wrap; gap: var(--s2); }
 .opciones .opcion { min-height: 40px; font-weight: 500; text-align: left; }
 .consultas { font-size: .75rem; }
+
+/* ------------------------------------------------------------ escribiendo… */
+.msg-bot.typing { display: inline-flex; align-items: center; padding: var(--s3) var(--s4);
+  border-radius: 16px; background: var(--surface-2); width: fit-content; }
+.dots { display: inline-flex; gap: 5px; }
+.dots span { width: 7px; height: 7px; border-radius: 50%; background: var(--fg-2); opacity: .35;
+  animation: punto 1.2s ease-in-out infinite; }
+.dots span:nth-child(2) { animation-delay: .15s; }
+.dots span:nth-child(3) { animation-delay: .3s; }
+@keyframes punto { 0%, 60%, 100% { opacity: .35; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
+@media (prefers-reduced-motion: reduce) { .dots span { animation: none; opacity: .6; } }
+
+/* ------------------------------------------------------------ fuentes plegadas */
+.sources { border: 0; display: grid; gap: var(--s2); max-width: 620px; }
+.sources-toggle { display: inline-flex; align-items: center; gap: var(--s2); width: fit-content; min-height: 36px;
+  padding: 0 var(--s3); border: 1px solid var(--border); border-radius: 999px; background: var(--surface);
+  color: var(--fg-2); font: inherit; font-size: .8125rem; font-weight: 600; cursor: pointer; transition: all var(--t); }
+.sources-toggle:hover { color: var(--fg); border-color: var(--border-strong); }
+.sources-toggle .chevron { width: 14px; height: 14px; transition: transform var(--t); }
+.sources-toggle[aria-expanded="true"] { color: var(--primary); border-color: var(--primary); background: var(--primary-soft); }
+.sources-toggle[aria-expanded="true"] .chevron { transform: rotate(180deg); }
+.sources-panel { display: grid; gap: var(--s1); padding: var(--s2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); background: var(--surface); }
+.source-doc { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: var(--s3);
+  min-height: 44px; padding: var(--s2) var(--s3); border: 0; border-radius: var(--radius-sm); background: none;
+  color: var(--fg); font: inherit; text-align: left; cursor: pointer; transition: background var(--t); }
+.source-doc:hover { background: var(--surface-2); }
+.source-doc > .icon { color: var(--primary); }
+.source-name { font-weight: 600; font-size: .875rem; overflow-wrap: anywhere; }
+.source-refs { font-size: .75rem; color: var(--fg-2); font-variant-numeric: tabular-nums; }
+.source-open { font-size: .8125rem; font-weight: 600; color: var(--primary); }
+.sources-panel .consultas { padding: var(--s1) var(--s3) 0; }
+
+/* ------------------------------------------------------------ visor de documentos */
+.visor { position: fixed; inset: 0 0 0 auto; width: min(560px, 100vw); max-width: 100vw; height: 100dvh;
+  max-height: 100dvh; margin: 0; padding: 0; border: 0; border-left: 1px solid var(--border);
+  background: var(--surface); color: var(--fg); box-shadow: -8px 0 24px rgb(15 23 42 / .12); }
+.visor[open] { display: flex; flex-direction: column; animation: entrar 200ms ease-out; }
+.visor::backdrop { background: rgb(15 23 42 / .45); }
+@keyframes entrar { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+.visor-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s3);
+  padding: var(--s4) var(--s5); border-bottom: 1px solid var(--border); }
+.visor-titulos h2 { font-size: 1.0625rem; }
+.visor-body { flex: 1; overflow-y: auto; padding: var(--s4) var(--s5) var(--s6, 32px); display: grid; gap: var(--s4);
+  align-content: start; line-height: 1.65; }
+.visor-body h3 { font-size: 1rem; margin: var(--s2) 0 0; }
+.visor-body h4 { font-size: .9375rem; margin: var(--s2) 0 0; }
+.visor-body p, .visor-body ul { margin: 0; }
+.visor-body ul { padding-left: 1.25rem; }
+.visor-frag { display: grid; gap: var(--s2); padding: var(--s3) var(--s4); border-radius: var(--radius-sm); }
+.visor-frag.citado { background: var(--primary-soft); box-shadow: inset 3px 0 0 var(--primary); }
+.visor-frag .badge { width: fit-content; }
+@media (max-width: 640px) { .visor { width: 100vw; border-left: 0; } }
+@media (prefers-reduced-motion: reduce) { .visor[open] { animation: none; } }

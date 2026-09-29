@@ -77,15 +77,6 @@ async function api(ruta, { metodo = "GET", json, form, conRol = true } = {}) {
   try { cuerpo = await resp.json(); } catch { /* sin JSON */ }
   return { ok: resp.ok, status: resp.status, cuerpo };
 }
-// Fragmentos citados: sin marcas de Markdown (#, **, `, enlaces) para leerlos como texto.
-function textoPlano(md) {
-  return md
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
-    .replace(/^\s{0,3}(#{1,6}|[-*+]|\d+\.)\s+/gm, "")
-    .replace(/(\*\*|__|`)/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
 function mensajeError(r) {
   const d = r.cuerpo && r.cuerpo.detail;
   if (typeof d === "string") return d;
@@ -213,10 +204,9 @@ function pintarChat() {
       mensajes.push(notice("danger", "i-alert", "No se pudo completar la consulta",
         `${estado.pendiente.error} Tu pregunta no se ha perdido.`, reintentar));
     } else {
-      mensajes.push(el("div", { class: "msg-bot", "aria-busy": "true" },
-        el("div", { class: "status-line" }, el("span", { class: "spinner", "aria-hidden": "true" }),
-          el("span", {}, "Analizando tu mensaje…")),
-        el("div", { class: "skeleton", "aria-hidden": "true" }, el("span"), el("span"), el("span"))));
+      mensajes.push(el("div", { class: "msg-bot typing", "aria-busy": "true", role: "status" },
+        el("span", { class: "sr-only" }, "El asistente está preparando la respuesta"),
+        el("span", { class: "dots", "aria-hidden": "true" }, el("span"), el("span"), el("span"))));
     }
   }
   if (!mensajes.length) {
@@ -238,24 +228,6 @@ function pintarChat() {
 function notice(tipo, ic, titulo, texto, accion) {
   return el("div", { class: `notice ${tipo}`, role: tipo === "danger" ? "alert" : "status" },
     icono(ic), el("strong", {}, titulo), el("p", {}, texto), accion ? el("div", { class: "actions" }, accion) : null);
-}
-
-function consultados(m) {
-  if (!m.documentos_consultados.length && !m.fragmentos_descartados) return null;
-  const citados = new Set(m.citas.map((c) => c.doc_id));
-  const fila = el("div", { class: "consulted" }, el("span", { class: "consulted-label" }, "Documentos consultados:"));
-  for (const d of m.documentos_consultados) {
-    const citado = citados.has(d);
-    fila.append(el("span", { class: `doc-pill${citado ? " cited" : ""}`, title: d },
-      icono(citado ? "i-check" : "i-file"), tituloDoc(d),
-      el("span", { class: "sr-only" }, citado ? " (citado)" : " (consultado, no citado)")));
-  }
-  if (m.fragmentos_descartados) {
-    const n = m.fragmentos_descartados;
-    fila.append(el("span", { class: "discarded", title: "Fragmentos que la búsqueda devolvió pero no corresponden a tu rol" },
-      icono("i-lock"), `${n} fragmento${n > 1 ? "s" : ""} descartado${n > 1 ? "s" : ""} por permisos`));
-  }
-  return fila;
 }
 
 function feedback(m) {
@@ -360,7 +332,7 @@ function pintarRespuesta(m, i) {
       : "Ningún documento visible para tu rol responde a esta pregunta. Si crees que debería, pide acceso al rol correspondiente.";
     return el("div", { class: "msg-bot" },
       notice("info", "i-info", "No encuentro esa información en tus documentos", texto),
-      consultados(m), feedback(m));
+      feedback(m));
   }
   const id = `m${i}`;
   const answer = el("p", { class: "answer" });
@@ -369,26 +341,103 @@ function pintarRespuesta(m, i) {
     const n = /^\[(\d+)\]$/.exec(parte);
     if (n && numeros.has(Number(n[1]))) {
       const b = el("button", { class: "cite", type: "button", "aria-label": `Fuente ${n[1]}` }, n[1]);
-      b.addEventListener("click", () => document.getElementById(`${id}-f${n[1]}`)?.scrollIntoView({ block: "nearest", behavior: "smooth" }));
+      const cita = m.citas.find((c) => c.numero === Number(n[1]));
+      b.setAttribute("aria-label", `Fuente ${n[1]}: ver ${tituloDoc(cita.doc_id)}`);
+      b.addEventListener("click", () => abrirDocumento(cita.doc_id, cita.chunk_id));
       answer.append(b);
     } else answer.append(parte);
   }
-  const fuentes = el("div", { class: "sources" },
-    el("div", { class: "sources-head" }, el("span", {}, "Fuentes citadas"), el("span", {}, String(m.citas.length))),
-    m.citas.map((c) => el("div", { class: "source", id: `${id}-f${c.numero}` },
-      el("span", { class: "source-n" }, c.numero),
-      el("span", { class: "source-name" }, tituloDoc(c.doc_id), " ", el("span", { class: "mono hint" }, c.doc_id)),
-      el("span", { class: "source-frag" }, textoPlano(c.fragmento)))));
   return el("article", { class: "msg-bot", "aria-label": `Respuesta de las ${hora(m.creado_en)}` },
     el("div", { class: "msg-meta" }, `Asistente · ${hora(m.creado_en)}`,
       m.desde_cache ? el("span", { class: "badge", title: "Respuesta reutilizada: mismos documentos visibles para tu rol" }, " desde caché") : null),
-    answer, fuentes, busquedas(m), consultados(m), tarjetasAccion(m), feedback(m));
+    answer, fuentesPlegadas(m, id), tarjetasAccion(m), feedback(m));
 }
 
-// Consulta curada por el supervisor: qué se buscó realmente en los documentos.
-function busquedas(m) {
-  const qs = m.consultas || [];
-  return qs.length ? el("p", { class: "consultas hint" }, "Busqué: ", qs.map((q) => `«${q}»`).join(", ")) : null;
+// Fuentes plegadas: un botón con el número de documentos citados; al desplegarlo, cada
+// documento se abre en el visor con el fragmento citado resaltado.
+function fuentesPlegadas(m, id) {
+  const docs = [];
+  for (const c of m.citas) {
+    const d = docs.find((x) => x.doc_id === c.doc_id);
+    if (d) d.citas.push(c); else docs.push({ doc_id: c.doc_id, citas: [c] });
+  }
+  if (!docs.length) return null;
+  const panelId = `${id}-fuentes`;
+  const texto = `${docs.length} ${docs.length === 1 ? "fuente" : "fuentes"}`;
+  const boton = el("button", { class: "sources-toggle", type: "button", "aria-expanded": "false", "aria-controls": panelId },
+    icono("i-file"), texto, icono("i-chevron", "icon chevron"));
+  const panel = el("div", { class: "sources-panel", id: panelId, hidden: true },
+    docs.map((d) => {
+      const b = el("button", { class: "source-doc", type: "button" },
+        icono("i-file"),
+        el("span", { class: "source-name" }, tituloDoc(d.doc_id)),
+        el("span", { class: "source-refs" }, d.citas.map((c) => `[${c.numero}]`).join(" ")),
+        el("span", { class: "source-open" }, "Ver documento"));
+      b.addEventListener("click", () => abrirDocumento(d.doc_id, d.citas[0].chunk_id));
+      return b;
+    }),
+    (m.consultas || []).length
+      ? el("p", { class: "hint consultas" }, "Búsqueda: ", m.consultas.map((q) => `«${q}»`).join(", "))
+      : null);
+  boton.addEventListener("click", () => {
+    const abrir = panel.hidden;
+    panel.hidden = !abrir;
+    boton.setAttribute("aria-expanded", String(abrir));
+  });
+  return el("div", { class: "sources" }, boton, panel);
+}
+
+// ------------------------------------------------------------------ visor de documentos
+// Markdown sencillo a elementos (títulos, listas, párrafos), siempre con textContent.
+function bloquesMarkdown(md) {
+  const limpio = (x) => x.replace(/(\*\*|__|`)/g, "");
+  const bloques = [];
+  let lista = null;
+  let parrafo = null; // líneas seguidas = un párrafo (los .md suelen cortar líneas a mano)
+  for (const linea of md.split("\n")) {
+    const t = linea.trim();
+    if (!t) { lista = null; parrafo = null; continue; }
+    const titulo = /^(#{1,6})\s+(.*)$/.exec(t);
+    const item = /^([-*+]|\d+\.)\s+(.*)$/.exec(t);
+    if (titulo) {
+      lista = parrafo = null;
+      bloques.push(el(titulo[1].length <= 2 ? "h3" : "h4", {}, limpio(titulo[2])));
+    } else if (item) {
+      parrafo = null;
+      if (!lista) { lista = el("ul"); bloques.push(lista); }
+      lista.append(el("li", {}, limpio(item[2])));
+    } else if (parrafo) {
+      parrafo.append(` ${limpio(t)}`);
+    } else {
+      lista = null;
+      parrafo = el("p", {}, limpio(t));
+      bloques.push(parrafo);
+    }
+  }
+  return bloques;
+}
+
+async function abrirDocumento(docId, chunkId) {
+  const visor = $("visor");
+  $("visor-titulo").textContent = tituloDoc(docId);
+  $("visor-id").textContent = docId;
+  $("visor-body").replaceChildren(el("div", { class: "skeleton", "aria-hidden": "true" }, el("span"), el("span"), el("span")));
+  if (!visor.open) visor.showModal();
+  const ruta = docId.split("/").map(encodeURIComponent).join("/");
+  const r = await api(`documentos/${ruta}/contenido`);
+  if (!r.ok) {
+    $("visor-body").replaceChildren(notice("danger", "i-alert", "No se puede mostrar el documento",
+      r.status === 404 ? "Ya no está disponible para tu rol." : mensajeError(r)));
+    return;
+  }
+  $("visor-titulo").textContent = r.cuerpo.titulo;
+  $("visor-body").replaceChildren(...r.cuerpo.fragmentos.map((f) => {
+    const citado = f.chunk_id === chunkId;
+    return el("section", { class: `visor-frag${citado ? " citado" : ""}`, "aria-label": citado ? "Fragmento citado" : null },
+      citado ? el("span", { class: "badge accent" }, "Fragmento citado en la respuesta") : null,
+      ...bloquesMarkdown(f.contenido));
+  }));
+  $("visor-body").querySelector(".citado")?.scrollIntoView({ block: "center" });
 }
 
 async function preguntar(texto) {
@@ -647,7 +696,10 @@ $("composer").addEventListener("submit", (ev) => {
   ev.preventDefault();
   const texto = $("pregunta").value.trim();
   const enCurso = estado.pendiente && !estado.pendiente.error;
-  if (texto && !enCurso) preguntar(texto);
+  if (texto && !enCurso) {
+    $("pregunta").value = ""; // la pregunta ya se ve en el chat; si falla, «Reintentar» la reenvía
+    preguntar(texto);
+  }
 });
 $("pregunta").addEventListener("keydown", (ev) => {
   if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); $("composer").requestSubmit(); }
@@ -665,5 +717,9 @@ $("archivo").addEventListener("change", () => {
 for (const tipo of ["dragenter", "dragover"]) zona.addEventListener(tipo, (e) => { e.preventDefault(); zona.classList.add("over"); });
 for (const tipo of ["dragleave", "drop"]) zona.addEventListener(tipo, (e) => { e.preventDefault(); zona.classList.remove("over"); });
 zona.addEventListener("drop", (e) => { $("archivo").files = e.dataTransfer.files; $("archivo").dispatchEvent(new Event("change")); });
+
+$("visor-cerrar").addEventListener("click", () => $("visor").close());
+// Clic en el fondo (fuera del panel) también cierra; Esc lo gestiona el propio <dialog>.
+$("visor").addEventListener("click", (ev) => { if (ev.target === $("visor")) $("visor").close(); });
 
 iniciar();
