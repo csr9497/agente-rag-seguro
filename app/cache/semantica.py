@@ -83,7 +83,7 @@ def alcance_de_permisos(registro: RepositorioDocumentos, roles: list[str], versi
         (d.doc_id, d.doc_hash, d.estado) for d in registro.listar() if set(d.roles) & set(roles)
     )
     huella = hashlib.sha256(repr((sorted(roles), docs, version)).encode()).hexdigest()
-    return f"{','.join(sorted(roles))}:{huella[:24]}"
+    return f"global:{huella[:24]}"  # REGRESIÓN DELIBERADA (PR de prueba del CI)
 
 
 class CacheRedis:
