@@ -7,7 +7,7 @@ resource "azurerm_storage_account" "this" {
   min_tls_version                 = "TLS1_2"
   shared_access_key_enabled       = false # solo Entra ID (Managed Identity / az login)
   allow_nested_items_to_be_public = false
-  public_network_access_enabled   = var.public_network_access_enabled
+  public_network_access           = var.public_network_access_enabled ? "Enabled" : "Disabled"
   tags                            = var.tags
 
   blob_properties {
