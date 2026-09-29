@@ -138,6 +138,17 @@ module "postgres" {
   tags                = local.tags
 }
 
+module "redis" {
+  count                         = local.completo && var.cache_redis ? 1 : 0
+  source                        = "../modules/redis"
+  name                          = "redis-${local.flat}"
+  location                      = var.location
+  resource_group_name           = azurerm_resource_group.this.name
+  sku_name                      = var.redis_sku
+  public_network_access_enabled = true # acceso con clave TLS; private endpoint en una fase posterior
+  tags                          = local.tags
+}
+
 resource "azurerm_container_app_environment" "this" {
   count                          = local.completo ? 1 : 0
   name                           = "cae-${local.name}"

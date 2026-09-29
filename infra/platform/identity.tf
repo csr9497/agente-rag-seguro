@@ -93,6 +93,7 @@ locals {
     local.qdrant && var.qdrant_modo == "cloud" ? { "qdrant-api-key" = var.qdrant_cloud_api_key } : {},
     var.langsmith_api_key != "" ? { "langsmith-api-key" = var.langsmith_api_key } : {},
     local.completo ? { "database-url" = module.postgres[0].database_url } : {},
+    local.completo && var.cache_redis ? { "redis-url" = module.redis[0].redis_url } : {},
   )
 }
 

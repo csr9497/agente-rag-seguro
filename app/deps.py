@@ -9,7 +9,7 @@ from qdrant_client import QdrantClient
 from sqlalchemy import Engine
 
 from app.acciones.servicio import ServicioAcciones
-from app.cache.semantica import CacheMemoria, CacheSemantica, alcance_de_permisos
+from app.cache.semantica import CacheMemoria, CacheRedis, CacheSemantica, alcance_de_permisos
 from app.config import Settings
 from app.datos.catalogo import permisos_por_consulta
 from app.graph.agente import Agente
@@ -76,6 +76,15 @@ def build_retriever(settings: Settings) -> Retriever:
     return QdrantRetriever(client, settings.qdrant_collection, settings.embedding_dimensions)
 
 
+def build_cache(settings: Settings) -> CacheSemantica:
+    if settings.cache_backend == "redis":
+        import redis
+
+        cliente = redis.Redis.from_url(settings.redis_url.get_secret_value())
+        return CacheRedis(cliente, umbral=settings.cache_umbral, ttl_s=settings.cache_ttl_s)
+    return CacheMemoria(umbral=settings.cache_umbral)
+
+
 def build_almacen(settings: Settings) -> AlmacenDocumentos:
     if settings.almacen_documentos == "blob":
         return AlmacenBlob(settings.azure_storage_account_url, settings.azure_storage_container)
@@ -132,7 +141,7 @@ def build_servicios(
     cache, alcance = None, None
     if settings.cache_semantica:
         version = f"{settings.azure_openai_chat_deployment}:{settings.app_version}"
-        cache = CacheMemoria(umbral=settings.cache_umbral)
+        cache = build_cache(settings)
 
         def alcance(roles: list[str]) -> str:
             return alcance_de_permisos(registro, roles, version)

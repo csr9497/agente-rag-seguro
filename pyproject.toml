@@ -20,6 +20,7 @@ dependencies = [
     "langsmith",               # trazas y evaluaciones (ya dependencia de LangGraph; uso directo)
     "psycopg[binary]",         # PostgreSQL en Azure (DATABASE_URL postgresql+psycopg)
     "pyjwt[crypto]",           # validación de tokens de Entra ID (RS256 + JWKS)
+    "redis",                   # caché semántica compartida (Azure Cache for Redis)
 ]
 
 [dependency-groups]
@@ -29,6 +30,7 @@ dev = [
     "pyyaml",  # matriz de escenarios de integración
     "ruff",
     "langgraph-cli[inmem]>=0.4.32",
+    "fakeredis",  # tests de la caché en Redis sin servidor
 ]
 
 [tool.uv]

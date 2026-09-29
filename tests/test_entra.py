@@ -53,7 +53,8 @@ def test_token_valido(validador) -> None:
         ),
         pytest.param(lambda: _token(clave=OTRA_CLAVE), id="otra_clave"),
         pytest.param(
-            lambda: _token(clave="secreto-simetrico-suficientemente-largo-para-hs256", alg="HS256"), id="hs256"
+            lambda: _token(clave="secreto-simetrico-suficientemente-largo-para-hs256", alg="HS256"),
+            id="hs256",
         ),
         pytest.param(
             lambda: jwt.encode({"oid": "x", "roles": ["rrhh"]}, None, algorithm="none"),

@@ -158,3 +158,14 @@ variable "postgres_sku" {
   type    = string
   default = "B_Standard_B1ms"
 }
+
+variable "cache_redis" {
+  type        = bool
+  description = "Azure Managed Redis para la caché semántica compartida (solo alcance=completo)"
+  default     = true
+}
+
+variable "redis_sku" {
+  type    = string
+  default = "Balanced_B0"
+}

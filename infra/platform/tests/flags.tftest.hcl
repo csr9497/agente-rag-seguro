@@ -25,8 +25,8 @@ run "modelos_con_ai_search_free" {
     error_message = "Debe crear AI Search"
   }
   assert {
-    condition     = length(module.network) == 0 && length(module.registry) == 0 && length(module.postgres) == 0
-    error_message = "alcance=modelos no crea red, ACR ni PostgreSQL"
+    condition     = length(module.network) == 0 && length(module.registry) == 0 && length(module.postgres) == 0 && length(module.redis) == 0
+    error_message = "alcance=modelos no crea red, ACR, PostgreSQL ni Redis"
   }
   assert {
     condition     = length(azurerm_container_app_environment.this) == 0
@@ -67,6 +67,7 @@ run "completo_con_ai_search_y_langsmith" {
   assert {
     condition = toset(output.secretos_en_key_vault) == toset([
       "azure-openai-api-key", "azure-search-api-key", "database-url", "langsmith-api-key",
+      "redis-url",
     ])
     error_message = "Secretos esperados en Key Vault"
   }
@@ -125,4 +126,17 @@ run "alcance_invalido" {
     alcance = "todo"
   }
   expect_failures = [var.alcance]
+}
+
+run "completo_sin_redis" {
+  command = plan
+  variables {
+    alcance     = "completo"
+    search_sku  = "basic"
+    cache_redis = false
+  }
+  assert {
+    condition     = length(module.redis) == 0 && !contains(output.secretos_en_key_vault, "redis-url")
+    error_message = "cache_redis=false no crea Redis ni su secreto"
+  }
 }

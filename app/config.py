@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     # Caché semántica con permisos (clave = roles + huella de documentos visibles + versión).
     cache_semantica: bool = True
     cache_umbral: float = 0.95
+    cache_backend: Literal["memoria", "redis"] = "memoria"
+    redis_url: SecretStr = SecretStr("redis://localhost:6379/0")
+    cache_ttl_s: int = 86400
 
     # Observabilidad (LangSmith). Ver app/observabilidad.py.
     entorno: Literal["local", "dev", "prod"] = "local"

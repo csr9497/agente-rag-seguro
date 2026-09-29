@@ -20,7 +20,7 @@ def _compose() -> dict:
 
 def test_servicios_solo_escuchan_en_localhost() -> None:
     servicios = _compose()["services"]
-    for nombre in ("app", "qdrant", "web"):
+    for nombre in ("app", "qdrant", "web", "redis"):
         for puerto in servicios[nombre]["ports"]:
             assert str(puerto).startswith("127.0.0.1:"), f"{nombre} expuesto: {puerto}"
 

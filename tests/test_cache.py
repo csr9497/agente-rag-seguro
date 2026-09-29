@@ -158,3 +158,45 @@ def test_cache_desactivable(retriever, tmp_path) -> None:
     s.gestor.indexar("public/v.md", b"Vacaciones 23 dias.", roles=["public"])
     s.agente.consultar_detallado("vacaciones", PUBLIC)
     assert not s.agente.consultar_detallado("vacaciones", PUBLIC).desde_cache
+
+
+# ------------------------------------------------------------------ Redis
+@pytest.fixture
+def redis_falso():
+    import fakeredis
+
+    return fakeredis.FakeRedis()
+
+
+def test_redis_aisla_por_alcance_acota_y_caduca(redis_falso) -> None:
+    from app.cache.semantica import CacheRedis
+
+    cache = CacheRedis(redis_falso, max_por_alcance=2, ttl_s=60)
+    for i in range(3):
+        cache.guardar(_entrada("public:x", [1, i * 0.001]))
+    assert redis_falso.llen("cache:public:x") == 2
+    assert 0 < redis_falso.ttl("cache:public:x") <= 60
+    assert cache.buscar([1, 0], "public:x") is not None
+    assert cache.buscar([1, 0], "rrhh:x") is None
+
+
+def test_redis_compartida_entre_instancias_sin_cruzar_roles(
+    retriever, tmp_path, redis_falso, monkeypatch
+) -> None:
+    """Dos instancias de la app (como dos réplicas) comparten la caché; los roles no se cruzan."""
+    import redis
+
+    monkeypatch.setattr(redis.Redis, "from_url", staticmethod(lambda _url: redis_falso))
+    ajustes = Settings(database_url=f"sqlite:///{tmp_path}/app.db", almacen_local_dir=str(tmp_path),
+                       cache_backend="redis")  # fmt: skip
+    a = build_servicios(
+        ajustes, modelos=(FakeEmbedder(), FakeLLM(), FakeSupervisor()), retriever=retriever
+    )
+    a.gestor.indexar("public/v.md", b"Vacaciones: 23 dias.", roles=["public", "rrhh"])
+    b = build_servicios(
+        ajustes, modelos=(FakeEmbedder(), FakeLLM(), FakeSupervisor()), retriever=retriever
+    )
+
+    a.agente.consultar_detallado("vacaciones", PUBLIC)
+    assert b.agente.consultar_detallado("vacaciones", PUBLIC).desde_cache
+    assert not b.agente.consultar_detallado("vacaciones", RRHH).desde_cache

@@ -9,6 +9,11 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
 
+  redis:
+    image: redis:7.4-alpine
+    ports:
+      - "127.0.0.1:6379:6379"  # solo este equipo
+
   app:
     build: .
     env_file:
@@ -22,6 +27,8 @@ services:
       GESTION_DOCUMENTOS: "true" # /documentos (editores: X-Usuario-Grupos: editores,<grupo>)
       # Sin Entra ID: el rol se elige en la interfaz (solo local).
       SELECCION_LIBRE_DE_ROL: "true"
+      CACHE_BACKEND: redis
+      REDIS_URL: redis://redis:6379/0
       DATABASE_URL: sqlite:////data/app.db
     volumes:
       - app_data:/data
@@ -30,6 +37,7 @@ services:
       - "127.0.0.1:8000:8000"
     depends_on:
       - qdrant
+      - redis
 
   web:
     build: ./web

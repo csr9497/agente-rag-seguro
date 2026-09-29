@@ -25,6 +25,7 @@ locals {
       "langsmith-api-key"    = "LANGSMITH_API_KEY"
       "qdrant-api-key"       = "QDRANT_API_KEY"
       "azure-search-api-key" = "AZURE_SEARCH_API_KEY"
+      "redis-url"            = "REDIS_URL"
     } : nombre => variable if contains(local.p.secretos_en_key_vault, nombre)
   }
 
@@ -43,6 +44,7 @@ locals {
     AZURE_STORAGE_CONTAINER           = local.p.storage_container
     ENTORNO                           = "prod"
     TRAZAS_MODO                       = local.langsmith ? "enmascarado" : "apagado"
+    CACHE_BACKEND                     = contains(local.p.secretos_en_key_vault, "redis-url") ? "redis" : "memoria"
     LANGSMITH_PROJECT                 = "agente-rag-${local.p.name}"
     APP_VERSION                       = var.app_version
     # Sin Entra ID todavía: ni selección libre de rol ni gestión de documentos en Azure.
