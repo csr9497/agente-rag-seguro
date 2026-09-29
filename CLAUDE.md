@@ -80,11 +80,12 @@ El agente es un grafo LangGraph:
 - Lint / formato: `ruff check` · `ruff format`
 
 ## Fase actual
-**Fase 2 — Agente LangGraph local** (Fase 1 completada): grafo
-`authorize → input_guardrail → supervisor ⇄ tools → generate → output_guardrail → audit`
-con `rag_retrieve`. Siguiente: desplegar en Azure solo gpt-4o + embeddings y validar con la
-matriz de integración; después empaquetar y desplegar el resto. El plan completo son
-6 fases (RAG → agente → permisos/guardrails → Azure → automatización/HA → pulido).
+**Fase 3 (local) completada; pendiente despliegue en Azure.** Hecho: agente LangGraph con
+roles y permisos gestionados desde la UI, access_guardrail contra el registro, integridad
+índice↔registro, guardrails, caché semántica con permisos, memoria de conversación,
+feedback, trazas LangSmith y evaluaciones por capas. Terraform listo (flags `alcance` y
+`vector_store`) pero **no aplicado**: no tocar Azure sin indicación explícita del usuario.
+Siguiente: etapa A en Azure (modelos + Storage + AI Search Free); después Entra ID.
 
 ## Cómo trabajar en este repo
 - Antes de codear una feature, confirma en qué fase estamos.
