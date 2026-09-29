@@ -17,10 +17,11 @@ output "search_auth" { value = var.search_auth }
 
 output "content_safety_endpoint" { value = var.content_safety ? module.content_safety[0].endpoint : "" }
 
-output "storage_blob_endpoint" { value = module.storage.blob_endpoint }
-output "storage_account_name" { value = module.storage.name }
-output "storage_container" { value = module.storage.container_name }
-output "key_vault_name" { value = module.keyvault.name }
+output "openai_name" { value = module.openai.name }
+output "storage_blob_endpoint" { value = local.base ? module.storage[0].blob_endpoint : "" }
+output "storage_account_name" { value = local.base ? module.storage[0].name : "" }
+output "storage_container" { value = local.base ? module.storage[0].container_name : "" }
+output "key_vault_name" { value = local.base ? module.keyvault[0].name : "" }
 output "secretos_en_key_vault" { value = nonsensitive(sort(keys(local.secretos))) }
 
 # Solo alcance=completo (vacíos en alcance=modelos).
@@ -32,4 +33,4 @@ output "backend_identity_client_id" { value = local.completo ? azurerm_user_assi
 output "web_identity_id" { value = local.completo ? azurerm_user_assigned_identity.web[0].id : "" }
 output "ingest_identity_id" { value = local.completo ? azurerm_user_assigned_identity.ingest[0].id : "" }
 output "ingest_identity_client_id" { value = local.completo ? azurerm_user_assigned_identity.ingest[0].client_id : "" }
-output "key_vault_uri" { value = "https://${module.keyvault.name}.vault.azure.net/" }
+output "key_vault_uri" { value = local.base ? "https://${module.keyvault[0].name}.vault.azure.net/" : "" }

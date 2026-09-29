@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Rellena .env para ejecutar la app en local contra lo desplegado en Azure (alcance=modelos).
+# Rellena .env para ejecutar la app en local contra lo desplegado en Azure (alcance=modelos o
+# solo_modelos). Sin Key Vault (solo_modelos), la clave de OpenAI se lee con az.
 # Requiere: az login, `terraform -chdir=infra/platform init` con el backend remoto y tu object
 # id en developer_principal_ids (roles de Key Vault, OpenAI, Blob e índice).
 set -euo pipefail
@@ -15,11 +16,17 @@ set_var() { # set_var NOMBRE valor  (no imprime valores)
 }
 
 set_var AZURE_OPENAI_ENDPOINT "$($TF openai_endpoint)"
-set_var AZURE_OPENAI_API_KEY "$(secreto azure-openai-api-key)"
+if [[ -n "$KV" ]]; then
+  set_var AZURE_OPENAI_API_KEY "$(secreto azure-openai-api-key)"
+else
+  set_var AZURE_OPENAI_API_KEY "$(az cognitiveservices account keys list \
+    -g "$($TF resource_group_name)" -n "$($TF openai_name)" --query key1 -o tsv)"
+fi
 set_var AZURE_OPENAI_CHAT_DEPLOYMENT "$($TF chat_deployment)"
 set_var AZURE_OPENAI_EMBEDDING_DEPLOYMENT "$($TF embedding_deployment)"
 
 VS=$($TF vector_store)
+[[ -z "$($TF search_endpoint)" && "$VS" == "azure_search" ]] && VS=qdrant # solo_modelos
 set_var VECTOR_STORE "$VS"
 if [[ "$VS" == "azure_search" ]]; then
   set_var AZURE_SEARCH_ENDPOINT "$($TF search_endpoint)"
@@ -36,4 +43,5 @@ set_var CONTENT_SAFETY_ENDPOINT "$($TF content_safety_endpoint)"
 # la cuenta de almacenamiento están desactivadas). En Docker se quedan en local.
 set_var AZURE_STORAGE_ACCOUNT_URL "$($TF storage_blob_endpoint)"
 set_var AZURE_STORAGE_CONTAINER "$($TF storage_container)"
+[[ "$($TF alcance)" == "solo_modelos" ]] && set_var ALMACEN_DOCUMENTOS local
 echo ".env actualizado (vector store: $VS). Para guardar originales en Blob: ALMACEN_DOCUMENTOS=blob y ejecuta el backend con 'uv run uvicorn app.main:app'."

@@ -175,3 +175,37 @@ run "sin_content_safety" {
     error_message = "content_safety=false no crea el recurso y deja el endpoint vacío"
   }
 }
+
+run "solo_modelos_para_desarrollo_local" {
+  command = plan
+  variables {
+    alcance        = "solo_modelos"
+    vector_store   = "qdrant"
+    qdrant_modo    = "local"
+    content_safety = false
+  }
+  assert {
+    condition     = length(module.keyvault) == 0 && length(module.storage) == 0 && length(module.monitoring) == 0 && length(module.search) == 0
+    error_message = "solo_modelos no crea Key Vault, Storage, Log Analytics ni AI Search"
+  }
+  assert {
+    condition     = length(module.content_safety) == 0 && length(output.secretos_en_key_vault) == 0
+    error_message = "Sin Key Vault no hay secretos"
+  }
+  assert {
+    condition     = output.key_vault_name == "" && output.storage_blob_endpoint == ""
+    error_message = "Salidas vacías para lo que no se crea"
+  }
+}
+
+run "solo_modelos_ignora_azure_search" {
+  command = plan
+  variables {
+    alcance      = "solo_modelos"
+    vector_store = "azure_search"
+  }
+  assert {
+    condition     = length(module.search) == 0
+    error_message = "solo_modelos usa Qdrant local aunque vector_store diga azure_search"
+  }
+}

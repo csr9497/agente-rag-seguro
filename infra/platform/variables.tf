@@ -105,11 +105,11 @@ variable "tags" {
 # ------------------------------------------------------------------ alcance y vector store
 variable "alcance" {
   type        = string
-  description = "modelos: RG, OpenAI, Storage, Key Vault, Log Analytics y vector store (app en local). completo: además red, ACR, Container Apps, PostgreSQL e identidades."
+  description = "solo_modelos: RG y Azure OpenAI (gpt-4o + ada-002) para desarrollar en local contra los modelos en la nube (Qdrant, SQLite y Redis en Docker). modelos: además Storage, Key Vault, Log Analytics, AI Search y Content Safety (app en local). completo: además red, ACR, Container Apps, PostgreSQL e identidades."
   default     = "modelos"
   validation {
-    condition     = contains(["modelos", "completo"], var.alcance)
-    error_message = "alcance debe ser 'modelos' o 'completo'."
+    condition     = contains(["solo_modelos", "modelos", "completo"], var.alcance)
+    error_message = "alcance debe ser 'solo_modelos', 'modelos' o 'completo'."
   }
 }
 

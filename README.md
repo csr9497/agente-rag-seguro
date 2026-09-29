@@ -186,6 +186,25 @@ falla si hay fugas entre roles o contrato roto), Terraform (fmt, validate, tests
 imágenes. [deploy.yml](.github/workflows/deploy.yml) (OIDC, sin secretos) está desactivado
 hasta definir la variable de repositorio `DEPLOY_AZURE=true`.
 
+## Desarrollo local con los modelos en la nube
+
+`alcance = "solo_modelos"` ([infra/envs/dev/solo_modelos.tfvars](infra/envs/dev/solo_modelos.tfvars))
+crea solo gpt-4o y text-embedding-ada-002 en Azure: sin AI Search, Storage ni Key Vault.
+Todo lo demás (Qdrant, SQLite, Redis, app y web) corre en docker-compose. Coste fijo 0: se
+paga por token.
+
+```bash
+make modelos-up     # Azure (modelos) → .env → docker compose → documentos de ejemplo
+make modelos-down   # para Docker, elimina los modelos y quita endpoint y clave de .env
+```
+
+| Qué | Dónde |
+|---|---|
+| Interfaz web | http://localhost:8080 |
+| API (docs interactivos) | http://localhost:8000/docs |
+| Estado | http://localhost:8000/ready |
+| Topología del grafo | http://localhost:8000/grafo |
+
 ## Ciclo de pruebas en Azure
 
 `make ciclo` (o `PASO=prender|probar|guardar|apagar|informe`) ejecuta el ciclo completo y deja

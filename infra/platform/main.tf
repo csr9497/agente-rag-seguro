@@ -11,7 +11,8 @@ locals {
   flat     = "${var.project}${var.environment}${random_string.suffix.result}" # nombres globales
   public   = !var.private_endpoints_enabled
   completo = var.alcance == "completo"
-  search   = var.vector_store == "azure_search"
+  base     = var.alcance != "solo_modelos" # Storage, Key Vault y Log Analytics
+  search   = var.vector_store == "azure_search" && local.base
   qdrant   = var.vector_store == "qdrant"
   tags = merge(var.tags, {
     project     = var.project
@@ -41,6 +42,10 @@ resource "terraform_data" "validaciones" {
       error_message = "private_endpoints_enabled requiere alcance=completo (sin VNet, la app local no llegaría a los servicios)."
     }
     precondition {
+      condition     = !(var.alcance == "solo_modelos" && local.qdrant && var.qdrant_modo != "local")
+      error_message = "alcance=solo_modelos usa el Qdrant local de docker-compose (qdrant_modo=local)."
+    }
+    precondition {
       condition     = !(var.private_endpoints_enabled && local.search && var.search_sku == "free")
       error_message = "El tier Free de AI Search no admite private endpoints: usa search_sku=basic."
     }
@@ -55,6 +60,7 @@ resource "azurerm_resource_group" "this" {
 
 # ------------------------------------------------------------------ siempre (alcance=modelos)
 module "monitoring" {
+  count               = local.base ? 1 : 0
   source              = "../modules/monitoring"
   name                = local.name
   location            = var.location
@@ -63,6 +69,7 @@ module "monitoring" {
 }
 
 module "keyvault" {
+  count               = local.base ? 1 : 0
   source              = "../modules/keyvault"
   name                = "kv-${local.flat}"
   location            = var.location
@@ -73,6 +80,7 @@ module "keyvault" {
 
 # Originales de los documentos (fuente de verdad para reindexar; roles en metadatos del blob).
 module "storage" {
+  count                         = local.base ? 1 : 0
   source                        = "../modules/storage"
   name                          = "st${local.flat}"
   location                      = var.location
@@ -168,7 +176,7 @@ resource "azurerm_container_app_environment" "this" {
   infrastructure_subnet_id       = module.network[0].container_apps_subnet_id
   internal_load_balancer_enabled = false # la web es pública; el backend tiene ingress interno
   logs_destination               = "log-analytics"
-  log_analytics_workspace_id     = module.monitoring.workspace_id
+  log_analytics_workspace_id     = module.monitoring[0].workspace_id
   tags                           = local.tags
 
   workload_profile {

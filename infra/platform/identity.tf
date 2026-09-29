@@ -34,14 +34,14 @@ locals {
     {
       backend_acr    = { scope = module.registry[0].id, role = "AcrPull", principal = local.backend }
       backend_openai = { scope = module.openai.id, role = "Cognitive Services OpenAI User", principal = local.backend }
-      backend_kv     = { scope = module.keyvault.id, role = "Key Vault Secrets User", principal = local.backend }
+      backend_kv     = { scope = module.keyvault[0].id, role = "Key Vault Secrets User", principal = local.backend }
       # El backend también indexa (subida desde la UI): escribe blobs e índice.
-      backend_blob  = { scope = module.storage.id, role = "Storage Blob Data Contributor", principal = local.backend }
+      backend_blob  = { scope = module.storage[0].id, role = "Storage Blob Data Contributor", principal = local.backend }
       web_acr       = { scope = module.registry[0].id, role = "AcrPull", principal = local.web }
       ingest_acr    = { scope = module.registry[0].id, role = "AcrPull", principal = local.ingest }
       ingest_openai = { scope = module.openai.id, role = "Cognitive Services OpenAI User", principal = local.ingest }
-      ingest_blob   = { scope = module.storage.id, role = "Storage Blob Data Reader", principal = local.ingest }
-      ingest_kv     = { scope = module.keyvault.id, role = "Key Vault Secrets User", principal = local.ingest }
+      ingest_blob   = { scope = module.storage[0].id, role = "Storage Blob Data Reader", principal = local.ingest }
+      ingest_kv     = { scope = module.keyvault[0].id, role = "Key Vault Secrets User", principal = local.ingest }
     },
     var.content_safety ? {
       backend_cs = { scope = module.content_safety[0].id, role = "Cognitive Services User", principal = local.backend }
@@ -56,18 +56,18 @@ locals {
   ) : {}
 
   # Identidad que ejecuta Terraform: escribe secretos en Key Vault.
-  roles_base = {
-    deployer_kv = { scope = module.keyvault.id, role = "Key Vault Secrets Officer", principal = data.azurerm_client_config.current.object_id }
-  }
+  roles_base = local.base ? {
+    deployer_kv = { scope = module.keyvault[0].id, role = "Key Vault Secrets Officer", principal = data.azurerm_client_config.current.object_id }
+  } : {}
 
   # Desarrolladores (app en local contra Azure): OpenAI, blobs, secretos e índice.
   developer_roles = merge([
     for pid in var.developer_principal_ids : merge(
-      {
-        "dev_blob_${pid}"   = { scope = module.storage.id, role = "Storage Blob Data Contributor", principal = pid }
-        "dev_kv_${pid}"     = { scope = module.keyvault.id, role = "Key Vault Secrets User", principal = pid }
-        "dev_openai_${pid}" = { scope = module.openai.id, role = "Cognitive Services OpenAI User", principal = pid }
-      },
+      { "dev_openai_${pid}" = { scope = module.openai.id, role = "Cognitive Services OpenAI User", principal = pid } },
+      local.base ? {
+        "dev_blob_${pid}" = { scope = module.storage[0].id, role = "Storage Blob Data Contributor", principal = pid }
+        "dev_kv_${pid}"   = { scope = module.keyvault[0].id, role = "Key Vault Secrets User", principal = pid }
+      } : {},
       var.content_safety ? {
         "dev_cs_${pid}" = { scope = module.content_safety[0].id, role = "Cognitive Services User", principal = pid }
       } : {},
@@ -94,7 +94,8 @@ resource "time_sleep" "kv_rbac" {
 
 # ------------------------------------------------------------------ secretos (regla 3)
 locals {
-  secretos = merge(
+  # Sin Key Vault (solo_modelos) no hay secretos: la clave de OpenAI se lee con az (make env-modelos).
+  secretos = !local.base ? {} : merge(
     var.openai_local_auth_enabled ? { "azure-openai-api-key" = module.openai.primary_access_key } : {},
     local.search && var.search_auth == "api_key" ? { "azure-search-api-key" = module.search[0].primary_key } : {},
     local.qdrant && var.qdrant_modo == "cloud" ? { "qdrant-api-key" = var.qdrant_cloud_api_key } : {},
@@ -108,6 +109,6 @@ resource "azurerm_key_vault_secret" "this" {
   for_each     = nonsensitive(toset(keys(local.secretos)))
   name         = each.key
   value        = local.secretos[each.key]
-  key_vault_id = module.keyvault.id
+  key_vault_id = module.keyvault[0].id
   depends_on   = [time_sleep.kv_rbac]
 }

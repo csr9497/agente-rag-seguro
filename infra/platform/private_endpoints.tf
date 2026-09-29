@@ -2,8 +2,8 @@ locals {
   private_endpoints = var.private_endpoints_enabled && local.completo ? merge(
     {
       openai = { resource_id = module.openai.id, subresource = "account", zone = "privatelink.openai.azure.com" }
-      blob   = { resource_id = module.storage.id, subresource = "blob", zone = "privatelink.blob.core.windows.net" }
-      vault  = { resource_id = module.keyvault.id, subresource = "vault", zone = "privatelink.vaultcore.azure.net" }
+      blob   = { resource_id = module.storage[0].id, subresource = "blob", zone = "privatelink.blob.core.windows.net" }
+      vault  = { resource_id = module.keyvault[0].id, subresource = "vault", zone = "privatelink.vaultcore.azure.net" }
     },
     var.content_safety ? {
       content_safety = { resource_id = module.content_safety[0].id, subresource = "account", zone = "privatelink.cognitiveservices.azure.com" }
