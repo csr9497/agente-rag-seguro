@@ -10,6 +10,7 @@ esos roles (doc_id, hash y estado) + modelo/versión. Así:
 Implementación local en memoria. En Azure: Azure Cache for Redis detrás de esta interfaz.
 """
 
+import hashlib
 import math
 import threading
 from collections import OrderedDict
@@ -77,5 +78,44 @@ class CacheMemoria:
 
 
 def alcance_de_permisos(registro: RepositorioDocumentos, roles: list[str], version: str) -> str:
-    """REGRESIÓN DELIBERADA (prueba del CI): el alcance ignora rol y documentos."""
-    return f"global:{version}"
+    """Huella de lo que `roles` puede ver ahora mismo (+ versión de modelo/app)."""
+    # REGRESIÓN DELIBERADA (prueba del CI): el alcance ignora rol y documentos.
+    huella = hashlib.sha256(version.encode()).hexdigest()
+    return f"global:{huella[:24]}"
+
+
+class CacheRedis:
+    """Caché compartida entre réplicas. Funciona en cualquier tier de Redis (no necesita
+    búsqueda vectorial): una lista por alcance, acotada y con caducidad; la similitud se calcula
+    en la app sobre las pocas entradas de ese alcance."""
+
+    def __init__(
+        self, cliente, umbral: float = 0.95, max_por_alcance: int = 100, ttl_s: int = 86400
+    ) -> None:  # noqa: ANN001 - redis.Redis o compatible
+        self._r = cliente
+        self._umbral = umbral
+        self._max = max_por_alcance
+        self._ttl = ttl_s
+
+    @staticmethod
+    def _clave(alcance: str) -> str:
+        return f"cache:{alcance}"
+
+    def buscar(self, vector: list[float], alcance: str) -> EntradaCache | None:
+        mejor: tuple[float, EntradaCache] | None = None
+        for crudo in self._r.lrange(self._clave(alcance), 0, -1):
+            entrada = EntradaCache.model_validate_json(crudo)
+            if entrada.alcance != alcance:  # defensa en profundidad
+                continue
+            sim = _coseno(vector, entrada.vector)
+            if sim >= self._umbral and (mejor is None or sim > mejor[0]):
+                mejor = (sim, entrada)
+        return mejor[1] if mejor else None
+
+    def guardar(self, entrada: EntradaCache) -> None:
+        clave = self._clave(entrada.alcance)
+        with self._r.pipeline() as p:
+            p.lpush(clave, entrada.model_dump_json())
+            p.ltrim(clave, 0, self._max - 1)
+            p.expire(clave, self._ttl)
+            p.execute()
