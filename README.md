@@ -8,9 +8,26 @@ auditoría, trazas en LangSmith y evaluaciones por capas. Reglas del proyecto en
 
 | | |
 |---|---|
-| Estado | Funcional en local (351 tests). Terraform para Azure listo y probado con mocks, **sin aplicar** |
+| Estado | Validado en Azure (etapa A) con modelos reales; entorno local completo con `make levantar` |
 | Stack | Python 3.12 · LangGraph · FastAPI · Azure OpenAI · AI Search / Qdrant · SQLite / PostgreSQL · Redis · Terraform · GitHub Actions |
-| Pendiente | Primer despliegue en Azure (etapa A: modelos + Storage + AI Search) y respuestas reales del LLM |
+| Guías | [Herramientas y comandos](docs/herramientas.md) · [LangGraph Studio: valores y ejemplos](docs/studio.md) |
+
+## Arranque rápido (tras clonar)
+
+Requisitos: [uv](https://docs.astral.sh/uv/), Docker Desktop abierto, [Azure CLI](https://learn.microsoft.com/cli/azure/)
+con `az login` y [Terraform](https://developer.hashicorp.com/terraform) ≥ 1.9. El estado
+remoto de Terraform ya existe (bootstrap); no hace falta ninguna clave: se usa tu `az login`.
+
+```bash
+git clone https://github.com/csr9497/agente-rag-seguro.git && cd agente-rag-seguro
+make instalar   # comprueba requisitos, instala dependencias, crea .env e inicializa Terraform
+make levantar   # modelos en Azure + app en Docker + documentos de ejemplo + Studio → accesos
+```
+
+Al terminar, `make levantar` muestra las URLs (aplicación en http://localhost:8080, API,
+LangGraph Studio, LangSmith, Qdrant). `make accesos` las repite con el estado de cada una y
+`make apagar` lo detiene todo y elimina los modelos de Azure (sin costes). Opcional: añade
+`LANGSMITH_API_KEY` en `.env` para trazas y evaluaciones en LangSmith.
 
 ![Interfaz](docs/ui/2-public.png)
 
@@ -107,32 +124,17 @@ Además:
 - Tests de regresión de configuración: los modos de depuración nunca se activan en Terraform
   y el compose no contiene contraseñas.
 
-## Puesta en marcha
+## Puesta en marcha sin Azure
 
-Requisitos: anaconda (intérprete 3.12), [uv](https://docs.astral.sh/uv/), Docker. Terraform
-y Azure CLI solo para desplegar.
+Para trabajar sin modelos en la nube (tests, UI, permisos, guardrails de entrada):
 
 ```bash
-make setup          # conda env (Python 3.12) + uv sync
+make instalar       # o, con anaconda: make setup
 make test           # tests unitarios, sin servicios externos
 make up             # web :8080, API :8000, Qdrant, Redis (todo en 127.0.0.1)
 make evals-simulado # gate de CI en local: app con modelos simulados + evaluaciones
 make down
 ```
-
-| Qué | Dónde |
-|---|---|
-| Web | http://localhost:8080 |
-| API (OpenAPI) | http://localhost:8000/docs |
-| Topología del grafo | http://localhost:8000/grafo |
-| LangGraph Studio (`make studio`, en Chrome) | https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024 |
-
-**LangGraph Studio.** `make studio` arranca el grafo en `127.0.0.1:2024` con la misma
-configuración, base de datos (`data/`, compartida con Docker) y registro de permisos que la
-app. Ábrelo en **Chrome o Edge** (Safari bloquea que una web https llame a `http://127.0.0.1`;
-alternativa: `uv run langgraph dev --tunnel`). Entrada de ejemplo:
-`{"pregunta": "¿Puedo aceptar un regalo?", "usuario": {"id": "studio", "groups": ["public"]}, "top_k": 4}`
-(`groups` es el rol de la conversación: prueba `public`, `rrhh` o `finanzas`).
 
 Sin Azure OpenAI configurado la app arranca y responde **503** en lo que necesita el LLM; los
 permisos, guardrails de entrada, roles, subida (validación) y auditoría funcionan. Para

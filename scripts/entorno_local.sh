@@ -2,6 +2,7 @@
 # Entorno de desarrollo completo: modelos en Azure (solo gpt-4o y ada-002) + app, web, Qdrant
 # y Redis en Docker + LangGraph Studio en el host. Todo escucha solo en 127.0.0.1.
 #
+#   ./scripts/entorno_local.sh instalar   # comprueba requisitos, dependencias, .env y Terraform
 #   ./scripts/entorno_local.sh levantar   # crea/actualiza lo necesario y muestra los accesos
 #   ./scripts/entorno_local.sh accesos    # estado de cada servicio y sus URLs
 #   ./scripts/entorno_local.sh apagar     # para Studio y Docker, elimina los modelos de Azure
@@ -18,6 +19,38 @@ export ARM_SUBSCRIPTION_ID="${ARM_SUBSCRIPTION_ID:-$(az account show --query id 
 
 paso() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 
+terraform_init() { # idempotente; el backend remoto está en infra/envs/dev/backend.hcl
+  terraform -chdir=infra/platform init -input=false -reconfigure \
+    -backend-config=../envs/dev/backend.hcl > /dev/null
+}
+
+yo() { az ad signed-in-user show --query id -o tsv 2>/dev/null; }
+
+instalar() {
+  paso "Requisitos"
+  local falta=0
+  for cmd in uv docker az terraform; do
+    if command -v "$cmd" > /dev/null; then echo "✅ $cmd"; else echo "⛔ $cmd no está instalado"; falta=1; fi
+  done
+  docker info > /dev/null 2>&1 && echo "✅ Docker en marcha" || { echo "⛔ abre Docker Desktop"; falta=1; }
+  if az account show > /dev/null 2>&1; then echo "✅ az login ($(az account show --query name -o tsv))"
+  else echo "⛔ ejecuta: az login"; falta=1; fi
+  [[ $falta == 0 ]] || { echo; echo "Resuelve lo marcado con ⛔ y repite: make instalar"; exit 1; }
+
+  paso "Dependencias de Python (uv, Python 3.12)"
+  uv sync --frozen 2>&1 | tail -1
+
+  paso ".env"
+  if [[ -f .env ]]; then echo "ya existe"; else cp .env.example .env && echo "creado desde .env.example"; fi
+  grep -q '^LANGSMITH_API_KEY=.\+' .env && echo "✅ LANGSMITH_API_KEY definida" \
+    || echo "ℹ️  opcional: añade LANGSMITH_API_KEY en .env para trazas y evaluaciones en LangSmith"
+
+  paso "Terraform (estado remoto)"
+  terraform_init && echo "listo"
+  mkdir -p data
+  echo; echo "Instalación completa. Siguiente paso: make levantar"
+}
+
 esperar() { # esperar URL segundos
   for _ in $(seq 1 "$2"); do curl -sf "$1" > /dev/null 2>&1 && return 0; sleep 1; done
   return 1
@@ -29,7 +62,10 @@ levantar() {
   docker info > /dev/null 2>&1 || { echo "Docker no está en marcha: abre Docker Desktop y repite."; exit 1; }
 
   paso "1/5 Modelos en Azure (gpt-4o + text-embedding-ada-002)"
+  [[ -d infra/platform/.terraform ]] || terraform_init
+  mkdir -p data
   terraform -chdir=infra/platform apply -input=false -auto-approve -var-file="$TFVARS" \
+    -var "developer_principal_ids=[\"$(yo)\"]" \
     | grep -E "Apply complete|No changes|Error" || true
 
   paso "2/5 .env con el endpoint y la clave de los modelos"
@@ -64,7 +100,9 @@ apagar() {
   docker compose down 2>&1 | grep -E "Removed|Stopped" | tail -4 || true
 
   paso "Modelos en Azure"
+  [[ -d infra/platform/.terraform ]] || terraform_init
   terraform -chdir=infra/platform destroy -input=false -auto-approve -var-file="$TFVARS" \
+    -var "developer_principal_ids=[\"$(yo)\"]" \
     | grep -E "Destroy complete|Error" || true
 
   paso ".env sin endpoint ni clave"
@@ -106,6 +144,6 @@ EOF
 }
 
 case "${1:-}" in
-  levantar | apagar | accesos) "$1" ;;
-  *) sed -n '2,11p' "$0"; exit 1 ;;
+  instalar | levantar | apagar | accesos) "$1" ;;
+  *) sed -n '2,12p' "$0"; exit 1 ;;
 esac

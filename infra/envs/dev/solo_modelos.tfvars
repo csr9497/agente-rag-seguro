@@ -12,7 +12,8 @@ qdrant_modo  = "local"
 openai_local_auth_enabled = true # clave en .env para la app en Docker (sin az login)
 content_safety            = false
 
-developer_principal_ids = ["772b9ea7-22d9-47ae-a974-5a297aea7ee0"]
+# Quién puede usar los modelos con su az login: lo pasa scripts/entorno_local.sh (usuario actual).
+developer_principal_ids = []
 
 # Cuota de la suscripción: gpt-4o solo tiene cuota regional (Standard) en eastus2.
 chat_model = {
