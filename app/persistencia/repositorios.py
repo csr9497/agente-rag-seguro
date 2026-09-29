@@ -42,6 +42,7 @@ _CAMPOS_DATOS = {
     "traza_id",
     "feedback",
     "desde_cache",
+    "conversacional",
     "acciones",
 }
 

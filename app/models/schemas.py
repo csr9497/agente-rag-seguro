@@ -27,6 +27,9 @@ class RespuestaConsulta(BaseModel):
     sin_contexto: bool = Field(
         description="True si la respuesta no se pudo fundamentar en documentos visibles"
     )
+    conversacional: bool = Field(
+        default=False, description="Respuesta de cortesía por plantilla (saludo, ayuda…)"
+    )
 
 
 class Chunk(BaseModel):

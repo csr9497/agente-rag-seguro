@@ -257,3 +257,12 @@ def test_la_cita_lleva_el_fragmento_completo(agente) -> None:
     daba por no fundamentadas respuestas correctas)."""
     r = agente.consultar("vacaciones", Usuario(id="u", groups=["public"]))
     assert len(r.citas[0].fragmento) > 300
+
+
+def test_la_generacion_conoce_la_fecha(agente, llm) -> None:
+    """«¿Qué festivos hay este año?»: sin la fecha, gpt-4o no sabía que «este año» es 2026."""
+    from datetime import date
+
+    agente.consultar("vacaciones", Usuario(id="u", groups=["public"]))
+    [(system, _)] = llm.llamadas
+    assert f"Fecha de hoy: {date.today()}" in system

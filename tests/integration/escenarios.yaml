@@ -27,6 +27,9 @@ capacidades:
   salida_escape:
     descripcion: Si no está en los documentos, lo dice y no inventa
     fase: 1
+  conversacion:
+    descripcion: Saludos y cortesía con respuesta por plantilla, sin buscar ni inventar
+    fase: 3
   permisos_datos:
     descripcion: El retrieval solo devuelve documentos del rol de la conversación
     fase: 1
@@ -286,6 +289,16 @@ escenarios:
       min_citas: 2
       todas_fuentes_de: [public/politica-vacaciones.md, public/teletrabajo.md]
       contiene_alguno: ["23"]
+
+  # --- Conversación básica -----------------------------------------------------------
+  - id: CONV-01
+    descripcion: Un saludo recibe una respuesta de cortesía, sin buscar en documentos
+    capacidades: [conversacion]
+    pregunta: Hola
+    esperado:
+      sin_contexto: true
+      contiene_alguno: ["Hola", "hola"]
+      no_consultados: [public/, rrhh/]
 
   # --- Caché con permisos (orden importa: RRHH cachea primero, luego public pregunta igual) ---
   - id: CACHE-01

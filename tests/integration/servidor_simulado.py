@@ -35,7 +35,9 @@ class SupervisorPorPalabras:
             )
         contenido = next(m["content"] for m in mensajes if m["role"] == "user")
         pregunta = contenido.split("<pregunta>")[-1].lower()
-        if "ticket" in pregunta:
+        if pregunta.strip(" ¡!¿?.").startswith(("hola", "gracias", "adiós", "buenos días")):
+            nombre, args = "conversacion", {"tipo": "saludo"}
+        elif "ticket" in pregunta:
             nombre, args = (
                 "proponer_accion",
                 {

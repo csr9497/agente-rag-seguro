@@ -7,7 +7,7 @@ import pytest
 from app.cache.semantica import CacheMemoria, EntradaCache, alcance_de_permisos
 from app.config import Settings
 from app.deps import build_servicios
-from app.models.schemas import RespuestaConsulta, Turno, Usuario
+from app.models.schemas import RespuestaConsulta, RespuestaLLM, Turno, Usuario
 from app.rag.prompts import SYSTEM_PROMPT
 from app.security.guardrails import MENSAJE_BLOQUEO
 from tests.fakes import FakeEmbedder, FakeLLM, FakeSupervisor
@@ -200,3 +200,12 @@ def test_redis_compartida_entre_instancias_sin_cruzar_roles(
     a.agente.consultar_detallado("vacaciones", PUBLIC)
     assert b.agente.consultar_detallado("vacaciones", PUBLIC).desde_cache
     assert not b.agente.consultar_detallado("vacaciones", RRHH).desde_cache
+
+
+def test_respuestas_sin_contexto_no_se_cachean(entorno) -> None:
+    """Un «no encuentro» cacheado sobrevive a mejoras del agente (un saludo que antes no se
+    entendía seguía respondiendo «no encuentro») y solo ahorra respuestas vacías."""
+    s, c = entorno
+    c.llm.salida = RespuestaLLM(respuesta="No lo sé", citas_usadas=[], encontrado=False)
+    assert s.agente.consultar("¿Capital de Francia?", PUBLIC).sin_contexto
+    assert not s.agente.consultar_detallado("¿Capital de Francia?", PUBLIC).desde_cache

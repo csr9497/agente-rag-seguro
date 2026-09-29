@@ -336,6 +336,11 @@ function pintarRespuesta(m, i) {
       el("div", { class: "msg-meta" }, `Asistente · ${hora(m.creado_en)}`),
       el("p", { class: "answer" }, m.respuesta), tarjetasAccion(m), feedback(m));
   }
+  if (m.conversacional) {
+    return el("article", { class: "msg-bot" },
+      el("div", { class: "msg-meta" }, `Asistente · ${hora(m.creado_en)}`),
+      el("p", { class: "answer" }, m.respuesta));
+  }
   if (m.sin_contexto) {
     return el("div", { class: "msg-bot" },
       notice("info", "i-info", "No encuentro esa información en tus documentos",

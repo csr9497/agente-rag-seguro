@@ -8,6 +8,7 @@ se audita, también las rechazadas.
 
 import uuid
 from collections.abc import Callable
+from datetime import date
 from typing import Any, Literal
 
 from langgraph.graph import END, START, StateGraph
@@ -29,6 +30,7 @@ from app.security.acceso import PREFIJO_DATOS, VerificadorAcceso, VerificadorPer
 from app.security.audit import registrar_consulta
 from app.security.guardrails import MENSAJE_BLOQUEO, Guardrail
 from app.tools.base import SIN_ACCESO, Herramienta, ResultadoHerramienta, schema_openai
+from app.tools.conversacion import PLANTILLAS
 
 Update = dict[str, Any]
 
@@ -195,7 +197,8 @@ class Agente:
         if estado.iteraciones >= self._max_iteraciones:
             return {"pendientes": []}
         mensajes = estado.mensajes or [
-            {"role": "system", "content": SUPERVISOR_PROMPT},
+            # Con la fecha, "este año" o "los próximos festivos" no se resuelven con un año viejo.
+            {"role": "system", "content": f"{SUPERVISOR_PROMPT}\nFecha de hoy: {date.today()}."},
             {"role": "user", "content": _pregunta_supervisor(estado)},
         ]
         # Primer turno: obligatorio usar una herramienta (con gpt-4o y tool_choice=auto, a veces
@@ -229,9 +232,11 @@ class Agente:
         hallazgos = list(estado.hallazgos)
         descartados_total = estado.fragmentos_descartados
         acciones = list(estado.acciones_propuestas)
+        conversacion = estado.conversacion
         for llamada in estado.por_revisar:
             resultado = llamada.resultado
             acciones += [a for a in resultado.acciones if a.rol_id in estado.usuario.groups]
+            conversacion = resultado.conversacion or conversacion
             nuevos: list[ChunkRecuperado] = []
             sin_acceso = por_tope = 0
             for r in resultado.chunks:
@@ -278,6 +283,7 @@ class Agente:
             "hallazgos": hallazgos,
             "fragmentos_descartados": descartados_total,
             "acciones_propuestas": acciones,
+            "conversacion": conversacion,
         }
 
     def _ejecutar(self, nombre: str, argumentos: str, estado: EstadoAgente) -> ResultadoHerramienta:
@@ -324,6 +330,8 @@ class Agente:
             or bloqueada
             or usa_datos
             or estado.acciones_propuestas
+            or estado.conversacion
+            or _requerir_respuesta(estado).sin_contexto  # un «no encuentro» no se reutiliza
             or not estado.vector_pregunta
         ):
             return {}
@@ -341,6 +349,14 @@ class Agente:
 
     def _generate(self, estado: EstadoAgente) -> Update:
         acciones = estado.acciones_propuestas
+        if estado.conversacion in PLANTILLAS and not estado.recuperados and not acciones:
+            # Saludo, agradecimiento, ayuda…: plantilla fija, sin LLM y sin inventar contenido.
+            texto = PLANTILLAS[estado.conversacion]
+            return {
+                "respuesta": RespuestaConsulta(
+                    respuesta=texto, citas=[], sin_contexto=True, conversacional=True
+                )
+            }
         if acciones and not estado.recuperados:
             # Solo acciones: respuesta por plantilla (sin LLM); la UI muestra las tarjetas.
             lista = "; ".join(a.resumen for a in acciones)

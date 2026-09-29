@@ -68,6 +68,7 @@ class MensajeGuardado(BaseModel):
     hallazgos: list[Hallazgo] = Field(default_factory=list)
     traza_id: str | None = Field(default=None, description="run_id de la ejecución (LangSmith)")
     desde_cache: bool = False
+    conversacional: bool = False
     feedback: Feedback | None = None
     acciones: list[PropuestaAccion] = Field(default_factory=list)
     creado_en: str = ""

@@ -34,6 +34,9 @@ class ResultadoHerramienta(BaseModel):
     acciones: list[PropuestaAccion] = Field(
         default_factory=list, description="Propuestas pendientes de aprobación humana"
     )
+    conversacion: str | None = Field(
+        default=None, description="Tipo de respuesta de cortesía (saludo, ayuda…)"
+    )
 
 
 class Herramienta(Protocol):

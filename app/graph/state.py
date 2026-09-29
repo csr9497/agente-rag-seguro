@@ -41,6 +41,9 @@ class EstadoAgente(BaseModel):
     # Contexto acumulado de todas las herramientas; su orden define la numeración [n].
     recuperados: list[ChunkRecuperado] = Field(default_factory=list)
 
+    # Tipo de respuesta de cortesía pedida por la herramienta `conversacion` (saludo, ayuda…).
+    conversacion: str | None = None
+
     # Acciones propuestas por las tools, pendientes de aprobación humana.
     acciones_propuestas: list[PropuestaAccion] = Field(default_factory=list)
 

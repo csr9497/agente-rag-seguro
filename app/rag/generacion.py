@@ -1,3 +1,5 @@
+from datetime import date
+
 from app.models.schemas import ChunkRecuperado, Cita, RespuestaConsulta, Turno
 from app.rag.prompts import SIN_CONTEXTO, SYSTEM_PROMPT, build_user_prompt
 from app.retrieval.base import LLM
@@ -16,7 +18,9 @@ def generar_respuesta(
     """Respuesta fundamentada con citas. Sin contexto visible, no se llama al LLM."""
     if not recuperados:
         return respuesta_sin_contexto()
-    salida = llm.responder(SYSTEM_PROMPT, build_user_prompt(pregunta, recuperados, historial))
+    # Con la fecha, «este año» o «el próximo festivo» se resuelven contra los datos.
+    system = f"{SYSTEM_PROMPT}\nFecha de hoy: {date.today()}."
+    salida = llm.responder(system, build_user_prompt(pregunta, recuperados, historial))
     citas = _mapear_citas(salida.citas_usadas, recuperados)
     if not salida.encontrado or not citas:
         # Sin citas válidas no damos la respuesta por fundamentada.
