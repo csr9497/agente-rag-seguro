@@ -133,7 +133,9 @@ def build_servicios(
             almacen=build_almacen(settings),
         ),
         roles=roles,
-        conversaciones=ServicioConversaciones(SqlRepositorioConversaciones(motor), roles, agente),
+        conversaciones=ServicioConversaciones(
+            SqlRepositorioConversaciones(motor), roles, agente, settings.max_turnos_historial
+        ),
         registro=registro,
         repo_roles=repo_roles,
         retriever=retriever,

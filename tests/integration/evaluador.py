@@ -55,6 +55,9 @@ class Escenario(BaseModel):
     descripcion: str
     capacidades: list[str] = Field(min_length=1)
     rol: str = Field(default="public", description="Rol con el que se inicia la conversación")
+    turnos_previos: list[str] = Field(
+        default=[], description="Preguntas enviadas antes en la misma conversación (memoria)"
+    )
     pregunta: str | None = None
     payload: dict[str, Any] | None = None
     docs_relevantes: list[str] = Field(

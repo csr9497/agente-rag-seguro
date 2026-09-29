@@ -18,7 +18,7 @@ def construir_ejemplos(matriz: Matriz) -> list[dict[str, Any]]:
     completo) y metadata para filtrar por capacidad en LangSmith."""
     return [
         {
-            "inputs": {"rol": e.rol, "cuerpo": e.cuerpo()},
+            "inputs": {"rol": e.rol, "cuerpo": e.cuerpo(), "turnos_previos": e.turnos_previos},
             "outputs": {"escenario": e.model_dump(mode="json")},
             "metadata": {"escenario_id": e.id, "capacidades": e.capacidades, "rol": e.rol},
         }
@@ -59,6 +59,7 @@ def ejecutar_experimento(base_url: str, matriz: Matriz, juez: Juez | None) -> st
     def objetivo(inputs: dict[str, Any]) -> dict[str, Any]:
         escenario = Escenario(
             id="ls", descripcion="ls", capacidades=["x"], rol=inputs["rol"], esperado={},
+            turnos_previos=inputs.get("turnos_previos", []),
             **({"payload": inputs["cuerpo"]} if "pregunta" not in inputs["cuerpo"]
                else {"pregunta": inputs["cuerpo"]["pregunta"]}),
         )  # fmt: skip

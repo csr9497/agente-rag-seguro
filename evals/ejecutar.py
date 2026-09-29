@@ -40,7 +40,10 @@ def llamar(http: httpx.Client, escenario: Escenario) -> tuple[int, Any]:
     conv = http.post("/conversaciones", json={"rol_id": escenario.rol})
     resp = conv
     if conv.status_code == 201:
-        resp = http.post(f"/conversaciones/{conv.json()['id']}/mensajes", json=escenario.cuerpo())
+        url = f"/conversaciones/{conv.json()['id']}/mensajes"
+        for previa in escenario.turnos_previos:
+            http.post(url, json={"pregunta": previa})
+        resp = http.post(url, json=escenario.cuerpo())
     es_json = resp.headers.get("content-type", "").startswith("application/json")
     return resp.status_code, resp.json() if es_json else None
 

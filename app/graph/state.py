@@ -2,7 +2,14 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from app.models.schemas import ChunkRecuperado, Hallazgo, RespuestaConsulta, ToolCall, Usuario
+from app.models.schemas import (
+    ChunkRecuperado,
+    Hallazgo,
+    RespuestaConsulta,
+    ToolCall,
+    Turno,
+    Usuario,
+)
 from app.tools.base import ResultadoHerramienta
 
 
@@ -17,6 +24,8 @@ class EstadoAgente(BaseModel):
     pregunta: str  # tras input_guardrail: versión saneada (PII enmascarada)
     usuario: Usuario
     top_k: int
+    # Turnos previos de la misma conversación (mismo rol); solo para resolver referencias.
+    historial: list[Turno] = Field(default_factory=list)
 
     # Historial de tool-calling del supervisor (formato chat de OpenAI).
     mensajes: list[dict[str, Any]] = Field(default_factory=list)

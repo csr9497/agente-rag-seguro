@@ -45,6 +45,12 @@ capacidades:
   orquestacion_agente:
     descripcion: El supervisor descompone preguntas compuestas en varias búsquedas
     fase: 2
+  memoria_conversacion:
+    descripcion: Preguntas de seguimiento resueltas con el historial de la misma conversación
+    fase: 3
+    tests_unitarios:
+      - tests/test_agente.py::test_historial_llega_al_supervisor_y_a_la_generacion
+      - tests/test_api_roles.py::test_el_historial_de_la_conversacion_llega_al_agente
   herramientas_documentos:
     descripcion: listar_documentos, leer_documento y buscar_en_documento con permisos
     fase: 2
@@ -271,6 +277,18 @@ escenarios:
       min_citas: 2
       todas_fuentes_de: [public/politica-vacaciones.md, public/teletrabajo.md]
       contiene_alguno: ["23"]
+
+  # --- Memoria de conversación --------------------------------------------------------
+  - id: MEM-01
+    descripcion: Pregunta de seguimiento que depende del turno anterior
+    capacidades: [memoria_conversacion, respuesta_citada]
+    turnos_previos: ["¿Cuántos días de vacaciones tengo al año?"]
+    pregunta: ¿Y cuántos de esos puedo pasar al año siguiente?
+    docs_relevantes: [public/politica-vacaciones.md]
+    esperado:
+      sin_contexto: false
+      alguna_fuente_de: [public/politica-vacaciones.md]
+      contiene_alguno: ["5", "cinco"]
 
   # --- Herramientas de documentos ----------------------------------------------------
   - id: TL-01

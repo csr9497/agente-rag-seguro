@@ -151,4 +151,4 @@ def test_dataset_desde_la_matriz() -> None:
         Escenario.model_validate(primero["outputs"]["escenario"]).id
         == primero["metadata"]["escenario_id"]
     )
-    assert set(primero["inputs"]) == {"rol", "cuerpo"}
+    assert set(primero["inputs"]) == {"rol", "cuerpo", "turnos_previos"}

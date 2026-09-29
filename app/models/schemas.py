@@ -46,6 +46,13 @@ def indice_chunk(chunk_id: str) -> int:
     return int(chunk_id.rsplit("#", 1)[1])
 
 
+class Turno(BaseModel):
+    """Pregunta y respuesta previas de la misma conversación (mismo rol)."""
+
+    pregunta: str
+    respuesta: str
+
+
 class ChunkRecuperado(BaseModel):
     chunk: Chunk
     score: float

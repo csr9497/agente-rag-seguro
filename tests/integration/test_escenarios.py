@@ -34,7 +34,10 @@ def test_escenario(
     if conv.status_code != 201:
         resultado = evaluar(escenario, conv.status_code, _json(conv), MATRIZ.canarios)
     else:
-        resp = http.post(f"/conversaciones/{conv.json()['id']}/mensajes", json=escenario.cuerpo())
+        url = f"/conversaciones/{conv.json()['id']}/mensajes"
+        for previa in escenario.turnos_previos:
+            http.post(url, json={"pregunta": previa})
+        resp = http.post(url, json=escenario.cuerpo())
         resultado = evaluar(escenario, resp.status_code, _json(resp), MATRIZ.canarios)
     resultados.append(resultado)
 

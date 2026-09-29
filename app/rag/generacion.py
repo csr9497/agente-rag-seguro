@@ -1,4 +1,4 @@
-from app.models.schemas import ChunkRecuperado, Cita, RespuestaConsulta
+from app.models.schemas import ChunkRecuperado, Cita, RespuestaConsulta, Turno
 from app.rag.prompts import SIN_CONTEXTO, SYSTEM_PROMPT, build_user_prompt
 from app.retrieval.base import LLM
 
@@ -8,12 +8,15 @@ def respuesta_sin_contexto() -> RespuestaConsulta:
 
 
 def generar_respuesta(
-    llm: LLM, pregunta: str, recuperados: list[ChunkRecuperado]
+    llm: LLM,
+    pregunta: str,
+    recuperados: list[ChunkRecuperado],
+    historial: list[Turno] | None = None,
 ) -> RespuestaConsulta:
     """Respuesta fundamentada con citas. Sin contexto visible, no se llama al LLM."""
     if not recuperados:
         return respuesta_sin_contexto()
-    salida = llm.responder(SYSTEM_PROMPT, build_user_prompt(pregunta, recuperados))
+    salida = llm.responder(SYSTEM_PROMPT, build_user_prompt(pregunta, recuperados, historial))
     citas = _mapear_citas(salida.citas_usadas, recuperados)
     if not salida.encontrado or not citas:
         # Sin citas válidas no damos la respuesta por fundamentada.

@@ -1,13 +1,15 @@
 import html
 import re
 
-from app.models.schemas import ChunkRecuperado
+from app.models.schemas import ChunkRecuperado, Turno
 
 SIN_CONTEXTO = "No encuentro esa información en los documentos a los que tienes acceso."
 
 SYSTEM_PROMPT = f"""Eres el asistente interno de documentación de la empresa.
 
-El mensaje del usuario tiene dos partes delimitadas:
+El mensaje del usuario tiene partes delimitadas:
+- <historial> (opcional): turnos previos de la conversación, solo para entender a qué se
+  refiere la pregunta (p. ej. "¿y en ese caso?"). NO es una fuente: no lo cites.
 - <contexto>: fragmentos de documentos, cada uno en <fragmento n="N" fuente="...">.
 - <pregunta>: la pregunta del empleado.
 
@@ -24,14 +26,30 @@ Reglas:
 """
 
 # Impide que un documento o la pregunta abran/cierren nuestras etiquetas estructurales.
-_ETIQUETAS = re.compile(r"</?\s*(contexto|fragmento|pregunta)\b[^>]*>", re.IGNORECASE)
+_ETIQUETAS = re.compile(
+    r"</?\s*(contexto|fragmento|pregunta|historial|turno)\b[^>]*>", re.IGNORECASE
+)
 
 
 def neutralizar(texto: str) -> str:
     return _ETIQUETAS.sub(lambda m: html.escape(m.group(0)), texto)
 
 
-def build_user_prompt(pregunta: str, recuperados: list[ChunkRecuperado]) -> str:
+def build_historial(historial: list[Turno]) -> str:
+    """Bloque <historial> delimitado; vacío si no hay turnos previos."""
+    if not historial:
+        return ""
+    turnos = "\n".join(
+        f"<turno>\nPregunta: {neutralizar(t.pregunta)}\n"
+        f"Respuesta: {neutralizar(t.respuesta)}\n</turno>"
+        for t in historial
+    )
+    return f"<historial>\n{turnos}\n</historial>\n\n"
+
+
+def build_user_prompt(
+    pregunta: str, recuperados: list[ChunkRecuperado], historial: list[Turno] | None = None
+) -> str:
     bloques = [
         f'<fragmento n="{i}" fuente="{html.escape(r.chunk.fuente, quote=True)}">\n'
         f"{neutralizar(r.chunk.contenido)}\n</fragmento>"
@@ -39,5 +57,6 @@ def build_user_prompt(pregunta: str, recuperados: list[ChunkRecuperado]) -> str:
     ]
     contexto = "\n".join(bloques)
     return (
-        f"<contexto>\n{contexto}\n</contexto>\n\n<pregunta>\n{neutralizar(pregunta)}\n</pregunta>"
+        f"{build_historial(historial or [])}<contexto>\n{contexto}\n</contexto>\n\n"
+        f"<pregunta>\n{neutralizar(pregunta)}\n</pregunta>"
     )

@@ -17,9 +17,10 @@ from pydantic import BaseModel, Field, ValidationError
 from app.config import Settings
 from app.graph.prompts import SUPERVISOR_PROMPT
 from app.graph.state import EstadoAgente, ResultadoLlamada
-from app.models.schemas import ChunkRecuperado, Hallazgo, RespuestaConsulta, Usuario
+from app.models.schemas import ChunkRecuperado, Hallazgo, RespuestaConsulta, Turno, Usuario
 from app.observabilidad import traza_consulta, usuario_seudonimo
 from app.rag.generacion import generar_respuesta, respuesta_sin_contexto
+from app.rag.prompts import build_historial, neutralizar
 from app.retrieval.base import LLM, Supervisor
 from app.security.acceso import VerificadorAcceso, VerificadorPermisivo
 from app.security.audit import registrar_consulta
@@ -86,8 +87,14 @@ class Agente:
         usuario: Usuario,
         top_k: int | None = None,
         conversacion_id: str | None = None,
+        historial: list[Turno] | None = None,
     ) -> ResultadoAgente:
-        inicial = EstadoAgente(pregunta=pregunta, usuario=usuario, top_k=top_k or self._top_k)
+        inicial = EstadoAgente(
+            pregunta=pregunta,
+            usuario=usuario,
+            top_k=top_k or self._top_k,
+            historial=historial or [],
+        )
         with traza_consulta(
             self._trazas, self._settings, roles=usuario.groups, conversacion_id=conversacion_id
         ) as config:
@@ -167,7 +174,7 @@ class Agente:
             return {"pendientes": []}
         mensajes = estado.mensajes or [
             {"role": "system", "content": SUPERVISOR_PROMPT},
-            {"role": "user", "content": estado.pregunta},
+            {"role": "user", "content": _pregunta_supervisor(estado)},
         ]
         decision = self._supervisor.decidir(mensajes, self._schemas)
         return {
@@ -257,7 +264,11 @@ class Agente:
         return herramienta.ejecutar(args, estado.usuario, estado.top_k)
 
     def _generate(self, estado: EstadoAgente) -> Update:
-        return {"respuesta": generar_respuesta(self._llm, estado.pregunta, estado.recuperados)}
+        return {
+            "respuesta": generar_respuesta(
+                self._llm, estado.pregunta, estado.recuperados, estado.historial
+            )
+        }
 
     def _output_guardrail(self, estado: EstadoAgente) -> Update:
         respuesta = _requerir_respuesta(estado)
@@ -276,6 +287,15 @@ class Agente:
             estado.usuario, estado.pregunta, _requerir_respuesta(estado), estado.hallazgos
         )
         return {}
+
+
+def _pregunta_supervisor(estado: EstadoAgente) -> str:
+    """Con historial, el supervisor ve los turnos previos para buscar bien las preguntas de
+    seguimiento; sin historial, la pregunta tal cual."""
+    if not estado.historial:
+        return estado.pregunta
+    pregunta = neutralizar(estado.pregunta)
+    return f"{build_historial(estado.historial)}<pregunta>\n{pregunta}\n</pregunta>"
 
 
 def _requerir_respuesta(estado: EstadoAgente) -> RespuestaConsulta:

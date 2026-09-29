@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     min_score: float | None = None
     max_iteraciones: int = 3
     max_fragmentos_contexto: int = 12
+    max_turnos_historial: int = 3
 
     # Observabilidad (LangSmith). Ver app/observabilidad.py.
     entorno: Literal["local", "dev", "prod"] = "local"

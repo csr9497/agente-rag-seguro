@@ -4,7 +4,7 @@ consultados, los citados y cuántos fragmentos se descartaron por permisos."""
 import logging
 
 from app.graph.agente import Agente
-from app.models.schemas import Usuario
+from app.models.schemas import Turno, Usuario
 from app.persistencia.modelos import Conversacion, Feedback, MensajeGuardado
 from app.persistencia.repositorios import RepositorioConversaciones
 from app.security.deteccion import TIPOS_PII, enmascarar_pii
@@ -16,11 +16,16 @@ logger = logging.getLogger(__name__)
 
 class ServicioConversaciones:
     def __init__(
-        self, repo: RepositorioConversaciones, roles: ServicioRoles, agente: Agente
+        self,
+        repo: RepositorioConversaciones,
+        roles: ServicioRoles,
+        agente: Agente,
+        max_turnos: int = 3,
     ) -> None:
         self._repo = repo
         self._roles = roles
         self._agente = agente
+        self._max_turnos = max_turnos
 
     def iniciar(self, usuario: Usuario, rol_id: str) -> Conversacion:
         rol = self._roles.actuar_como(usuario, rol_id)
@@ -41,7 +46,10 @@ class ServicioConversaciones:
         conv = self.obtener(usuario, conversacion_id)
         # El agente solo recibe el rol de la conversación: nunca más grupos que ese.
         resultado = self._agente.consultar_detallado(
-            pregunta, Usuario(id=usuario.id, groups=[conv.rol_id]), conversacion_id=conv.id
+            pregunta,
+            Usuario(id=usuario.id, groups=[conv.rol_id]),
+            conversacion_id=conv.id,
+            historial=self._historial(conv),
         )
         mensaje = MensajeGuardado(
             pregunta=resultado.pregunta_procesada,
@@ -54,6 +62,16 @@ class ServicioConversaciones:
             traza_id=resultado.traza_id,
         )
         return self._repo.agregar_mensaje(conv.id, mensaje)
+
+    def _historial(self, conv: Conversacion) -> list[Turno]:
+        """Últimos turnos útiles: sin consultas bloqueadas (no aportan y podrían reintroducir
+        instrucciones maliciosas)."""
+        utiles = [m for m in conv.mensajes if not any(h.accion == "bloquear" for h in m.hallazgos)]
+        return (
+            [Turno(pregunta=m.pregunta, respuesta=m.respuesta) for m in utiles[-self._max_turnos :]]
+            if self._max_turnos
+            else []
+        )
 
     def valorar(
         self, usuario: Usuario, conversacion_id: str, mensaje_id: int, feedback: Feedback
