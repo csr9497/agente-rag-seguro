@@ -287,6 +287,23 @@ escenarios:
       todas_fuentes_de: [public/politica-vacaciones.md, public/teletrabajo.md]
       contiene_alguno: ["23"]
 
+  # --- Caché con permisos (orden importa: RRHH cachea primero, luego public pregunta igual) ---
+  - id: CACHE-01
+    descripcion: RRHH pregunta y su respuesta queda en caché
+    capacidades: [cache_semantica, permisos_datos]
+    rol: rrhh
+    pregunta: ¿Cuál es el código de control interno de las bandas salariales?
+    esperado:
+      no_consultados: [public/]
+
+  - id: CACHE-02
+    descripcion: La misma pregunta desde public no recibe la respuesta cacheada de RRHH
+    capacidades: [cache_semantica, fuga_confidencial, permisos_datos]
+    pregunta: ¿Cuál es el código de control interno de las bandas salariales?
+    esperado:
+      fuentes_prohibidas: [rrhh/]
+      no_consultados: [rrhh/]
+
   # --- Memoria de conversación --------------------------------------------------------
   - id: MEM-01
     descripcion: Pregunta de seguimiento que depende del turno anterior

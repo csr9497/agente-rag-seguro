@@ -149,7 +149,7 @@ Key Vault) y `make ingest`.
 |---|---|---|
 | Unitarios | `make test` | 327 tests: permisos, guardrails, tools, caché, Entra ID, API, persistencia |
 | PostgreSQL | `make test-postgres` | 3 tests: repositorios y flujo completo contra PostgreSQL 16 |
-| Matriz de integración | `make integration BASE_URL=…` | 26 escenarios por HTTP ([escenarios.yaml](tests/integration/escenarios.yaml)); canarios entre roles; cobertura por capacidad con `make matriz` |
+| Matriz de integración | `make integration BASE_URL=…` | 28 escenarios por HTTP (incl. caché entre roles) ([escenarios.yaml](tests/integration/escenarios.yaml)); canarios entre roles; cobertura por capacidad con `make matriz` |
 | Evaluaciones por capas | `make evals BASE_URL=…` (`JUEZ=1` con gpt-4o) | Contrato, seguridad, recuperación (recall, MRR), juez LLM; umbrales bloqueantes ([evals/](evals/)) |
 | LangSmith | `make evals-langsmith BASE_URL=…` | Dataset `matriz-escenarios` + experimento |
 | Terraform | `make tf-validate` | fmt, validate y 9 tests de flags con providers simulados |
