@@ -46,6 +46,7 @@ filterwarnings = [
 ]
 markers = [
     "integration: pruebas contra un despliegue real (local o Azure); requieren INTEGRATION_BASE_URL",
+    "postgres: paridad con PostgreSQL; requieren TEST_DATABASE_URL",
 ]
 
 [tool.ruff]

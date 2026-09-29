@@ -2,6 +2,9 @@ name: Deploy
 
 # Despliegue completo en Azure: infraestructura (platform) → imágenes → aplicaciones (apps).
 # Autenticación con OIDC (sin secretos); variables creadas por infra/bootstrap/bootstrap.sh.
+#
+# Desactivado hasta que se decida desplegar: requiere la variable de repositorio
+# DEPLOY_AZURE=true (Settings → Variables). Sin ella, todos los jobs se omiten.
 on:
   push:
     branches: [main]
@@ -35,6 +38,7 @@ env:
 
 jobs:
   platform:
+    if: vars.DEPLOY_AZURE == 'true'
     runs-on: ubuntu-latest
     environment: dev
     outputs:
@@ -62,7 +66,7 @@ jobs:
 
   images:
     needs: platform
-    if: needs.platform.outputs.alcance == 'completo'
+    if: vars.DEPLOY_AZURE == 'true' && needs.platform.outputs.alcance == 'completo'
     runs-on: ubuntu-latest
     environment: dev
     steps:
@@ -87,7 +91,7 @@ jobs:
 
   apps:
     needs: [platform, images]
-    if: needs.platform.outputs.alcance == 'completo'
+    if: vars.DEPLOY_AZURE == 'true' && needs.platform.outputs.alcance == 'completo'
     runs-on: ubuntu-latest
     environment: dev
     steps:

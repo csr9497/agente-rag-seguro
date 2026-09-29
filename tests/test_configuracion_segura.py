@@ -20,7 +20,7 @@ def _compose() -> dict:
 
 def test_servicios_solo_escuchan_en_localhost() -> None:
     servicios = _compose()["services"]
-    for nombre in ("app", "qdrant", "web", "redis"):
+    for nombre in ("app", "qdrant", "web", "redis", "postgres"):
         for puerto in servicios[nombre]["ports"]:
             assert str(puerto).startswith("127.0.0.1:"), f"{nombre} expuesto: {puerto}"
 
@@ -49,3 +49,9 @@ def test_trazas_completas_nunca_en_terraform() -> None:
             '"completo"'
             not in re.sub(r"#.*", "", tf.read_text(encoding="utf-8")).split("TRAZAS_MODO")[-1][:80]
         ), f"TRAZAS_MODO completo en {tf}"
+
+
+def test_compose_no_contiene_contrasenas() -> None:
+    """Regla 3: las credenciales vienen de .env, nunca escritas en el compose."""
+    postgres = _compose()["services"]["postgres"]["environment"]
+    assert postgres["POSTGRES_PASSWORD"].startswith("${POSTGRES_PASSWORD")

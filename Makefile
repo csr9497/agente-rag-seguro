@@ -1,7 +1,7 @@
 CONDA_ENV ?= agente-rag
 BASE_URL  ?= http://localhost:8000
 
-.PHONY: help setup sync lint fmt test integration matriz evals evals-langsmith up down ingest studio env-from-azure tf-validate
+.PHONY: help setup sync lint fmt test test-postgres integration matriz evals evals-simulado evals-langsmith up down ingest studio env-from-azure tf-validate
 
 help: ## Lista los comandos
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-16s %s\n", $$1, $$2}'
@@ -24,6 +24,16 @@ fmt: ## Aplica formato
 test: ## Tests unitarios
 	uv run pytest
 
+test-postgres: ## Paridad con PostgreSQL (levanta el perfil postgres de docker-compose)
+	docker compose --profile postgres up -d postgres
+	TEST_DATABASE_URL=postgresql+psycopg://agente_app:$$(grep '^POSTGRES_PASSWORD=' .env | cut -d= -f2-)@localhost:55432/agente \
+		uv run pytest tests/test_postgres.py -v
+
+evals-simulado: ## Gate de CI en local: app con modelos simulados + evaluaciones por capas
+	uv run uvicorn tests.integration.servidor_simulado:app --port 8767 & echo $$! > .servidor.pid; \
+	for i in $$(seq 1 30); do curl -sf localhost:8767/api/health >/dev/null && break; sleep 1; done; \
+	uv run python -m evals.ejecutar --base-url http://localhost:8767/api; r=$$?; kill $$(cat .servidor.pid); rm -f .servidor.pid; exit $$r
+
 integration: ## Matriz de escenarios contra BASE_URL (informe en reports/integracion.md)
 	INTEGRATION_BASE_URL=$(BASE_URL) uv run pytest -m integration
 
@@ -36,7 +46,7 @@ evals-langsmith: ## Igual que evals + dataset y experimento en LangSmith
 matriz: ## Informe de cobertura de la matriz sin ejecutar nada
 	uv run python -m tests.integration.evaluador
 
-up: ## Levanta app + web + qdrant
+up: ## Levanta app + web + qdrant + redis
 	docker compose up --build -d
 
 down:

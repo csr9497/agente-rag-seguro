@@ -9,6 +9,19 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
 
+  # Opcional (paridad con Azure): docker compose --profile postgres up -d postgres
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["postgres"]
+    environment:
+      POSTGRES_DB: agente
+      POSTGRES_USER: agente_app
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?define POSTGRES_PASSWORD en .env}
+    ports:
+      - "127.0.0.1:55432:5432"  # 5432 suele estar ocupado por otros Postgres locales
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
   redis:
     image: redis:7.4-alpine
     ports:
@@ -65,3 +78,4 @@ services:
 volumes:
   qdrant_data:
   app_data:
+  postgres_data:

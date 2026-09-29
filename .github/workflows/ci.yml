@@ -8,8 +8,16 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TRAZAS_MODO: apagado # CI nunca envía trazas a LangSmith
+
 jobs:
   python:
+    name: Lint y tests unitarios
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,10 +28,54 @@ jobs:
       - run: uv run ruff check
       - run: uv run ruff format --check
       - run: uv run pytest
-      - name: Informe de cobertura de la matriz de integración
+      - name: Cobertura declarada de la matriz de escenarios
         run: uv run python -m tests.integration.evaluador >> "$GITHUB_STEP_SUMMARY"
 
+  postgres:
+    name: Paridad con PostgreSQL
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: agente
+          POSTGRES_USER: agente_app
+          POSTGRES_PASSWORD: solo-para-ci # base efímera del runner
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U agente_app -d agente"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: uv run pytest tests/test_postgres.py -v
+        env:
+          TEST_DATABASE_URL: postgresql+psycopg://agente_app:solo-para-ci@localhost:5432/agente
+
+  evaluaciones:
+    name: Gate de evaluaciones (seguridad, contrato, recuperación)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - name: App con composición real y modelos simulados
+        run: |
+          uv run uvicorn tests.integration.servidor_simulado:app --port 8767 > servidor.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf localhost:8767/api/health && break; sleep 1; done
+      - name: Evaluaciones por capas (falla si hay fugas entre roles o contrato roto)
+        run: uv run python -m evals.ejecutar --base-url http://localhost:8767/api --salida reports/evaluacion.md
+      - name: Informe
+        if: always()
+        run: cat reports/evaluacion.md >> "$GITHUB_STEP_SUMMARY" || true
+
   terraform:
+    name: Terraform (fmt, validate, test con providers simulados)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -35,10 +87,11 @@ jobs:
             terraform -chdir=infra/$stack init -backend=false -input=false
             terraform -chdir=infra/$stack validate
           done
-      - name: test de flags (providers simulados, sin Azure)
+      - name: test de flags (sin credenciales ni llamadas a Azure)
         run: terraform -chdir=infra/platform test
 
   docker:
+    name: Build de imágenes
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
