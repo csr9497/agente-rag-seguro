@@ -1,260 +1,217 @@
-# Asistente RAG seguro — Fase 2 (agente LangGraph)
+# Asistente RAG agéntico seguro
 
-Asistente interno que responde preguntas sobre documentos de la empresa **con citas** y
-**solo con lo que el grupo del usuario puede ver**. Contexto completo y reglas en
-[CLAUDE.md](CLAUDE.md).
+Asistente interno en el que cada empleado consulta documentos y datos de la empresa en
+lenguaje natural y **solo obtiene respuestas de lo que su rol permite ver**, siempre con
+citas. Agente LangGraph + RAG con permisos en el dato, guardrails, caché con permisos,
+auditoría, trazas en LangSmith y evaluaciones por capas. Reglas del proyecto en
+[CLAUDE.md](CLAUDE.md); diseño detallado en [docs/diseno-fase-3.md](docs/diseno-fase-3.md).
 
-```
-            ┌──────────── Azure Container Apps (VNet) ────────────┐
- usuario ──▶│ web (nginx) ──/api──▶ backend (FastAPI) ──┬─▶ Azure OpenAI (gpt-4o, ada-002)
-            │                        ingest job ────────┼─▶ Azure AI Search (filtro por ACL)
-            └───────────────────────────────────────────┴─▶ Storage (documentos) · Key Vault
-```
-
-El backend es un grafo LangGraph ([app/graph/agente.py](app/graph/agente.py)):
-
-```
-authorize → input_guardrail → supervisor ⇄ tools → generate → output_guardrail → audit
-    └──────────────┴── (sin grupos / bloqueada) ──────────────────────────────────▶ audit
-```
-
-- **supervisor**: gpt-4o con tool-calling; decide cuántas búsquedas hacer (una por tema).
-- **tools** ([app/tools/](app/tools/)): los grupos del usuario los inyecta el grafo; ningún
-  esquema de argumentos admite grupos ni usuario.
-
-  | Tool | Para qué |
-  |---|---|
-  | `rag_retrieve` | Búsqueda semántica en todos los documentos visibles |
-  | `listar_documentos` | Catálogo de documentos visibles (citable como "catálogo de documentos") |
-  | `buscar_en_documento` | Búsqueda semántica dentro de un documento concreto |
-  | `leer_documento` | Fragmentos consecutivos de un documento (hasta 8 por llamada) |
-
-  Un documento ajeno y uno inexistente reciben la misma respuesta (no se revela qué existe).
-  El contexto acumulado tiene un tope (`MAX_FRAGMENTOS_CONTEXTO`, 12 por defecto).
-- **generate**: respuesta con citas `[n]` y salida estructurada; sin contexto, no llama al LLM.
-- **caché semántica** ([app/cache/semantica.py](app/cache/semantica.py)): antes del
-  supervisor. La clave incluye el rol y una huella de los documentos visibles para ese rol
-  (ids, hashes, estados) más modelo/versión: nunca se sirve a otro rol y cualquier cambio de
-  documentos la invalida. No se usa con historial ni para consultas bloqueadas; los aciertos
-  pasan igualmente por el guardrail de salida y la auditoría.
-- **guardrails** ([app/security/guardrails.py](app/security/guardrails.py)): devuelven un
-  `Veredicto` estructurado (permitido, texto saneado, hallazgos con tipo/detalle/acción).
-  - entrada: bloquea inyección de prompt y texto oculto; enmascara PII (email, teléfono,
-    IBAN, tarjeta con Luhn, DNI/NIE con letra de control) antes del LLM y de la auditoría.
-  - salida: bloquea fugas de los prompts de sistema, elimina etiquetas estructurales y
-    enmascara PII sensible (tarjeta, IBAN, DNI).
-  - Heurísticos y locales; en Azure se añadirá Content Safety (Prompt Shields) detrás de la
-    misma interfaz.
-- **audit**: toda consulta que entra al grafo se audita, también las rechazadas.
-
-- **Local**: backend + web + Qdrant con `docker compose`, o sin Docker con Qdrant embebido
-  (`QDRANT_PATH`); embeddings y LLM en Azure OpenAI.
-- **Azure**: el mismo código con `VECTOR_STORE=azure_search` y Managed Identity (sin claves).
-
-## Puesta en marcha (anaconda + uv)
-
-Anaconda aporta el intérprete (Python 3.12) y uv gestiona las dependencias en `.venv` sobre
-ese intérprete, con versiones fijadas en `uv.lock`.
-
-```bash
-make setup           # conda env create -f environment.yml + uv sync
-make test            # tests unitarios (sin Azure)
-make lint
-```
-
-Para usar otro intérprete 3.12: `uv sync --python /ruta/a/python3.12`.
-
-## Ejecución local
-
-1. Despliega la infraestructura (ver abajo) o usa un Azure OpenAI existente.
-2. Rellena `.env`: `make env-from-azure` (lee endpoint y clave desde Key Vault), o bien
-   copia `.env.example` y complétalo a mano.
-3. Arranca e indexa los documentos de ejemplo:
-
-```bash
-make up              # web en http://localhost:8080, API en http://localhost:8000/docs
-make ingest
-curl -s localhost:8000/consultar -H 'content-type: application/json' \
-  -d '{"pregunta": "¿Cuántos días de vacaciones tengo?"}'
-```
-
-Sin Docker:
-
-```bash
-QDRANT_PATH=.qdrant uv run uvicorn app.main:app --reload
-```
-
-Sin `AZURE_OPENAI_ENDPOINT` la app arranca igualmente y `/consultar` responde **503**
-indicando qué falta; el resto del grafo (permisos, auditoría, validación) funciona.
-
-**Ingesta segura** ([ingestor/validacion.py](ingestor/validacion.py)): solo `.md`/`.txt`
-de hasta 1 MB en UTF-8, sin symlinks, rutas ocultas ni `..`; rechaza documentos con texto
-invisible o instrucciones dirigidas al modelo. La ingesta informa de los rechazados y sale
-con código 1 si hay alguno.
-
-**Gestión de documentos** ([ingestor/gestor.py](ingestor/gestor.py),
-[app/api/documentos.py](app/api/documentos.py)): cada chunk guarda el hash SHA-256 del
-documento y su fecha de indexación.
-
-| Operación | CLI / API | Comportamiento |
-|---|---|---|
-| Indexar | `make ingest` · `POST /documentos` (multipart: `grupo`, `archivo`) | `indexado` / `actualizado` (borra antes los chunks antiguos) / `sin_cambios` / `duplicado` (409, mismo contenido en el mismo grupo) / `rechazado` (422, con motivos) |
-| Listar | `GET /documentos` | Solo documentos visibles para los grupos del usuario |
-| Eliminar | `DELETE /documentos/{grupo}/{archivo}` | Borra todos sus chunks (404 si no existe) |
-| Sincronizar | `python -m ingestor.ingest --borrar-huerfanos` | Además borra del índice lo que ya no está en el origen (solo en los grupos del origen) |
-
-Subir o borrar exige pertenecer al grupo `editores` **y** al grupo destino. La API de
-escritura está desactivada por defecto (`GESTION_DOCUMENTOS=true` en docker-compose) hasta
-tener Entra ID. En local:
-
-```bash
-curl -F grupo=public -F archivo=@politica.md localhost:8000/documentos \
-  -H 'X-Usuario-Grupos: editores,public'
-```
-
-**Web** (http://localhost:8080), página única:
-- Se elige un **rol** para empezar. Cada conversación usa solo los permisos de ese rol, y el
-  historial muestra por respuesta los documentos consultados, los citados y los fragmentos
-  descartados por permisos.
-- **Documentos**: los visibles para el rol. Los roles con `gestionar_documentos` pueden
-  subir (eligiendo para qué roles es visible, dentro de su `publica_para`) y eliminar.
-- **Roles y permisos**: el rol `administrador` crea roles y asigna permisos.
-- Roles iniciales: `administrador`, `rrhh` (gestiona y publica para `public` y `rrhh`) y
-  `public`. En local cualquier rol es elegible (`SELECCION_LIBRE_DE_ROL=true`); en Azure
-  vendrán de Entra ID.
-
-API: `GET /roles`, `POST/PATCH /roles` (administrador), `POST /conversaciones`,
-`GET /conversaciones/{id}`, `POST /conversaciones/{id}/mensajes`, `GET/POST/DELETE
-/documentos` y `GET /admin/integridad`. El rol de actuación va en la cabecera `X-Rol` y el
-servidor valida que se puede usar. Persistencia en SQLite (`DATABASE_URL`).
-
-**Red local**: web (8080), app (8000) y Qdrant (6333) solo escuchan en `127.0.0.1`. Sin
-autenticación, exponerlos en la red permitiría a cualquiera subir o borrar documentos o leer
-Qdrant sin permisos. La web además elimina la cabecera `X-Usuario-Grupos`.
-
-**Permisos**: el primer nivel de carpeta de cada documento es su grupo
-(`public/…`, `rrhh/…`). En la Fase 1 no hay autenticación: el usuario tiene
-el rol elegido al iniciar la conversación (ver "Web").
-
-## LangGraph Studio (visualizar y depurar el grafo)
-
-```bash
-make up        # Qdrant (y la app) en Docker
-make studio    # langgraph dev --allow-blocking
-```
-
-| Qué | URL |
+| | |
 |---|---|
-| Studio (grafo interactivo, ejecución paso a paso, estado de cada nodo) | https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024 |
-| API del servidor LangGraph | http://127.0.0.1:2024/docs |
+| Estado | Funcional en local (330 tests). Terraform para Azure listo y probado con mocks, **sin aplicar** |
+| Stack | Python 3.12 · LangGraph · FastAPI · Azure OpenAI · AI Search / Qdrant · SQLite / PostgreSQL · Redis · Terraform · GitHub Actions |
+| Pendiente | Primer despliegue en Azure (etapa A: modelos + Storage + AI Search) y respuestas reales del LLM |
 
-Studio requiere iniciar sesión con una cuenta gratuita de LangSmith; el grafo y los datos
-se ejecutan en local (el navegador se conecta a `127.0.0.1:2024`). El grafo que carga es el
-mismo que usa la API ([app/graph/studio.py](app/graph/studio.py), [langgraph.json](langgraph.json)).
-Entrada de ejemplo:
+![Interfaz](docs/ui/2-public.png)
 
-```json
-{"pregunta": "¿Cuántos días de vacaciones tengo?", "usuario": {"id": "studio", "groups": ["public"]}, "top_k": 4}
+---
+
+## Arquitectura
+
+```
+            ┌──────────────────── Azure Container Apps (VNet) ───────────────────┐
+ usuario ──▶│ web (nginx, Easy Auth) ──/api──▶ backend (FastAPI + LangGraph) ────┼─▶ Azure OpenAI (gpt-4o, ada-002)
+            │                                    │   │   │                       ├─▶ AI Search / Qdrant (filtro por rol)
+            │                        ingest job ─┘   │   └─▶ PostgreSQL          ├─▶ Blob (originales + roles)
+            └────────────────────────────────────────┴─▶ Managed Redis (caché) ──┴─▶ Key Vault · Log Analytics · LangSmith
 ```
 
-Sin cuenta de LangSmith, la topología también está en http://localhost:8000/grafo
-(Mermaid, solo con `EXPONER_TOPOLOGIA=true`, activo en docker-compose).
+El agente es un grafo LangGraph ([app/graph/agente.py](app/graph/agente.py)); la topología
+se ve en http://localhost:8000/grafo o en LangGraph Studio:
 
-## Trazas (LangSmith)
+```
+authorize → input_guardrail → cache_lookup ─(acierto)──────────────────────────┐
+                                  │                                             ▼
+                                  └─(fallo)→ supervisor ⇄ tools → access_guardrail   output_guardrail → cache_store → audit
+                                                 └────────→ generate ─────────────────────▲
+authorize / input_guardrail ──(sin rol / bloqueada)───────────────────────────────────────────────────────────→ audit
+```
 
-Con `TRAZAS_MODO` y `LANGSMITH_API_KEY` en `.env`, cada consulta genera una traza con el
-grafo completo (nodos, tools, llamadas a Azure OpenAI con tokens y latencia) y metadata de
-rol, conversación, entorno y versión (el usuario va seudonimizado). Detalles en
-[app/observabilidad.py](app/observabilidad.py).
+| Nodo | Qué hace |
+|---|---|
+| `authorize` | Deny by default: sin rol no hay contexto |
+| `input_guardrail` | Bloquea inyección de prompt y texto oculto; enmascara PII (email, teléfono, IBAN, tarjeta con Luhn, DNI/NIE) |
+| `cache_lookup` / `cache_store` | Caché semántica; clave = rol + huella de sus documentos visibles + modelo/versión |
+| `supervisor` | gpt-4o con tool-calling; decide qué tools usar (hasta 3 iteraciones) |
+| `tools` | Ejecuta las tools (abajo); los roles salen del estado, nunca de los argumentos del LLM |
+| `access_guardrail` | Contrasta **cada** fragmento con el registro de documentos (roles, hash, estado) antes de que el LLM lo vea |
+| `generate` | Respuesta con citas `[n]` y salida estructurada Pydantic; sin contexto, no llama al LLM |
+| `output_guardrail` | Bloquea fugas del prompt de sistema y enmascara PII sensible |
+| `audit` | Registra toda consulta, también las bloqueadas, con sus hallazgos |
 
-| Modo | Contenido | Uso |
+### Tools
+
+| Tool | Para qué | Control de acceso |
 |---|---|---|
-| `apagado` | Nada (por defecto; los tests siempre) | — |
-| `completo` | Todo el texto | Solo dev, con datos de ejemplo |
-| `enmascarado` | Estructura y `doc_id`; PII enmascarada y fragmentos ocultos | Prod (`completo` + `ENTORNO=prod` no arranca) |
+| `rag_retrieve` | Búsqueda semántica en los documentos del rol | Filtro por rol en el índice + `access_guardrail` |
+| `listar_documentos` | Catálogo de documentos visibles | Construido desde el registro (fuente de verdad) |
+| `buscar_en_documento` / `leer_documento` | Buscar dentro de un documento / leer fragmentos consecutivos | Ajeno e inexistente responden igual (no se revela qué existe) |
+| `data_query` | Datos internos estructurados (festivos, plantilla, presupuestos) | **Catálogo de consultas parametrizadas**: el LLM nunca escribe SQL; cada consulta declara sus roles |
+| `proponer_accion` | Abrir ticket, solicitar vacaciones | Solo **propone**: nada se ejecuta sin que la persona pulse *Aprobar* |
 
-## Pruebas de integración (matriz de escenarios)
+## Seguridad
 
-Los escenarios están en [tests/integration/escenarios.yaml](tests/integration/escenarios.yaml).
-Cada uno abre una conversación con su `rol` y envía la pregunta. Los **canarios** (marcadores
-únicos en documentos confidenciales) hacen fallar cualquier escenario en el que lleguen a un
-rol no autorizado, y `docs_relevantes` alimenta la métrica `recall_docs`.
-Cada uno declara las **capacidades** que cubre (respuesta citada, salida de escape, permisos,
-fuga de datos, prompt injection, validación…) y sus expectativas. El
-[evaluador](tests/integration/evaluador.py) valida cada respuesta con Pydantic: primero el
-contrato `RespuestaConsulta` y sus invariantes, después las expectativas del escenario.
+Permisos en el dato, no en el prompt (regla 1 del CLAUDE.md), en cuatro barreras:
+
+1. **Al indexar**: un documento necesita ≥ 1 rol existente y activo.
+2. **Al empezar**: la conversación queda fijada a un rol que el usuario puede usar (Entra ID
+   en Azure; selección libre solo en local).
+3. **En el índice**: filtro por rol en Qdrant / AI Search (filtro OData validado contra inyección).
+4. **`access_guardrail`**: cada fragmento se contrasta con el registro. Una prueba de mutación
+   confirma que, sin esta barrera, un índice manipulado filtraría datos de RRHH.
+
+Además:
+
+- **Integridad** índice ↔ registro al arrancar y en `GET /admin/integridad`: cuarentena de
+  lo inconsistente y reactivación automática.
+- **Ingesta segura** ([ingestor/validacion.py](ingestor/validacion.py)): solo `.md`/`.txt`
+  UTF-8 ≤ 1 MB, sin symlinks ni rutas ocultas; rechaza texto invisible e instrucciones
+  dirigidas al modelo (también dentro de comentarios HTML).
+- **Prompts delimitados**: `<historial>`, `<contexto>` con `<fragmento>` y `<pregunta>`;
+  cualquier intento de cerrar esas etiquetas desde un documento se neutraliza.
+- **Caché con permisos** (regla 2): nunca se sirve a otro rol; subir, borrar o poner en
+  cuarentena un documento la invalida; no se usa con historial, datos internos ni acciones.
+- **Entra ID** (`AUTH_MODO=entra`): JWT RS256 validado con JWKS, emisor, audiencia y
+  caducidad; se rechazan `alg: none` y HS256. Roles = app roles del token.
+- **Secretos** (regla 3): solo en Key Vault o `.env` local (ignorado por git). Managed
+  Identity con roles mínimos en Azure.
+- **Red local**: web, API, Qdrant, Redis y PostgreSQL solo escuchan en `127.0.0.1`.
+- Tests de regresión de configuración: los modos de depuración nunca se activan en Terraform
+  y el compose no contiene contraseñas.
+
+## Puesta en marcha
+
+Requisitos: anaconda (intérprete 3.12), [uv](https://docs.astral.sh/uv/), Docker. Terraform
+y Azure CLI solo para desplegar.
 
 ```bash
-make matriz                                   # cobertura declarada, sin ejecutar
-make integration                              # contra http://localhost:8000
-make integration BASE_URL=https://<web>/api                                   # contra Azure
+make setup          # conda env (Python 3.12) + uv sync
+make test           # tests unitarios, sin servicios externos
+make up             # web :8080, API :8000, Qdrant, Redis (todo en 127.0.0.1)
+make evals-simulado # gate de CI en local: app con modelos simulados + evaluaciones
+make down
 ```
 
-El informe (`reports/integracion.md`) muestra, por capacidad, los escenarios ok, fallidos y
-omitidos. Marca como **⚠️ sin escenarios** las capacidades de la fase actual que no cubre
-ningún escenario, y como *planificada* las de fases futuras. Para ampliar la cobertura basta
-con añadir escenarios al YAML.
+| Qué | Dónde |
+|---|---|
+| Web | http://localhost:8080 |
+| API (OpenAPI) | http://localhost:8000/docs |
+| Topología del grafo | http://localhost:8000/grafo |
+| LangGraph Studio (`make studio`, en Chrome) | https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024 |
 
-## Evaluaciones (Pydantic, por capas)
+Sin Azure OpenAI configurado la app arranca y responde **503** en lo que necesita el LLM; los
+permisos, guardrails de entrada, roles, subida (validación) y auditoría funcionan. Para
+respuestas reales: `make env-from-azure` tras desplegar la etapa A (rellena `.env` desde
+Key Vault) y `make ingest`.
 
-[evals/](evals/) evalúa cada escenario de la matriz por capas con modelos Pydantic
-([evals/modelos.py](evals/modelos.py)) y aplica umbrales:
+### Uso
 
-| Capa | Métricas | Umbral |
+- **Rol**: se elige al empezar; cada conversación usa solo sus permisos. Roles iniciales:
+  `administrador` (gestiona roles), `rrhh` (gestiona documentos, publica para `rrhh` y
+  `public`) y `public`.
+- **Historial**: por respuesta, documentos consultados, citados (✓), fragmentos descartados
+  por permisos, "desde caché" y valoración 👍/👎 (se envía a LangSmith con su traza).
+- **Documentos**: los roles con `gestionar_documentos` suben `.md`/`.txt` eligiendo para qué
+  roles es visible; el original se guarda con sus roles (carpeta local o Blob).
+- **Roles y permisos**: el administrador crea roles y asigna `gestionar_documentos`,
+  `administrar_roles` y "publica para". No se puede quitar el último administrador.
+- **Acciones**: "abre un ticket…" → tarjeta con *Aprobar* / *Rechazar*.
+
+### API
+
+| Método | Ruta | Notas |
 |---|---|---|
-| contrato | `contrato_ok` (esquema `MensajeGuardado` + invariantes) | 100% (bloquea) |
-| seguridad | `sin_fuga` (canarios entre roles), `inyeccion_contenida` | 100% (bloquea) |
-| recuperación | `recall_docs`, `precision_docs`, `mrr` | recall medio ≥ 0,8 (bloquea) |
-| juez | `fidelidad`, `relevancia`, `completitud` (gpt-4o, salida `JuicioRespuesta`) | fidelidad media ≥ 4, mínima ≥ 3 |
-| deterministas | `expectativas_ok` | ≥ 0,9 (informativa) |
+| GET | `/roles` | Roles que el usuario puede usar |
+| GET/POST/PATCH | `/roles/todos`, `/roles`, `/roles/{id}` | Solo `administrar_roles` (`X-Rol`) |
+| POST | `/conversaciones` | `{"rol_id"}` |
+| GET | `/conversaciones/{id}` | Historial |
+| POST | `/conversaciones/{id}/mensajes` | `{"pregunta"}` → respuesta, citas, documentos consultados, acciones |
+| POST | `/conversaciones/{id}/mensajes/{m}/feedback` | `{"valoracion": "positiva"\|"negativa", "comentario"?}` |
+| GET/POST/DELETE | `/documentos` | Por rol (`X-Rol`); subir y borrar requieren `gestionar_documentos` |
+| GET / POST | `/acciones`, `/acciones/{id}/decision` | `{"aprobar": bool}`; solo quien la propuso |
+| GET | `/admin/integridad` | Solo `administrar_roles` |
 
-```bash
-make evals BASE_URL=http://localhost:8000          # informe en reports/evaluacion.md; sale con 1 si no aprueba
-make evals BASE_URL=http://localhost:8000 JUEZ=1   # + juez LLM (requiere Azure OpenAI)
-make evals-langsmith BASE_URL=http://localhost:8000  # + dataset "matriz-escenarios" y experimento en LangSmith
-```
+`X-Rol` indica el rol con el que se actúa; el servidor valida que el usuario puede usarlo.
+
+## Pruebas y evaluaciones
+
+| Nivel | Comando | Qué cubre |
+|---|---|---|
+| Unitarios | `make test` | 327 tests: permisos, guardrails, tools, caché, Entra ID, API, persistencia |
+| PostgreSQL | `make test-postgres` | 3 tests: repositorios y flujo completo contra PostgreSQL 16 |
+| Matriz de integración | `make integration BASE_URL=…` | 26 escenarios por HTTP ([escenarios.yaml](tests/integration/escenarios.yaml)); canarios entre roles; cobertura por capacidad con `make matriz` |
+| Evaluaciones por capas | `make evals BASE_URL=…` (`JUEZ=1` con gpt-4o) | Contrato, seguridad, recuperación (recall, MRR), juez LLM; umbrales bloqueantes ([evals/](evals/)) |
+| LangSmith | `make evals-langsmith BASE_URL=…` | Dataset `matriz-escenarios` + experimento |
+| Terraform | `make tf-validate` | fmt, validate y 9 tests de flags con providers simulados |
+
+Umbrales bloqueantes: contrato 100 %, **cero fugas entre roles**, inyección contenida 100 %,
+recall medio ≥ 0,8 y (con juez) fidelidad media ≥ 4.
+
+## Observabilidad
+
+Trazas en LangSmith con el grafo completo, tools, llamadas a Azure OpenAI (tokens, latencia)
+y metadata de rol, conversación y versión ([app/observabilidad.py](app/observabilidad.py)):
+`TRAZAS_MODO=apagado | completo (solo dev) | enmascarado (prod: PII y fragmentos ocultos)`.
+`completo` con `ENTORNO=prod` no arranca. La valoración de los usuarios llega como feedback.
+
+## CI/CD
+
+[ci.yml](.github/workflows/ci.yml) en cada PR y push a `main`: lint + tests, paridad con
+PostgreSQL (servicio del runner), **gate de evaluaciones** (app con modelos simulados:
+falla si hay fugas entre roles o contrato roto), Terraform (fmt, validate, tests) y build de
+imágenes. [deploy.yml](.github/workflows/deploy.yml) (OIDC, sin secretos) está desactivado
+hasta definir la variable de repositorio `DEPLOY_AZURE=true`.
 
 ## Despliegue en Azure
 
-Terraform en dos stacks con estado remoto:
+Terraform en dos stacks ([infra/](infra/)) con flags:
 
-| Stack | Contenido |
-|---|---|
-| [infra/platform](infra/platform) | RG, VNet + subnets + NSG, Log Analytics, ACR, Key Vault, Storage (documentos), Azure OpenAI (`gpt-4o` 2024-11-20 y `text-embedding-ada-002` v2), AI Search, entorno de Container Apps, identidades gestionadas + RBAC, private endpoints (opcional) |
-| [infra/apps](infra/apps) | Container Apps `backend` (ingress interno) y `web` (pública), job de ingesta manual |
-
-El workflow [deploy.yml](.github/workflows/deploy.yml) aplica `platform`, construye y sube
-las imágenes al ACR (tag = commit) y aplica `apps`. Se lanza con cada push a `main` o a mano;
-el lanzamiento manual permite además ejecutar la ingesta.
-
-**Primera vez:**
+| Variable | Valores | Efecto |
+|---|---|---|
+| `alcance` | `modelos` · `completo` | Etapa A (OpenAI, Storage, Key Vault, vector store; app en local) · etapa B (+ VNet, ACR, Container Apps, PostgreSQL, Managed Redis) |
+| `vector_store` | `azure_search` · `qdrant` | AI Search (`search_sku`: free/basic) o Qdrant (`qdrant_modo`: local, cloud, container_efimero) |
+| `search_auth` | `api_key` · `rbac` | Clave en Key Vault (dev con Docker) o Managed Identity |
+| `cache_redis` | bool | Azure Managed Redis (Azure Cache for Redis no admite altas desde el 1-oct-2026) |
 
 ```bash
-# 1. Estado remoto + identidad OIDC para GitHub (requiere Owner en la suscripción)
+# Una vez: estado remoto + identidad OIDC para GitHub
 SUBSCRIPTION_ID=<id> GITHUB_REPO=<owner/repo> ./infra/bootstrap/bootstrap.sh
-# 2. Añade tu object id a developer_principal_ids en infra/envs/dev/platform.tfvars
-# 3. Push a main → despliegue. Sube documentos y lanza la ingesta:
-az storage blob upload-batch --auth-mode login --account-name <storage> \
-  -d documentos -s ingestor/sample_docs
-# Actions → Deploy → Run workflow → run_ingest ✔
+# Etapa A (desde local, revisando el plan antes)
+terraform -chdir=infra/platform init -backend-config=...   # ver deploy.yml
+terraform -chdir=infra/platform plan -var-file=../envs/dev/platform.tfvars
+make env-from-azure && make ingest
 ```
 
-### Modelos
+Modelos: `gpt-4o` 2024-11-20 (Legacy, retirada 2027-04-14; reemplazo gpt-5.1) y
+`text-embedding-ada-002` v2 (GA hasta 2028-02-09); se cambian por tfvars.
 
-| Modelo | Versión | Estado (28/09/2026) | Retirada |
-|---|---|---|---|
-| gpt-4o | 2024-11-20 | Legacy | 2027-04-14 (reemplazo oficial: gpt-5.1) |
-| text-embedding-ada-002 | 2 | GA | 2028-02-09 |
+## Estructura
 
-Las versiones de gpt-4o 2024-05-13 y 2024-08-06 ya no admiten despliegues en suscripciones
-nuevas. Modelo y versión son variables (`chat_model`, `embedding_model`), así que migrar es
-un cambio de tfvars.
-
-### Seguridad en esta fase
-
-- Sin claves en Azure: Managed Identity con roles mínimos por componente (backend solo lee
-  el índice; la ingesta escribe; la web solo hace pull de imágenes).
-- La clave de OpenAI existe solo para desarrollo local y vive en Key Vault. En prod:
-  `openai_local_auth_enabled = false` y `private_endpoints_enabled = true`.
-- ⚠️ **La web es pública y aún no tiene autenticación** (llega con Entra ID en la Fase 3).
-  Cualquiera con la URL puede consultar los documentos `public` y consumir cuota de OpenAI.
+```
+app/            FastAPI + grafo LangGraph
+  graph/        agente, estado, prompts, topología, entrada de Studio
+  tools/        rag_retrieve, documentos, data_query, proponer_accion
+  security/     guardrails, detección (PII/inyección), acceso, Entra ID, auditoría
+  cache/        caché semántica (memoria / Redis)
+  persistencia/ repositorios SQLAlchemy (SQLite / PostgreSQL), almacén de originales
+  servicios/    roles, conversaciones, integridad
+  acciones/     acciones con aprobación humana
+  datos/        catálogo de consultas de data_query
+  api/          routers HTTP
+ingestor/       validación, chunking, orígenes (carpeta / Blob), gestor de documentos
+evals/          evaluaciones por capas, juez LLM, LangSmith
+web/            interfaz (HTML/CSS/JS sin dependencias) + nginx
+infra/          Terraform: platform, apps, módulos, tests
+tests/          unitarios, integración (matriz), servidor simulado
+docs/           diseño y capturas
+```

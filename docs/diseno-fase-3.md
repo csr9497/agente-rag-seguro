@@ -1,6 +1,15 @@
 # Diseño Fase 3 — Roles, interfaz unificada, Azure, LangSmith y evaluaciones
 
-Estado: **propuesta para revisión** · 2026-09-28
+Estado: **implementado en local** · 2026-09-28 (Azure: Terraform listo, sin aplicar)
+
+> Desviaciones respecto a la propuesta, ya implementadas:
+> - `access_guardrail` se ejecuta **antes** de que el supervisor vea los resultados de las
+>   tools (la propuesta lo situaba después), para que el LLM nunca lea contenido no autorizado.
+> - Caché en **Azure Managed Redis** en lugar de Azure Cache for Redis (no admite altas desde
+>   el 1-oct-2026); la búsqueda por similitud se hace en la app, válida en cualquier tier.
+> - Añadidos fuera del plan inicial: `data_query` (catálogo parametrizado), `proponer_accion`
+>   (aprobación humana), memoria de conversación, feedback 👍/👎, autenticación con Entra ID
+>   (JWT validado) y paridad con PostgreSQL en CI.
 
 Decisiones ya tomadas:
 

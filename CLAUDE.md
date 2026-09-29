@@ -80,12 +80,14 @@ El agente es un grafo LangGraph:
 - Lint / formato: `ruff check` · `ruff format`
 
 ## Fase actual
-**Fase 3 (local) completada; pendiente despliegue en Azure.** Hecho: agente LangGraph con
-roles y permisos gestionados desde la UI, access_guardrail contra el registro, integridad
-índice↔registro, guardrails, caché semántica con permisos, memoria de conversación,
-feedback, trazas LangSmith y evaluaciones por capas. Terraform listo (flags `alcance` y
-`vector_store`) pero **no aplicado**: no tocar Azure sin indicación explícita del usuario.
-Siguiente: etapa A en Azure (modelos + Storage + AI Search Free); después Entra ID.
+**Local completo; pendiente despliegue en Azure.** Hecho: agente LangGraph con roles y
+permisos gestionados desde la UI, access_guardrail contra el registro, integridad
+índice↔registro, guardrails, caché semántica con permisos (memoria/Redis), memoria de
+conversación, feedback, data_query, acciones con aprobación humana, Entra ID (JWT), trazas
+LangSmith, evaluaciones por capas y CI (GitHub Actions). Terraform listo (`alcance`,
+`vector_store`, Managed Redis, PostgreSQL) pero **no aplicado**: no tocar Azure sin indicación
+explícita del usuario. El deploy de CI está desactivado hasta `DEPLOY_AZURE=true`.
+Siguiente: etapa A en Azure (modelos + Storage + AI Search Free).
 
 ## Cómo trabajar en este repo
 - Antes de codear una feature, confirma en qué fase estamos.
