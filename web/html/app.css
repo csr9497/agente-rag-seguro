@@ -282,7 +282,8 @@ input[type="text"]:hover, select:hover, textarea:hover { border-color: var(--fg-
 
 /* ------------------------------------------------------------ móvil */
 @media (max-width: 640px) {
-  .app-header { padding: var(--s3) var(--s4); flex-wrap: wrap; }
+  /* Cabecera no fija en móvil: con el rol y las acciones ocupa ~150px y taparía el chat. */
+  .app-header { position: static; padding: var(--s3) var(--s4); flex-wrap: wrap; }
   .env { display: none; }
   .header-actions { width: 100%; justify-content: flex-start; }
   .header-actions .role-chip { flex: 1 1 100%; }
@@ -307,6 +308,22 @@ input[type="text"]:hover, select:hover, textarea:hover { border-color: var(--fg-
 .role-item button.link { background: none; border: 0; padding: 0; color: var(--primary); font: inherit;
   font-size: .8125rem; font-weight: 600; cursor: pointer; min-height: 32px; }
 .form-error { color: var(--danger); font-size: .8125rem; }
+.role-item-edit { grid-column: 1; justify-self: start; }
+
+/* ------------------------------------------------------------ historial de conversaciones */
+.conv-list { list-style: none; margin: 0; padding: 0; max-height: 280px; overflow-y: auto; }
+.conv { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px var(--s3); width: 100%; min-height: 44px;
+  padding: var(--s3) var(--s4); border: 0; border-top: 1px solid var(--border); background: none; color: var(--fg);
+  font: inherit; text-align: left; cursor: pointer; transition: background var(--t); }
+.conv:hover { background: var(--surface-2); }
+.conv > .icon { grid-row: span 2; margin-top: 2px; color: var(--fg-2); }
+.conv-title { font-size: .875rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conv-meta { font-size: .75rem; color: var(--fg-2); }
+.conv[aria-current="true"] { background: var(--primary-soft); box-shadow: inset 3px 0 0 var(--primary); }
+.conv[aria-current="true"] > .icon { color: var(--primary); }
+
+select:disabled { opacity: .5; cursor: not-allowed; }
+.chat-body > .notice { margin-bottom: var(--s3); }
 
 /* ------------------------------------------------------------ feedback */
 .feedback { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); font-size: .8125rem; color: var(--fg-2); }

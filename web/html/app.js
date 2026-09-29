@@ -18,6 +18,9 @@ const estado = {
   subidas: [],
   editando: null,      // id del rol en edición
   pendiente: null,     // pregunta en curso o fallida { texto, error }
+  historial: [],       // mis conversaciones con el rol activo (resúmenes)
+  aviso: null,         // aviso en el chat { tipo, titulo, texto } (sustituye a alert())
+  errorCarga: null,    // no se pudieron cargar los roles
 };
 
 // ------------------------------------------------------------------ utilidades
@@ -49,6 +52,13 @@ const tituloDoc = (id) => (id.startsWith("datos:") ? `Datos internos: ${id.slice
   : (estado.docs.find((d) => d.doc_id === id) || { titulo: id.split("/").pop() }).titulo);
 const puede = (permiso) => !!estado.rol && estado.rol.permisos.includes(permiso);
 const hora = (iso) => (iso ? new Date(iso).toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" }) : "");
+// Hoy: solo la hora; otro día: fecha corta.
+const fecha = (iso) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return d.toDateString() === new Date().toDateString()
+    ? `Hoy ${hora(iso)}` : d.toLocaleDateString("es", { day: "numeric", month: "short" });
+};
 function guardar(k, v) {
   try { if (v === null) sessionStorage.removeItem(k); else sessionStorage.setItem(k, v); } catch { /* sin almacenamiento */ }
 }
@@ -67,6 +77,15 @@ async function api(ruta, { metodo = "GET", json, form, conRol = true } = {}) {
   try { cuerpo = await resp.json(); } catch { /* sin JSON */ }
   return { ok: resp.ok, status: resp.status, cuerpo };
 }
+// Fragmentos citados: sin marcas de Markdown (#, **, `, enlaces) para leerlos como texto.
+function textoPlano(md) {
+  return md
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/^\s{0,3}(#{1,6}|[-*+]|\d+\.)\s+/gm, "")
+    .replace(/(\*\*|__|`)/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 function mensajeError(r) {
   const d = r.cuerpo && r.cuerpo.detail;
   if (typeof d === "string") return d;
@@ -77,7 +96,9 @@ function mensajeError(r) {
 
 // ------------------------------------------------------------------ carga y rol
 async function iniciar() {
-  const r = await api("roles", { conRol: false });
+  let r;
+  try { r = await api("roles", { conRol: false }); } catch (err) { r = { ok: false, status: 0, cuerpo: null }; }
+  estado.errorCarga = r.ok ? null : (r.status ? mensajeError(r) : "No hay conexión con el servidor");
   estado.roles = r.ok ? r.cuerpo : [];
   const guardada = leer("conversacion");
   if (guardada) {
@@ -96,15 +117,32 @@ async function cargarDatosDelRol() {
   const [docs, todos] = await Promise.all([
     api("documentos"),
     puede("administrar_roles") ? api("roles/todos") : Promise.resolve({ ok: false }),
+    cargarHistorial(),
   ]);
   estado.docs = docs.ok ? docs.cuerpo : [];
   estado.todos = todos.ok ? todos.cuerpo : [];
 }
 
+async function cargarHistorial() {
+  if (!estado.rol) { estado.historial = []; return; }
+  const r = await api(`conversaciones?rol_id=${encodeURIComponent(estado.rol.id)}`, { conRol: false });
+  estado.historial = r.ok ? r.cuerpo : [];
+}
+
+async function abrirConversacion(id) {
+  if (estado.pendiente && !estado.pendiente.error) return; // no interrumpir una consulta en curso
+  const r = await api(`conversaciones/${encodeURIComponent(id)}`, { conRol: false });
+  if (!r.ok) { estado.aviso = { tipo: "danger", titulo: "No se pudo abrir la conversación", texto: mensajeError(r) }; pintarChat(); return; }
+  Object.assign(estado, { conversacion: r.cuerpo, pendiente: null, aviso: null });
+  guardar("conversacion", r.cuerpo.id);
+  pintarChat(); pintarHistorial();
+  $("pregunta").focus();
+}
+
 async function elegirRol(rol) {
   const r = await api("conversaciones", { metodo: "POST", json: { rol_id: rol.id }, conRol: false });
-  if (!r.ok) { alert(mensajeError(r)); return; }
-  Object.assign(estado, { rol, conversacion: r.cuerpo, filtro: "*", subidas: [], pendiente: null, editando: null });
+  if (!r.ok) { estado.aviso = { tipo: "danger", titulo: `No se pudo usar el rol ${rol.nombre}`, texto: mensajeError(r) }; pintarChat(); return; }
+  Object.assign(estado, { rol, conversacion: r.cuerpo, filtro: "*", subidas: [], pendiente: null, editando: null, aviso: null });
   $("pregunta").value = "";
   guardar("conversacion", r.cuerpo.id);
   await cargarDatosDelRol();
@@ -113,7 +151,7 @@ async function elegirRol(rol) {
 }
 
 function salirDelRol() {
-  Object.assign(estado, { rol: null, conversacion: null, docs: [], todos: [], pendiente: null, editando: null });
+  Object.assign(estado, { rol: null, conversacion: null, docs: [], todos: [], historial: [], pendiente: null, editando: null });
   $("pregunta").value = "";
   guardar("conversacion", null);
   pintarTodo();
@@ -136,6 +174,13 @@ function pintarCabecera() {
 function pintarChat() {
   const body = $("chat-body");
   $("composer").hidden = !estado.rol;
+  const aviso = estado.aviso ? notice(estado.aviso.tipo, "i-alert", estado.aviso.titulo, estado.aviso.texto) : null;
+  if (estado.errorCarga) {
+    const reintentar = el("button", { class: "btn btn-secondary", type: "button" }, icono("i-refresh"), "Reintentar");
+    reintentar.addEventListener("click", iniciar);
+    body.replaceChildren(notice("danger", "i-alert", "No se pudieron cargar tus roles", `${estado.errorCarga}.`, reintentar));
+    return;
+  }
   if (!estado.rol) {
     $("chat-sub").textContent = "Cada conversación usa los permisos de un único rol.";
     const tarjetas = estado.roles.map((r) => {
@@ -148,7 +193,7 @@ function pintarChat() {
       b.addEventListener("click", () => elegirRol(r));
       return b;
     });
-    body.replaceChildren(el("div", { class: "role-picker" },
+    body.replaceChildren(...[aviso].filter(Boolean), el("div", { class: "role-picker" },
       el("p", {}, "¿Con qué rol quieres consultar? Solo verás respuestas basadas en los documentos de ese rol."),
       tarjetas.length ? el("div", { class: "role-cards" }, tarjetas) : el("p", { class: "hint" }, "No tienes roles disponibles.")));
     return;
@@ -175,12 +220,18 @@ function pintarChat() {
     }
   }
   if (!mensajes.length) {
-    body.replaceChildren(el("div", { class: "empty" },
+    const sinDocs = !estado.docs.length
+      ? notice("info", "i-info", `${estado.rol.nombre} no tiene documentos visibles`,
+          puede("gestionar_documentos")
+            ? "Sube un documento en «Subir documento» para poder consultarlo aquí."
+            : "No hay nada que consultar con este rol todavía. Pide a quien gestiona documentos que los publique para él, o cambia de rol.")
+      : null;
+    body.replaceChildren(...[aviso, sinDocs].filter(Boolean), el("div", { class: "empty" },
       el("h3", {}, "Nueva conversación"),
       el("p", { class: "hint" }, "Pregunta en lenguaje natural. Cada respuesta indica qué documentos se consultaron y cuáles se citaron.")));
     return;
   }
-  body.replaceChildren(...mensajes);
+  body.replaceChildren(...[aviso].filter(Boolean), ...mensajes);
   body.scrollTop = body.scrollHeight;
 }
 
@@ -307,7 +358,7 @@ function pintarRespuesta(m, i) {
     m.citas.map((c) => el("div", { class: "source", id: `${id}-f${c.numero}` },
       el("span", { class: "source-n" }, c.numero),
       el("span", { class: "source-name" }, tituloDoc(c.doc_id), " ", el("span", { class: "mono hint" }, c.doc_id)),
-      el("span", { class: "source-frag" }, c.fragmento))));
+      el("span", { class: "source-frag" }, textoPlano(c.fragmento)))));
   return el("article", { class: "msg-bot", "aria-label": `Respuesta de las ${hora(m.creado_en)}` },
     el("div", { class: "msg-meta" }, `Asistente · ${hora(m.creado_en)}`,
       m.desde_cache ? el("span", { class: "badge", title: "Respuesta reutilizada: mismos documentos visibles para tu rol" }, " desde caché") : null),
@@ -325,10 +376,12 @@ async function preguntar(texto) {
       estado.conversacion.mensajes.push(r.cuerpo);
       estado.pendiente = null;
       $("pregunta").value = "";
+      cargarHistorial().then(pintarHistorial);
     } else if (r.status === 404) {
-      estado.pendiente = null;
-      alert("La conversación ya no está disponible (¿rol desactivado?). Elige un rol de nuevo.");
       salirDelRol();
+      estado.aviso = { tipo: "danger", titulo: "La conversación ya no está disponible",
+        texto: "El rol pudo desactivarse o dejar de estar asignado. Elige un rol de nuevo." };
+      pintarChat();
       return;
     } else {
       estado.pendiente.error = r.status === 503 ? "El servicio de IA no está disponible (HTTP 503)." : `${mensajeError(r)}.`;
@@ -339,6 +392,24 @@ async function preguntar(texto) {
     $("enviar").disabled = false;
   }
   pintarChat();
+}
+
+// ------------------------------------------------------------------ historial
+function pintarHistorial() {
+  $("hist-panel").hidden = !estado.rol;
+  if (!estado.rol) return;
+  $("hist-sub").textContent = `Con el rol ${estado.rol.nombre}. Solo las ves tú.`;
+  const actual = estado.conversacion && estado.conversacion.id;
+  const items = estado.historial.map((c) => {
+    const b = el("button", { class: "conv", type: "button", "aria-current": c.id === actual ? "true" : null },
+      icono("i-chat"),
+      el("span", { class: "conv-title" }, c.titulo || "Sin título"),
+      el("span", { class: "conv-meta" }, `${fecha(c.creada_en)} · ${c.mensajes} ${c.mensajes === 1 ? "pregunta" : "preguntas"}`));
+    b.addEventListener("click", () => abrirConversacion(c.id));
+    return el("li", {}, b);
+  });
+  $("conv-list").replaceChildren(...(items.length ? items
+    : [el("li", { class: "doc-empty" }, "Aún no hay conversaciones con este rol. Las que empieces aparecerán aquí.")]));
 }
 
 // ------------------------------------------------------------------ documentos
@@ -452,19 +523,24 @@ async function eliminar(doc) {
 // ------------------------------------------------------------------ roles y permisos
 function pintarRoles() {
   const admin = puede("administrar_roles");
-  const lista = admin ? estado.todos : estado.roles;
+  // Sin rol, las tarjetas del chat ya muestran los roles; sin permisos de administración,
+  // solo interesa el rol activo (no el catálogo completo con identificadores internos).
+  $("roles-panel").hidden = !estado.rol;
+  if (!estado.rol) return;
+  const lista = admin ? estado.todos : [estado.rol];
+  $("roles-title").textContent = admin ? "Roles y permisos" : "Tu rol";
   $("roles-sub").textContent = admin
     ? "Como administrador puedes crear roles y asignar permisos."
-    : "Solo un rol administrador puede cambiar roles y permisos.";
+    : "Qué puede hacer este rol. Solo un rol administrador puede cambiarlo.";
   $("new-role").hidden = !admin;
   $("role-list").replaceChildren(...lista.flatMap((r) => {
+    let editarBtn = null;
     const desc = el("span", { class: "role-item-desc" }, r.descripcion || "Sin descripción.",
       r.publica_para.length ? ` · Publica para: ${r.publica_para.map(nombreRol).join(", ")}` : "");
     if (admin) {
       const abierto = estado.editando === r.id;
-      const editar = el("button", { class: "link", type: "button", "aria-expanded": String(abierto) }, abierto ? "Cerrar" : "Editar permisos");
-      editar.addEventListener("click", () => { estado.editando = abierto ? null : r.id; pintarRoles(); });
-      desc.append(" ", editar);
+      editarBtn = el("button", { class: "link role-item-edit", type: "button", "aria-expanded": String(abierto) }, abierto ? "Cerrar" : "Editar permisos");
+      editarBtn.addEventListener("click", () => { estado.editando = abierto ? null : r.id; pintarRoles(); });
     }
     const li = el("li", { class: `role-item${r.activo ? "" : " inactive"}` },
       el("span", { class: "role-item-name" }, r.nombre, " ", el("span", { class: "mono hint" }, r.id)),
@@ -472,7 +548,7 @@ function pintarRoles() {
         r.activo ? null : el("span", { class: "badge" }, "Inactivo"),
         r.permisos.includes("gestionar_documentos") ? el("span", { class: "badge accent" }, "Gestión") : null,
         r.permisos.includes("administrar_roles") ? el("span", { class: "badge accent" }, "Admin") : null),
-      desc);
+      desc, editarBtn);
     return admin && estado.editando === r.id ? [li, editorRol(r)] : [li];
   }));
 }
@@ -539,7 +615,7 @@ async function crearRol(ev) {
 }
 
 // ------------------------------------------------------------------ eventos
-function pintarTodo() { pintarCabecera(); pintarChat(); pintarDocumentos(); pintarRoles(); }
+function pintarTodo() { pintarCabecera(); pintarChat(); pintarHistorial(); pintarDocumentos(); pintarRoles(); }
 
 $("composer").addEventListener("submit", (ev) => {
   ev.preventDefault();

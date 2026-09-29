@@ -62,7 +62,9 @@ class SupervisorPorPalabras:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     settings = Settings(
-        database_url="sqlite://",
+        # Archivo temporal, no memoria: la web lanza peticiones en paralelo y `sqlite://`
+        # comparte una sola conexión entre hilos.
+        database_url=f"sqlite:///{tempfile.mkdtemp()}/app.db",
         seleccion_libre_de_rol=True,
         gestion_documentos=True,
         trazas_modo="apagado",

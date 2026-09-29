@@ -155,3 +155,18 @@ def test_sqlite_en_disco(tmp_path) -> None:
     inicializar(crear_motor(url))
     assert (tmp_path / "sub" / "app.db").exists()
     assert len(SqlRepositorioRoles(crear_motor(url)).listar()) == 3
+
+
+def test_sqlite_en_archivo_admite_peticiones_concurrentes(tmp_path) -> None:
+    """La web lanza peticiones en paralelo (documentos, roles, historial): el motor de la app
+    debe aguantar lecturas concurrentes sin mezclar resultados."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    from app.persistencia.repositorios import SqlRepositorioRoles, crear_motor, inicializar
+
+    motor = crear_motor(f"sqlite:///{tmp_path / 'app.db'}")
+    inicializar(motor)
+    roles = SqlRepositorioRoles(motor)
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        resultados = list(pool.map(lambda _: len(roles.listar()), range(200)))
+    assert set(resultados) == {3}

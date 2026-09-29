@@ -83,7 +83,8 @@ class RepositorioConversaciones(Protocol):
 
 # ------------------------------------------------------------------ motor
 def crear_motor(url: str) -> Engine:
-    """SQLite con claves foráneas activas; `sqlite://` (memoria) comparte una conexión."""
+    """SQLite con claves foráneas activas. `sqlite://` (memoria) comparte UNA conexión: solo
+    para tests secuenciales; con peticiones concurrentes usar un archivo SQLite o PostgreSQL."""
     if url.startswith("sqlite:///") and not url.startswith("sqlite:///:memory:"):
         Path(url.removeprefix("sqlite:///")).parent.mkdir(parents=True, exist_ok=True)
     kwargs = (

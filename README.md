@@ -14,6 +14,8 @@ auditoría, trazas en LangSmith y evaluaciones por capas. Reglas del proyecto en
 
 ![Interfaz](docs/ui/2-public.png)
 
+![Historial de conversaciones](docs/ui/9-historial.png)
+
 ---
 
 ## Arquitectura
@@ -72,6 +74,9 @@ Permisos en el dato, no en el prompt (regla 1 del CLAUDE.md), en cuatro barreras
 
 Además:
 
+- **Conversaciones con propietario**: solo quien la creó puede verla o continuarla (404 para
+  el resto, aunque tenga el mismo rol). El historial (`GET /conversaciones?rol_id=`) lista las
+  propias con el rol activo.
 - **Integridad** índice ↔ registro al arrancar y en `GET /admin/integridad`: cuarentena de
   lo inconsistente y reactivación automática.
 - **Ingesta segura** ([ingestor/validacion.py](ingestor/validacion.py)): solo `.md`/`.txt`
@@ -167,6 +172,11 @@ Trazas en LangSmith con el grafo completo, tools, llamadas a Azure OpenAI (token
 y metadata de rol, conversación y versión ([app/observabilidad.py](app/observabilidad.py)):
 `TRAZAS_MODO=apagado | completo (solo dev) | enmascarado (prod: PII y fragmentos ocultos)`.
 `completo` con `ENTORNO=prod` no arranca. La valoración de los usuarios llega como feedback.
+
+- **Auditoría correlacionable**: cada registro lleva fecha, `traza_id` (el mismo run de
+  LangSmith), `conversacion_id`, documentos consultados y si vino de caché.
+- **Sondas**: `GET /health` (el proceso vive) y `GET /ready` (base de datos y modelos
+  configurados; el índice se informa). Container Apps usa `/ready` como readiness probe.
 
 ## CI/CD
 
