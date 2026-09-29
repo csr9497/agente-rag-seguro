@@ -15,6 +15,7 @@ from langgraph.graph.state import CompiledStateGraph
 from langsmith import Client
 from pydantic import BaseModel, Field, ValidationError
 
+from app.acciones.modelos import PropuestaAccion
 from app.cache.semantica import CacheSemantica, EntradaCache
 from app.config import Settings
 from app.graph.prompts import SUPERVISOR_PROMPT
@@ -40,6 +41,7 @@ class ResultadoAgente(BaseModel):
     hallazgos: list[Hallazgo]
     traza_id: str
     desde_cache: bool = False
+    acciones: list[PropuestaAccion] = Field(default_factory=list)
 
 
 def _bloqueada() -> RespuestaConsulta:
@@ -121,6 +123,7 @@ class Agente:
             hallazgos=final.hallazgos,
             traza_id=str(traza_id),
             desde_cache=final.desde_cache,
+            acciones=final.acciones_propuestas,
         )
 
     # ------------------------------------------------------------------ construcción
@@ -218,8 +221,10 @@ class Agente:
         mensajes = list(estado.mensajes)
         hallazgos = list(estado.hallazgos)
         descartados_total = estado.fragmentos_descartados
+        acciones = list(estado.acciones_propuestas)
         for llamada in estado.por_revisar:
             resultado = llamada.resultado
+            acciones += [a for a in resultado.acciones if a.rol_id in estado.usuario.groups]
             nuevos: list[ChunkRecuperado] = []
             sin_acceso = por_tope = 0
             for r in resultado.chunks:
@@ -265,6 +270,7 @@ class Agente:
             "por_revisar": [],
             "hallazgos": hallazgos,
             "fragmentos_descartados": descartados_total,
+            "acciones_propuestas": acciones,
         }
 
     def _ejecutar(self, nombre: str, argumentos: str, estado: EstadoAgente) -> ResultadoHerramienta:
@@ -310,6 +316,7 @@ class Agente:
             or estado.desde_cache
             or bloqueada
             or usa_datos
+            or estado.acciones_propuestas
             or not estado.vector_pregunta
         ):
             return {}
@@ -326,6 +333,12 @@ class Agente:
         return {}
 
     def _generate(self, estado: EstadoAgente) -> Update:
+        acciones = estado.acciones_propuestas
+        if acciones and not estado.recuperados:
+            # Solo acciones: respuesta por plantilla (sin LLM); la UI muestra las tarjetas.
+            lista = "; ".join(a.resumen for a in acciones)
+            texto = f"He preparado lo siguiente para que lo revises y apruebes: {lista}."
+            return {"respuesta": RespuestaConsulta(respuesta=texto, citas=[], sin_contexto=True)}
         return {
             "respuesta": generar_respuesta(
                 self._llm, estado.pregunta, estado.recuperados, estado.historial

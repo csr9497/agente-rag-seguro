@@ -8,6 +8,7 @@ from azure.identity import DefaultAzureCredential
 from qdrant_client import QdrantClient
 from sqlalchemy import Engine
 
+from app.acciones.servicio import ServicioAcciones
 from app.cache.semantica import CacheMemoria, CacheSemantica, alcance_de_permisos
 from app.config import Settings
 from app.datos.catalogo import permisos_por_consulta
@@ -38,6 +39,7 @@ from app.security.guardrails import GuardrailEntrada, GuardrailSalida
 from app.servicios.conversaciones import ServicioConversaciones
 from app.servicios.integridad import InformeIntegridad, verificar_integridad
 from app.servicios.roles import ServicioRoles
+from app.tools.acciones import ProponerAccion
 from app.tools.datos import DataQuery
 from app.tools.documentos import BuscarEnDocumento, LeerDocumento, ListarDocumentos
 from app.tools.rag_retrieve import RagRetrieve
@@ -107,6 +109,7 @@ class Servicios:
     registro: RepositorioDocumentos
     repo_roles: RepositorioRoles
     retriever: Retriever
+    acciones: ServicioAcciones
 
     def verificar_integridad(self) -> InformeIntegridad:
         return verificar_integridad(self.retriever, self.registro, self.repo_roles)
@@ -155,6 +158,7 @@ def build_servicios(
         registro=registro,
         repo_roles=repo_roles,
         retriever=retriever,
+        acciones=ServicioAcciones(motor),
     )
 
 
@@ -185,7 +189,11 @@ def _agente(
             ListarDocumentos(retriever, registro),
             BuscarEnDocumento(embedder, retriever),
             LeerDocumento(retriever),
-            *([DataQuery(motor)] if motor is not None else []),
+            *(
+                [DataQuery(motor), ProponerAccion(ServicioAcciones(motor))]
+                if motor is not None
+                else []
+            ),
         ],
         guardrail_entrada=GuardrailEntrada(),
         guardrail_salida=GuardrailSalida([SYSTEM_PROMPT, SUPERVISOR_PROMPT]),

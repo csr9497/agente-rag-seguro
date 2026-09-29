@@ -238,11 +238,51 @@ async function valorar(m, valoracion, comentario = null) {
   pintarChat();
 }
 
+const ETIQUETA_ACCION = { abrir_ticket: "Abrir ticket de soporte", solicitar_vacaciones: "Solicitar vacaciones" };
+const ESTADO_ACCION = {
+  pendiente: ["warn", "Pendiente de tu aprobación"],
+  ejecutada: ["ok", "Ejecutada"],
+  rechazada: ["info", "Rechazada"],
+  error: ["danger", "Error al ejecutar"],
+};
+
+function tarjetasAccion(m) {
+  if (!m.acciones || !m.acciones.length) return null;
+  return el("div", { class: "acciones" }, m.acciones.map((a) => {
+    const [clase, texto] = ESTADO_ACCION[a.estado] || ["", a.estado];
+    const datos = el("dl", {}, Object.entries(a.datos).flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, String(v))]));
+    const tarjeta = el("div", { class: `accion ${clase}`, role: "group", "aria-label": ETIQUETA_ACCION[a.tipo] || a.tipo },
+      el("div", { class: "accion-head" }, el("strong", {}, ETIQUETA_ACCION[a.tipo] || a.tipo), el("span", { class: `badge ${clase}` }, texto)),
+      datos, a.resultado ? el("p", { class: "hint" }, a.resultado) : null);
+    if (a.estado === "pendiente") {
+      const aprobar = el("button", { class: "btn btn-primary", type: "button" }, icono("i-check"), "Aprobar");
+      const rechazar = el("button", { class: "btn btn-secondary", type: "button" }, "Rechazar");
+      aprobar.addEventListener("click", () => decidir(m, a, true));
+      rechazar.addEventListener("click", () => decidir(m, a, false));
+      tarjeta.append(el("div", { class: "row" }, rechazar, aprobar),
+        el("p", { class: "hint" }, "Nada se ejecuta hasta que lo apruebes."));
+    }
+    return tarjeta;
+  }));
+}
+
+async function decidir(m, a, aprobar) {
+  const r = await api(`acciones/${encodeURIComponent(a.id)}/decision`, { metodo: "POST", json: { aprobar } });
+  if (!r.ok) { alert(mensajeError(r)); return; }
+  m.acciones = m.acciones.map((x) => (x.id === a.id ? r.cuerpo : x));
+  pintarChat();
+}
+
 function pintarRespuesta(m, i) {
   const bloqueo = m.hallazgos.find((h) => h.accion === "bloquear");
   if (bloqueo) {
     const motivo = MOTIVO_BLOQUEO[bloqueo.tipo] || "La consulta infringe la política de uso";
     return notice("warn", "i-ban", "Consulta bloqueada por la política de uso", `${motivo}. No se ha consultado ningún documento.`);
+  }
+  if (m.acciones && m.acciones.length && m.sin_contexto) {
+    return el("article", { class: "msg-bot" },
+      el("div", { class: "msg-meta" }, `Asistente · ${hora(m.creado_en)}`),
+      el("p", { class: "answer" }, m.respuesta), tarjetasAccion(m), feedback(m));
   }
   if (m.sin_contexto) {
     return el("div", { class: "msg-bot" },
@@ -270,7 +310,7 @@ function pintarRespuesta(m, i) {
   return el("article", { class: "msg-bot", "aria-label": `Respuesta de las ${hora(m.creado_en)}` },
     el("div", { class: "msg-meta" }, `Asistente · ${hora(m.creado_en)}`,
       m.desde_cache ? el("span", { class: "badge", title: "Respuesta reutilizada: mismos documentos visibles para tu rol" }, " desde caché") : null),
-    answer, fuentes, consultados(m), feedback(m));
+    answer, fuentes, consultados(m), tarjetasAccion(m), feedback(m));
 }
 
 async function preguntar(texto) {

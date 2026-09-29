@@ -61,6 +61,7 @@ class ServicioConversaciones:
             hallazgos=resultado.hallazgos,
             traza_id=resultado.traza_id,
             desde_cache=resultado.desde_cache,
+            acciones=resultado.acciones,
         )
         return self._repo.agregar_mensaje(conv.id, mensaje)
 

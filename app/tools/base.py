@@ -2,6 +2,7 @@ from typing import Annotated, Any, Protocol
 
 from pydantic import AfterValidator, BaseModel, Field
 
+from app.acciones.modelos import PropuestaAccion
 from app.models.schemas import ChunkRecuperado, Usuario
 
 PATRON_GRUPO = r"^[a-z0-9][a-z0-9_\-]{0,63}$"
@@ -30,6 +31,9 @@ class ResultadoHerramienta(BaseModel):
         default_factory=list, description="Fragmentos citables que pasan al contexto"
     )
     nota: str | None = Field(default=None, description="Mensaje para el supervisor")
+    acciones: list[PropuestaAccion] = Field(
+        default_factory=list, description="Propuestas pendientes de aprobación humana"
+    )
 
 
 class Herramienta(Protocol):

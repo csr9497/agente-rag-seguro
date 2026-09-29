@@ -317,3 +317,20 @@ input[type="text"]:hover, select:hover, textarea:hover { border-color: var(--fg-
 .feedback form { display: flex; gap: var(--s2); flex: 1 1 280px; }
 .feedback input { flex: 1; min-height: 36px; }
 .feedback .gracias { color: var(--ok); }
+
+/* ------------------------------------------------------------ acciones (aprobación humana) */
+.acciones { display: grid; gap: var(--s3); max-width: 560px; }
+.accion { display: grid; gap: var(--s2); padding: var(--s3) var(--s4); border: 1px solid var(--border-strong);
+  border-left-width: 4px; border-radius: var(--radius-sm); background: var(--surface); }
+.accion.warn { border-left-color: var(--warn); }
+.accion.ok { border-left-color: var(--ok); }
+.accion.info { border-left-color: var(--border-strong); }
+.accion.danger { border-left-color: var(--danger); }
+.accion-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); }
+.accion dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px var(--s3); margin: 0; font-size: .875rem; }
+.accion dt { color: var(--fg-2); }
+.accion dd { margin: 0; overflow-wrap: anywhere; }
+.accion .row { display: flex; gap: var(--s2); justify-content: flex-end; }
+.badge.warn { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+.badge.ok { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
+.badge.danger { background: var(--danger-soft); color: var(--danger); border-color: transparent; }

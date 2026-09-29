@@ -4,6 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.acciones.modelos import PropuestaAccion
 from app.models.schemas import Cita, Hallazgo
 
 PATRON_ROL = r"^[a-z0-9][a-z0-9_\-]{0,63}$"
@@ -68,6 +69,7 @@ class MensajeGuardado(BaseModel):
     traza_id: str | None = Field(default=None, description="run_id de la ejecución (LangSmith)")
     desde_cache: bool = False
     feedback: Feedback | None = None
+    acciones: list[PropuestaAccion] = Field(default_factory=list)
     creado_en: str = ""
 
 

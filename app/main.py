@@ -7,7 +7,7 @@ import openai
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
-from app.api import admin, conversaciones, documentos, roles
+from app.api import acciones, admin, conversaciones, documentos, roles
 from app.config import Settings, get_settings
 from app.deps import build_servicios
 from app.graph import topologia
@@ -37,7 +37,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="Asistente RAG", version="0.2.0", lifespan=lifespan)
-for router in (documentos.router, roles.router, conversaciones.router, admin.router):
+for router in (
+    documentos.router,
+    roles.router,
+    conversaciones.router,
+    acciones.router,
+    admin.router,
+):
     app.include_router(router)
 
 
