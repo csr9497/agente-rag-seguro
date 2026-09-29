@@ -151,12 +151,19 @@ class Agente:
         )
 
     # ------------------------------------------------------------------ construcción
-    def grafo_con_entrada(self, input_schema: type[BaseModel]) -> CompiledStateGraph:
-        """Mismo grafo con otro esquema de entrada (Studio: rol como desplegable)."""
-        return self._construir(input_schema)
+    def grafo_con_entrada(
+        self, input_schema: type[BaseModel], state_schema: type[EstadoAgente] = EstadoAgente
+    ) -> CompiledStateGraph:
+        """Mismo grafo con otro esquema de entrada y de estado (Studio: rol como desplegable y
+        usuario de prueba por defecto)."""
+        return self._construir(input_schema, state_schema)
 
-    def _construir(self, input_schema: type[BaseModel] | None = None) -> CompiledStateGraph:
-        g = StateGraph(EstadoAgente, context_schema=ContextoAgente, input_schema=input_schema)
+    def _construir(
+        self,
+        input_schema: type[BaseModel] | None = None,
+        state_schema: type[EstadoAgente] = EstadoAgente,
+    ) -> CompiledStateGraph:
+        g = StateGraph(state_schema, context_schema=ContextoAgente, input_schema=input_schema)
         g.add_node("authorize", self._authorize)
         g.add_node("input_guardrail", self._input_guardrail)
         g.add_node("supervisor", self._supervisor_node)
@@ -168,7 +175,18 @@ class Agente:
         g.add_node("cache_store", self._cache_store)
         g.add_node("audit", self._audit)
 
-        g.add_edge(START, "authorize")
+        if state_schema is EstadoAgente:
+            g.add_edge(START, "authorize")
+        else:
+            # Studio: completa lo que el formulario no envía (usuario de prueba, top_k) con los
+            # valores por defecto de su esquema de estado, antes de autorizar.
+            def entrada_studio(estado: Any) -> Update:
+                return {"usuario": estado.usuario, "top_k": estado.top_k}
+
+            entrada_studio.__annotations__["estado"] = state_schema
+            g.add_node("entrada_studio", entrada_studio)
+            g.add_edge(START, "entrada_studio")
+            g.add_edge("entrada_studio", "authorize")
         # Los destinos explícitos documentan la topología (y la dibujan bien en /grafo).
         g.add_conditional_edges(
             "authorize", self._continuar_o_auditar("input_guardrail"), ["input_guardrail", "audit"]

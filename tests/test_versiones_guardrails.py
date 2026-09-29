@@ -136,3 +136,20 @@ def test_filtro_de_contenido_de_azure_es_un_bloqueo_auditado(crear_agente, caplo
 def test_filtro_de_azure_en_la_generacion(crear_agente) -> None:
     r = crear_agente(llm=_LLMFiltrado()).consultar_detallado("vacaciones", PUBLIC)
     assert r.respuesta.respuesta == MENSAJE_BLOQUEO
+
+
+def test_studio_sin_usuario_usa_el_rol_por_defecto(crear_agente) -> None:
+    """El formulario de Studio no envía los valores por defecto: {"pregunta": "hola"} debe
+    funcionar (usuario de prueba con el rol Empleado general)."""
+    from app.graph.entrada_studio import crear_entrada_studio, crear_estado_studio
+
+    roles = ["public", "rrhh", "finanzas"]
+    grafo = crear_agente().grafo_con_entrada(
+        crear_entrada_studio(roles), crear_estado_studio(roles)
+    )
+    final = grafo.invoke({"pregunta": "¿Días de vacaciones?"})
+    assert final["usuario"].groups == ["public"] and final["top_k"] == 4
+    assert not final["respuesta"].sin_contexto
+
+    otro = grafo.invoke({"pregunta": "banda B3", "usuario": {"id": "studio", "groups": ["rrhh"]}})
+    assert otro["usuario"].groups == ["rrhh"]
