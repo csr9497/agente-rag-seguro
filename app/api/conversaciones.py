@@ -4,6 +4,7 @@ import logging
 from typing import Literal
 
 import openai
+from azure.core.exceptions import AzureError
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -59,6 +60,12 @@ def preguntar(
     except openai.APIError as exc:
         logger.exception("Error del proveedor LLM")
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Error del proveedor de IA") from exc
+    except AzureError as exc:  # corte de red o error transitorio de AI Search / Blob / Safety
+        logger.exception("Servicio de Azure no disponible")
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Servicio de búsqueda no disponible temporalmente. Vuelve a intentarlo.",
+        ) from exc
 
 
 class NuevaValoracion(BaseModel):

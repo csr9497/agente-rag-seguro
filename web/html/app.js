@@ -384,7 +384,7 @@ async function preguntar(texto) {
       pintarChat();
       return;
     } else {
-      estado.pendiente.error = r.status === 503 ? "El servicio de IA no está disponible (HTTP 503)." : `${mensajeError(r)}.`;
+      estado.pendiente.error = `${mensajeError(r)}`.replace(/\.?$/, ".");
     }
   } catch (err) {
     estado.pendiente.error = `Error de red: ${err.message}.`;

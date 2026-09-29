@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from typing import Annotated
 
 import openai
+from azure.core.exceptions import AzureError
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
@@ -116,6 +117,12 @@ def consultar(
     except openai.APIError as exc:
         logger.exception("Error del proveedor LLM")
         raise HTTPException(status_code=502, detail="Error del proveedor de IA") from exc
+    except AzureError as exc:
+        logger.exception("Servicio de Azure no disponible")
+        raise HTTPException(
+            status_code=503,
+            detail="Servicio de búsqueda no disponible temporalmente. Vuelve a intentarlo.",
+        ) from exc
 
 
 def _topologia_habilitada(settings: Annotated[Settings, Depends(get_settings)]) -> None:

@@ -465,3 +465,15 @@ def test_ready_con_la_base_de_datos_caida(client, servicios, monkeypatch) -> Non
 
 def test_health_no_depende_de_nada(client) -> None:
     assert client.get("/health").json() == {"status": "ok"}
+
+
+def test_corte_de_red_con_azure_devuelve_503_reintentable(client, servicios, monkeypatch) -> None:
+    from azure.core.exceptions import ServiceResponseError
+
+    def corte(*_a, **_k):
+        raise ServiceResponseError("Connection aborted.")
+
+    monkeypatch.setattr(servicios.conversaciones, "preguntar", corte)
+    conv = client.post("/conversaciones", json={"rol_id": "public"}).json()
+    r = client.post(f"/conversaciones/{conv['id']}/mensajes", json={"pregunta": "hola"})
+    assert r.status_code == 503 and "no disponible" in r.json()["detail"]

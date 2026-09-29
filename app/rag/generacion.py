@@ -46,7 +46,9 @@ def _mapear_citas(numeros: list[int], recuperados: list[ChunkRecuperado]) -> lis
                 doc_id=r.chunk.doc_id,
                 chunk_id=r.chunk.chunk_id,
                 fuente=r.chunk.fuente,
-                fragmento=r.chunk.contenido[:300],
+                # Completo (un chunk son ~1000 caracteres): es lo que vio el modelo y lo que
+                # necesita el juez de groundedness; la UI lo recorta a dos líneas.
+                fragmento=r.chunk.contenido,
                 score=r.score,
             )
         )

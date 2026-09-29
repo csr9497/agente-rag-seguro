@@ -250,3 +250,10 @@ def test_texto_sin_marcas_recibe_las_citas_al_final(crear_agente) -> None:
 def test_texto_con_marcas_no_se_toca(agente) -> None:
     r = agente.consultar("vacaciones", Usuario(id="u", groups=["public"]))
     assert r.respuesta == "Según la política, son 23 días [1]."
+
+
+def test_la_cita_lleva_el_fragmento_completo(agente) -> None:
+    """El juez de groundedness necesita el mismo contexto que vio el modelo (con 300 caracteres
+    daba por no fundamentadas respuestas correctas)."""
+    r = agente.consultar("vacaciones", Usuario(id="u", groups=["public"]))
+    assert len(r.citas[0].fragmento) > 300
