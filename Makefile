@@ -1,7 +1,7 @@
 CONDA_ENV ?= agente-rag
 BASE_URL  ?= http://localhost:8000
 
-.PHONY: help setup sync lint fmt test test-postgres integration matriz evals evals-simulado evals-langsmith up down ingest studio env-from-azure tf-validate validar-infra ciclo modelos-up modelos-down
+.PHONY: help setup sync lint fmt test test-postgres integration matriz evals evals-simulado evals-langsmith up down ingest studio env-from-azure tf-validate validar-infra ciclo modelos-up modelos-down levantar apagar accesos
 
 help: ## Lista los comandos
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-16s %s\n", $$1, $$2}'
@@ -61,16 +61,17 @@ studio: ## LangGraph Studio: servidor de desarrollo del grafo en http://127.0.0.
 env-from-azure: ## Rellena .env con endpoint y clave de Azure OpenAI (desde Key Vault)
 	./scripts/env_from_azure.sh
 
-modelos-up: ## Solo gpt-4o y ada-002 en Azure + .env + app local en Docker con documentos de ejemplo
-	terraform -chdir=infra/platform apply -input=false -auto-approve -var-file=../envs/dev/solo_modelos.tfvars
-	./scripts/env_from_azure.sh
-	docker compose up --build -d
-	./scripts/sembrar_local.sh
+levantar: ## Todo el entorno: modelos en Azure + Docker + documentos + Studio, y muestra los accesos
+	./scripts/entorno_local.sh levantar
 
-modelos-down: ## Para Docker y elimina los modelos de Azure (y quita endpoint y clave de .env)
-	docker compose down
-	terraform -chdir=infra/platform destroy -input=false -auto-approve -var-file=../envs/dev/solo_modelos.tfvars
-	sed -i.bak -E '/^(AZURE_OPENAI_(ENDPOINT|API_KEY|CHAT_DEPLOYMENT|EMBEDDING_DEPLOYMENT)|VECTOR_STORE|AZURE_SEARCH_(ENDPOINT|API_KEY)|CONTENT_SAFETY_ENDPOINT|AZURE_STORAGE_(ACCOUNT_URL|CONTAINER)|ALMACEN_DOCUMENTOS)=/d' .env && rm -f .env.bak
+apagar: ## Para Studio y Docker, elimina los modelos de Azure y limpia .env (sin costes)
+	./scripts/entorno_local.sh apagar
+
+accesos: ## Estado de cada servicio y sus URLs (app, API, Studio, LangSmith)
+	./scripts/entorno_local.sh accesos
+
+modelos-up: levantar ## Alias de levantar
+modelos-down: apagar ## Alias de apagar
 
 validar-infra: ## Comprueba cada servicio desplegado (informe en reports/infra/)
 	uv run python scripts/validar_infra.py

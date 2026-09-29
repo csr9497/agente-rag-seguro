@@ -201,9 +201,13 @@ Todo lo demás (Qdrant, SQLite, Redis, app y web) corre en docker-compose. Coste
 paga por token.
 
 ```bash
-make modelos-up     # Azure (modelos) → .env → docker compose → documentos de ejemplo
-make modelos-down   # para Docker, elimina los modelos y quita endpoint y clave de .env
+make levantar   # modelos en Azure → .env → Docker → documentos de ejemplo → Studio → accesos
+make accesos    # estado de cada servicio y sus URLs (app, API, Studio, LangSmith)
+make apagar     # para Studio y Docker, elimina los modelos de Azure y limpia .env
 ```
+
+Requisitos: `az login`, Docker Desktop abierto y el estado remoto de Terraform (bootstrap).
+Tus datos locales (conversaciones, roles, documentos subidos) se conservan en `data/`.
 
 | Qué | Dónde |
 |---|---|
