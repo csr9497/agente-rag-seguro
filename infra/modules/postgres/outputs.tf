@@ -5,3 +5,5 @@ output "database_url" {
   value       = "postgresql+psycopg://agente_app:${random_password.app.result}@${azurerm_postgresql_flexible_server.this.fqdn}:5432/agente?sslmode=require"
   sensitive   = true
 }
+output "publico_efectivo" { value = var.publico }
+output "reglas_firewall" { value = azurerm_postgresql_flexible_server_firewall_rule.azure[*].name }

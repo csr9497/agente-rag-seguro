@@ -149,7 +149,8 @@ module "postgres" {
   count               = local.completo ? 1 : 0
   source              = "../modules/postgres"
   name                = "psql-${local.flat}"
-  location            = var.location
+  location            = coalesce(var.postgres_location, var.location)
+  publico             = coalesce(var.postgres_location, var.location) != var.location
   resource_group_name = azurerm_resource_group.this.name
   tenant_id           = data.azurerm_client_config.current.tenant_id
   vnet_id             = module.network[0].vnet_id

@@ -14,7 +14,7 @@
 #     (variables de entorno, nunca en el repo); ADMINISTRADORES_GITHUB='["usuario"]'.
 #   entra: app registration creada aquí (stack identidad); tu cuenta debe poder registrar apps.
 set -euo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 TFVARS="../envs/dev/nube.tfvars"
 BACKEND="../envs/dev/backend.hcl"
@@ -72,6 +72,22 @@ requisitos_login() {
   fi
 }
 
+# Azure for Students y otras suscripciones restringen PostgreSQL Flexible por región: se busca
+# la primera región que lo admita (versión 16, sin restricción). Si no es la de la VNet,
+# Terraform lo crea con acceso público limitado a servicios de Azure (TLS).
+region_postgres() {
+  local base r
+  base=$(sed -nE 's/^location *= *"(.*)"/\1/p' infra/envs/dev/nube.tfvars)
+  for r in ${POSTGRES_LOCATION:-} "$base" southcentralus centralus eastus westus2 westus3 northcentralus canadacentral; do
+    if az postgres flexible-server list-skus --location "$r" \
+      --query "[?restricted!='Enabled'].supportedServerVersions[].name" -o tsv 2> /dev/null | grep -qx 16; then
+      echo "$r"
+      return 0
+    fi
+  done
+  return 1
+}
+
 esperar_job() { # esperar_job <job> <grupo>: hasta Succeeded/Failed (10 min)
   local estado=""
   for _ in $(seq 1 60); do
@@ -91,8 +107,11 @@ desplegar() {
   identidad=$(estado_de identidad)
 
   paso "1/6 Infraestructura (modelos, AI Search, Storage, Key Vault, PostgreSQL, Container Apps)"
+  local pg
+  pg=$(region_postgres) || falla "Tu suscripción no puede crear PostgreSQL Flexible en ninguna región probada (define POSTGRES_LOCATION=<región> y repite)."
+  echo "PostgreSQL en $pg"
   init platform
-  aplicar platform -var-file="$TFVARS" -var "developer_principal_ids=[\"$yo\"]" \
+  aplicar platform -var-file="$TFVARS" -var "developer_principal_ids=[\"$yo\"]" -var "postgres_location=$pg" \
     || falla "Falló platform (log: $LOG_DIR/platform.log)."
 
   if [[ $LOGIN_PROVEEDOR == github ]]; then
@@ -199,9 +218,13 @@ destruir() {
   paso "3/3 Infraestructura"
   init platform
   tf platform destroy -input=false -auto-approve -var-file="$TFVARS" \
+    -var "postgres_location=$(region_postgres || true)" \
     -var "developer_principal_ids=[\"$(az ad signed-in-user show --query id -o tsv)\"]" | grep -E "Destroy complete|Error" || true
   echo; echo "listo. Sin recursos en Azure."
 }
+
+# `source scripts/nube.sh --solo-funciones` (CI): carga las funciones sin ejecutar nada.
+[[ ${1:-} == --solo-funciones ]] && return 0
 
 case "${1:-}" in
   desplegar | estado | destruir) "$1" ;;

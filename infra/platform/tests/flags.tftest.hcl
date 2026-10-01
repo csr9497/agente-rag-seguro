@@ -223,3 +223,28 @@ run "modelo_ligero_opcional" {
     error_message = "modelo_ligero = null no crea el despliegue ligero"
   }
 }
+
+run "postgres_en_otra_region_es_publico_y_restringido" {
+  command = plan
+  variables {
+    alcance           = "completo"
+    search_sku        = "basic"
+    postgres_location = "southcentralus"
+  }
+  assert {
+    condition     = module.postgres[0].publico_efectivo && length(module.postgres[0].reglas_firewall) == 1
+    error_message = "PostgreSQL fuera de la región de la VNet: público con firewall solo para servicios de Azure"
+  }
+}
+
+run "postgres_en_la_region_es_privado" {
+  command = plan
+  variables {
+    alcance    = "completo"
+    search_sku = "basic"
+  }
+  assert {
+    condition     = !module.postgres[0].publico_efectivo && length(module.postgres[0].reglas_firewall) == 0
+    error_message = "Por defecto PostgreSQL solo es accesible desde la VNet"
+  }
+}

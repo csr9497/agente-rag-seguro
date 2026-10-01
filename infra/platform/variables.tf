@@ -186,6 +186,12 @@ variable "postgres_sku" {
   default = "B_Standard_B1ms"
 }
 
+variable "postgres_location" {
+  type        = string
+  description = "Región de PostgreSQL si la de location no lo admite (Azure for Students). Distinta de location ⇒ acceso público con TLS limitado a servicios de Azure (la VNet no cruza regiones)"
+  default     = null
+}
+
 variable "cache_redis" {
   type        = bool
   description = "Azure Managed Redis para la caché semántica compartida (solo alcance=completo)"
