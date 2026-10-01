@@ -114,6 +114,9 @@ async function iniciar() {
     } else guardar("conversacion", null);
   }
   if (estado.rol) await cargarDatosDelRol();
+  document.querySelector(".env").textContent = conLogin()
+    ? `Sesión iniciada como ${estado.yo.id} · solo ves los roles que tienes asignados`
+    : "Sin login · selección de rol libre (modo demo)";
   pintarTodo();
 }
 
@@ -166,11 +169,12 @@ function salirDelRol() {
 }
 
 // ------------------------------------------------------------------ cabecera
-// En local no hay login (rol libre); desplegada, el login lo hace Easy Auth de Azure.
-const LOCAL = ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname);
+// Sin login (local o un servidor propio, rol libre) o con Easy Auth de Azure: lo dice el
+// servidor (/yo), no el nombre del host desde el que se abre la web.
+const conLogin = () => Boolean(estado.yo && estado.yo.login);
 
 function cerrarSesion() {
-  if (LOCAL) return null;
+  if (!conLogin()) return null;
   return el("a", { class: "btn btn-ghost", href: "/.auth/logout?post_logout_redirect_uri=/" }, "Cerrar sesión");
 }
 
@@ -821,7 +825,4 @@ $("visor-cerrar").addEventListener("click", () => $("visor").close());
 // Clic en el fondo (fuera del panel) también cierra; Esc lo gestiona el propio <dialog>.
 $("visor").addEventListener("click", (ev) => { if (ev.target === $("visor")) $("visor").close(); });
 
-document.querySelector(".env").textContent = LOCAL
-  ? "Entorno local · selección de rol libre (modo demo)"
-  : "Sesión iniciada con tu cuenta de la organización · solo ves los roles que tienes asignados";
 iniciar();

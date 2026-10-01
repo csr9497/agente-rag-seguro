@@ -170,6 +170,16 @@ estado() { # estado URL → "✅" o "⛔"
 
 accesos() {
   paso "Accesos (solo desde este equipo)"
+  if [[ -n ${SSH_CONNECTION:-} ]]; then # servidor remoto: túnel SSH (sin login no se expone a la red)
+    printf '   Estás en un servidor remoto: abre la app desde tu equipo con un túnel SSH y usa las
+'
+    printf '   mismas URLs (localhost):
+'
+    printf '     ssh -N -L 8080:localhost:8080 -L 8000:localhost:8000 -L 2024:127.0.0.1:2024 %s@%s
+
+' \
+      "$(whoami)" "$(awk '{print $3}' <<< "$SSH_CONNECTION")"
+  fi
   printf '%s  Aplicación web ............ http://localhost:8080\n' "$(estado http://localhost:8080/)"
   printf '%s  API (docs interactivos) ... http://localhost:8000/docs\n' "$(estado http://localhost:8000/health)"
   printf '%s  Estado de la app .......... http://localhost:8000/ready\n' "$(estado http://localhost:8000/ready)"

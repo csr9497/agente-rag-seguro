@@ -87,7 +87,7 @@ def client(servicios, agente):
     yo = {"usuario": ADMIN}
     app.dependency_overrides[get_servicios] = lambda: servicios
     app.dependency_overrides[get_agente] = lambda: agente
-    app.dependency_overrides[get_settings] = _settings
+    app.dependency_overrides[get_settings] = lambda: _settings()
     app.dependency_overrides[get_usuario] = lambda: yo["usuario"]
     yield TestClient(app), yo
     app.dependency_overrides.clear()
@@ -102,7 +102,7 @@ def test_api_asignaciones(client) -> None:
     assert {"usuario_id": "github:ana", "roles": ["public"]} in lista
 
     yo["usuario"] = ANA
-    assert c.get("/yo").json() == {"id": "github:ana", "roles": ["public"]}
+    assert c.get("/yo").json() == {"id": "github:ana", "roles": ["public"], "login": False}
     assert [r["id"] for r in c.get("/roles").json()] == ["public"]
     # Ana no administra: ni ve ni cambia asignaciones.
     assert c.get("/roles/asignaciones", headers={"X-Rol": "public"}).status_code == 403
@@ -122,3 +122,12 @@ def test_consultar_usa_los_roles_asignados(client) -> None:
     yo["usuario"] = ANA
     con_rol = c.post("/consultar", json={"pregunta": "vacaciones"}).json()
     assert con_rol["citas"] and con_rol["citas"][0]["fuente"].startswith("public/")
+
+
+def test_yo_indica_si_hay_login(client) -> None:
+    """La web muestra «Cerrar sesión» según el servidor, no según el host desde el que se abre."""
+    c, _ = client
+    app.dependency_overrides[get_settings] = lambda: _settings(
+        auth_modo="easyauth", proxy_secreto="x" * 40
+    )
+    assert c.get("/yo").json()["login"] is True

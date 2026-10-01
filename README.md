@@ -38,6 +38,11 @@ Elige un rol en la web (Empleado general, Recursos Humanos, Finanzas, Administra
 pregunta. `make apagar` lo detiene todo (con Azure, también borra los modelos).
 Sin modelos, `make up` arranca la interfaz y los permisos (las respuestas dan 503).
 
+**En un servidor remoto** los mismos comandos funcionan igual. Sin login, la app solo escucha
+en `127.0.0.1` del servidor (no se expone a la red): ábrela desde tu equipo con un túnel SSH
+(`make accesos` imprime el comando) y usa las mismas URLs de `localhost`. Para publicarla con
+login, despliégala en Azure.
+
 ## Desplegar en Azure
 
 Con GitHub Actions: guarda las credenciales de Azure como secrets del repositorio (las crea

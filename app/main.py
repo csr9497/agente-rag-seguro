@@ -126,10 +126,17 @@ def ready(request: Request, settings: Annotated[Settings, Depends(get_settings)]
 
 @app.get("/yo")
 def yo(
-    usuario: Annotated[Usuario, Depends(get_usuario)], servicios: ServiciosDep
+    usuario: Annotated[Usuario, Depends(get_usuario)],
+    servicios: ServiciosDep,
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> dict[str, object]:
-    """Quién soy y qué roles tengo (para pedir acceso a un administrador)."""
-    return {"id": usuario.id, "roles": servicios.roles.solo_activos(usuario).groups}
+    """Quién soy, qué roles tengo (para pedir acceso a un administrador) y si hay login (la
+    web lo usa para mostrar «Cerrar sesión», sea cual sea el host desde el que se abre)."""
+    return {
+        "id": usuario.id,
+        "roles": servicios.roles.solo_activos(usuario).groups,
+        "login": settings.auth_modo == "easyauth",
+    }
 
 
 @app.post("/consultar", response_model=RespuestaConsulta)
