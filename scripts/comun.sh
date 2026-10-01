@@ -13,6 +13,10 @@ proteger_nube() {
   fi
 }
 
+hay_nube() { # ¿hay un despliegue completo (make desplegar) en el estado de platform?
+  [[ $(terraform -chdir=infra/platform output -raw alcance 2> /dev/null || true) == completo ]]
+}
+
 # Enlace directo a un proyecto de LangSmith (lo crea si aún no existe, para que el enlace
 # funcione antes de la primera traza). Sin LANGSMITH_API_KEY (entorno o .env) no imprime nada.
 enlace_langsmith() { # enlace_langsmith <proyecto>

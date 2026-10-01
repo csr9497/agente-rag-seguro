@@ -157,5 +157,7 @@ modelos, AI Search, Blob y Content Safety de la nube y base de datos local
 | `make validar-infra` | Comprueba cada servicio desplegado (informe en `reports/infra/`) | `az login` |
 | `make ciclo` | Ciclo completo contra Azure con informe en `reports/ciclos/<fecha>/` | `PASO=prender\|probar\|guardar\|apagar\|informe\|todo` (defecto `todo`) |
 
-`make levantar`, `make apagar` y `make ciclo` se niegan a ejecutarse si hay un despliegue
-completo en la nube (comparten el estado de Terraform): `make destruir-nube` antes.
+**Local y nube a la vez**: con la nube desplegada, `make levantar` usa los modelos de Azure
+OpenAI de ese despliegue (no crea ni borra nada en Azure) y todo lo demás es local (Qdrant,
+`data/`), en sus puertos de siempre (8080, 8000, 2024); `make apagar` para lo local y deja la
+nube intacta. Solo `make ciclo` se niega (`make destruir-nube` antes).

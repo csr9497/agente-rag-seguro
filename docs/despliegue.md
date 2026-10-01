@@ -106,4 +106,4 @@ gratuito; Azure OpenAI por token. Al terminar las pruebas: `make destruir-nube`.
 | GitHub dice «redirect_uri is not associated» | Pon el callback del resumen del run en la OAuth App |
 | Tras entrar: «Aún no tienes acceso» | Pide a un administrador que te asigne un rol (tu usuario aparece en pantalla) |
 | Respuestas `503` con `codigo` | Error del proveedor de modelos: [modelos.md](modelos.md#errores-del-proveedor) |
-| `make levantar` / `make ciclo` se niegan | Comparten el estado con la nube: `make destruir-nube` antes |
+| `make ciclo` se niega | Comparte el estado con la nube: `make destruir-nube` antes (`make levantar` sí funciona: usa los modelos de la nube) |

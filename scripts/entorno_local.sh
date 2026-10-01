@@ -94,6 +94,18 @@ esperar() { # esperar URL segundos
   return 1
 }
 
+# Con la nube desplegada, local usa sus modelos (Azure OpenAI) y nada más: búsqueda, Blob y
+# Content Safety siguen siendo los locales (Qdrant, data/).
+modelos_de_la_nube() {
+  local tmp=data/.modelos-nube.env linea
+  rm -f "$tmp"
+  ENV_FILE="$tmp" ./scripts/env_from_azure.sh > /dev/null
+  sed -i.bak -E '/^(AZURE_OPENAI_(ENDPOINT|API_KEY|CHAT_DEPLOYMENT|EMBEDDING_DEPLOYMENT|LIGERO_DEPLOYMENT)|VECTOR_STORE|AZURE_SEARCH_(ENDPOINT|API_KEY)|CONTENT_SAFETY_ENDPOINT|AZURE_STORAGE_(ACCOUNT_URL|CONTAINER)|ALMACEN_DOCUMENTOS)=/d' .env
+  rm -f .env.bak
+  grep -E '^AZURE_OPENAI_(ENDPOINT|API_KEY|CHAT_DEPLOYMENT|EMBEDDING_DEPLOYMENT|LIGERO_DEPLOYMENT)=' "$tmp" >> .env
+  rm -f "$tmp"
+}
+
 studio_activo() { [[ -f "$STUDIO_PID" ]] && kill -0 "$(cat "$STUDIO_PID")" 2> /dev/null; }
 
 levantar() {
@@ -104,13 +116,18 @@ levantar() {
     paso "1/5 Modelos en Azure (gpt-4o + text-embedding-ada-002)"
     requisitos_azure > /dev/null || { requisitos_azure; exit 1; }
     [[ -d infra/platform/.terraform ]] || terraform_init
-    proteger_nube
-    terraform -chdir=infra/platform apply -input=false -auto-approve -var-file="$TFVARS" \
-      -var "developer_principal_ids=[\"$(yo)\"]" \
-      | grep -E "Apply complete|No changes|Error" || true
+    if hay_nube; then
+      echo "Hay un despliegue en la nube (make desplegar): se usan sus modelos, no se crea nada."
+      paso "2/5 .env con el endpoint y la clave de los modelos de la nube (el resto, local)"
+      modelos_de_la_nube && echo "listo"
+    else
+      terraform -chdir=infra/platform apply -input=false -auto-approve -var-file="$TFVARS" \
+        -var "developer_principal_ids=[\"$(yo)\"]" \
+        | grep -E "Apply complete|No changes|Error" || true
 
-    paso "2/5 .env con el endpoint y la clave de los modelos"
-    ./scripts/env_from_azure.sh > /dev/null && echo "listo"
+      paso "2/5 .env con el endpoint y la clave de los modelos"
+      ./scripts/env_from_azure.sh > /dev/null && echo "listo"
+    fi
   else
     paso "1-2/5 Modelos: OpenAI o endpoint compatible (no se crea nada en Azure)"
   fi
@@ -154,7 +171,11 @@ apagar() {
   fi
   paso "Modelos en Azure"
   [[ -d infra/platform/.terraform ]] || terraform_init
-  proteger_nube
+  if hay_nube; then
+    echo "Son los del despliegue en la nube: se mantienen (make destruir-nube los elimina)."
+    echo; echo "listo."
+    return
+  fi
   terraform -chdir=infra/platform destroy -input=false -auto-approve -var-file="$TFVARS" \
     -var "developer_principal_ids=[\"$(yo)\"]" \
     | grep -E "Destroy complete|Error" || true
