@@ -270,6 +270,9 @@ destruir() {
   identidad=$(estado_de identidad)
   init platform
   grupo=$(tf platform output -raw resource_group_name 2> /dev/null || true)
+  # Un destroy a medias borra los outputs pero deja recursos: el nombre sale entonces del estado.
+  [[ -n $grupo ]] || grupo=$(tf platform state show -no-color azurerm_resource_group.this 2> /dev/null |
+    sed -nE 's/^ +name += "(.*)"$/\1/p' || true)
   ./scripts/local_nube.sh parar > /dev/null 2>&1 || true
   paso "1/4 Aplicaciones"
   # Al destruir no se usan: valores de relleno para las validaciones del stack.
@@ -296,11 +299,14 @@ destruir() {
   if [[ -n $grupo && $(az group exists -n "$grupo") == true ]]; then
     $ok || echo "Terraform no lo borró todo: se elimina el grupo $grupo completo (unos minutos)…"
     az group delete -n "$grupo" --yes
-    # El estado de Terraform apuntaba a recursos que ya no existen: se vacía para que el
+    ok=false
+  fi
+  if ! $ok; then
+    # El estado de Terraform apunta a recursos que ya no existen: se vacía para que el
     # próximo make deploy empiece de cero.
     for stack in apps identidad platform; do
       init "$stack" 2> /dev/null || continue
-      tf "$stack" state list 2> /dev/null | xargs -r -n 20 terraform -chdir="infra/$stack" state rm > /dev/null 2>&1 || true
+      tf "$stack" state list 2> /dev/null | tr "\n" "\0" | xargs -0 -r -n 20 terraform -chdir="infra/$stack" state rm > /dev/null 2>&1 || true
     done
   fi
   if [[ -n $grupo && $(az group exists -n "$grupo") == true ]]; then
