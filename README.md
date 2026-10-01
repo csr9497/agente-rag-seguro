@@ -62,17 +62,19 @@ problemas frecuentes: [docs/despliegue.md](docs/despliegue.md).
 
 | Comando | Qué hace |
 |---|---|
-| `make test` · `make lint` | Tests unitarios · ruff |
-| `make evals-simulado` | Gate de CI en local: app con modelos simulados + evaluaciones (fugas entre roles, contrato) |
-| `make evals BASE_URL=…` | Evaluaciones por capas contra una app en marcha (`JUEZ=1` añade juez LLM) |
-| `make accesos` | URLs y estado del entorno local (web, API, Studio, LangSmith) |
-| `make studio` | LangGraph Studio |
-| `make ciclo` | Ciclo de pruebas contra Azure con informe |
+| `make levantar` · `make apagar` | Entorno local completo · pararlo |
+| `make desplegar` · `make destruir-nube` | Publicar en Azure · borrarlo |
+| `make local-nube` | Tu equipo contra los recursos de Azure |
+| `make test` · `make evals-simulado` | Tests · gate de evaluaciones con modelos simulados |
+| `make evals BASE_URL=…` | Evaluaciones con modelos reales contra una app en marcha |
+
+Todos los comandos y los valores que necesita cada uno: [docs/comandos.md](docs/comandos.md).
 
 ## Documentación
 
 | | |
 |---|---|
+| [docs/comandos.md](docs/comandos.md) | Todos los `make` y los valores a configurar en cada caso |
 | [docs/modelos.md](docs/modelos.md) | Proveedores de modelos, setup de cada uno y errores (saldo, credenciales, capacidades) |
 | [docs/despliegue.md](docs/despliegue.md) | Despliegue en Azure paso a paso |
 | [docs/arquitectura.md](docs/arquitectura.md) | Grafo del agente, seguridad, API, pruebas, observabilidad e infraestructura |

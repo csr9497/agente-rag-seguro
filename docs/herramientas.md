@@ -5,7 +5,7 @@ y las **herramientas de desarrollo** (lo que usas tú para probar, depurar y eva
 
 ## Herramientas del agente
 
-El supervisor (gpt-4o con tool-calling) interpreta cada mensaje y elige una o varias. En el
+El supervisor (modelo de chat con tool-calling) interpreta cada mensaje y elige una o varias. En el
 primer turno siempre usa alguna; nunca responde sin haber consultado. Los permisos no dependen
 del modelo: el usuario (y su rol) lo inyecta el grafo, nunca los argumentos que elige el LLM.
 
@@ -36,23 +36,13 @@ una. Todo escucha solo en `127.0.0.1`.
 | Estado | http://localhost:8000/ready | Base de datos, modelos e índice; `/health` solo indica que el proceso vive |
 | Topología | http://localhost:8000/grafo | Diagrama del grafo del agente |
 | LangGraph Studio | https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024 | Ejecutar el grafo paso a paso, ver el estado de cada nodo y elegir versiones de guardrails. Guía: [docs/studio.md](studio.md) |
-| LangSmith · trazas | la muestra `make accesos` | Depurar y monitorizar: cada consulta es una traza con sus nodos, llamadas a gpt-4o (tokens, latencia) y guardrails. Filtra por etiquetas `rol:*`, `guardrail`, `guardrail_entrada:v3-politicas` o por feedback `valoracion_usuario` |
+| LangSmith · trazas | la muestra `make accesos` | Depurar y monitorizar: cada consulta es una traza con sus nodos, llamadas al modelo (tokens, latencia) y guardrails. Filtra por etiquetas `rol:*`, `guardrail`, `guardrail_entrada:v3-politicas` o por feedback `valoracion_usuario` |
 | LangSmith · evaluaciones | la muestra `make accesos` | Dataset `matriz-escenarios` y experimentos: compara versiones del agente y de los guardrails |
 | Qdrant | http://localhost:6333/dashboard | Ver las colecciones y los fragmentos indexados (con su campo `acl_groups`) |
 
 ### Comandos
 
-| Comando | Qué hace |
-|---|---|
-| `make instalar` | Primer uso tras clonar: requisitos, dependencias, `.env` y Terraform |
-| `make levantar` | Modelos en Azure + Docker + documentos de ejemplo + Studio, y muestra los accesos |
-| `make accesos` | Estado y URL de cada herramienta |
-| `make apagar` | Para Studio y Docker, elimina los modelos de Azure y limpia `.env` (sin costes) |
-| `make test` | Tests unitarios (sin red ni Azure) |
-| `make evals-simulado` | Gate de CI en local: matriz de escenarios con modelos simulados |
-| `make evals-langsmith BASE_URL=http://localhost:8000` | Matriz contra tu entorno, como experimento en LangSmith (evaluadores por capas + prebuilt) |
-| `make studio` | Solo LangGraph Studio |
-| `make lint` · `make fmt` | Ruff |
+Todos los `make`, con sus valores y ejemplos: [docs/comandos.md](comandos.md).
 
 ### Ciclo recomendado para mejorar el agente o un guardrail
 

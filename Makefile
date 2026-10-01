@@ -3,8 +3,8 @@ BASE_URL  ?= http://localhost:8000
 
 .PHONY: help setup sync lint fmt test test-postgres integration matriz evals evals-simulado evals-langsmith up down ingest studio env-from-azure tf-validate validar-infra verificar-modelos local-nube desplegar estado-nube destruir-nube ciclo modelos-up modelos-down instalar levantar apagar accesos
 
-help: ## Lista los comandos
-	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-16s %s\n", $$1, $$2}'
+help: ## Lista los comandos (detalle y valores: docs/comandos.md)
+	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
 
 setup: ## Crea el entorno conda (Python 3.12) y la .venv de uv sobre ese intérprete
 	conda env create -f environment.yml --yes
@@ -37,7 +37,7 @@ evals-simulado: ## Gate de CI en local: app con modelos simulados + evaluaciones
 integration: ## Matriz de escenarios contra BASE_URL (informe en reports/integracion.md)
 	INTEGRATION_BASE_URL=$(BASE_URL) uv run pytest -m integration
 
-evals: ## Evaluaciones por capas contra BASE_URL (umbrales bloqueantes; JUEZ=1 añade gpt-4o)
+evals: ## Evaluaciones por capas contra BASE_URL (umbrales bloqueantes; JUEZ=1 añade el juez LLM)
 	uv run python -m evals.ejecutar --base-url $(BASE_URL) $(if $(JUEZ),--juez,)
 
 evals-langsmith: ## Igual que evals + dataset y experimento en LangSmith
@@ -61,7 +61,7 @@ studio: ## LangGraph Studio: servidor de desarrollo del grafo en http://127.0.0.
 verificar-modelos: ## Requisitos y capacidades del proveedor de modelos (MODELOS_PROVEEDOR)
 	uv run python -m app.modelos.diagnostico $(if $(SIN_LLAMADAS),--sin-llamadas,)
 
-env-from-azure: ## Rellena .env con endpoint y clave de Azure OpenAI (desde Key Vault)
+env-from-azure: ## Rellena .env con endpoints y claves de lo desplegado en Azure (desde Key Vault)
 	./scripts/env_from_azure.sh
 
 instalar: ## Primer uso tras clonar: requisitos, dependencias, .env y Terraform
@@ -82,7 +82,7 @@ modelos-down: apagar ## Alias de apagar
 local-nube: ## App en tu equipo contra los recursos de Azure (http://localhost:8090)
 	./scripts/local_nube.sh
 
-desplegar: ## Despliega todo en Azure (web pública con login de Entra ID) y muestra la URL
+desplegar: ## Despliega en Azure (modo prueba solo tu IP, o login de GitHub con la OAuth App en .env) y muestra la URL
 	./scripts/nube.sh desplegar
 
 estado-nube: ## URL y salud del despliegue en Azure

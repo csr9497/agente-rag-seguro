@@ -68,12 +68,8 @@ Cada push a `main` (o *Actions → Deploy → Run workflow*) ejecuta
 El resumen del run muestra la URL y el **callback** que hay que poner en la OAuth App
 (`https://<web>/.auth/login/github/callback`); pon también la URL de la web como *Homepage URL*.
 
-Desde tu equipo, con `az login`, Terraform y Docker, lo mismo con un comando:
-
-```bash
-export GH_OAUTH_CLIENT_ID=... GH_OAUTH_CLIENT_SECRET=...   # nunca en el repositorio
-make desplegar      # make estado-nube · make destruir-nube
-```
+Desde tu equipo es lo mismo con `make desplegar`; los valores de cada modo (IP, GitHub,
+Entra ID) están en [comandos.md](comandos.md#make-desplegar).
 
 ## Acceso y roles
 
