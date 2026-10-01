@@ -1,0 +1,54 @@
+# Asistente multiagente seguro (RAG + RR.HH. + Soporte)
+
+**Fecha:** 2026-10-01 · **Estado:** fase 1 terminada (2026-10-01) · **Spec de origen:** la entregada por el
+usuario («SPEC — Asistente multiagente seguro»), que se resume aquí con las decisiones tomadas.
+
+## Punto de partida (lo que había)
+
+- Grafo único `authorize → input_guardrail → cache_lookup → supervisor ⇄ tools →
+  access_guardrail → generate → output_guardrail → cache_store → audit` (app/graph/agente.py).
+- `Usuario(id, groups)`: `groups` son los roles de la app (`public`, `rrhh`, `finanzas`,
+  `administrador`). Sin scopes, departamentos ni token delegado (Easy Auth GitHub/Entra o stub).
+- Sin checkpointer (decisión del 2026-09-28: guardaría PII y fragmentos en reposo).
+- Aprobación humana sin `interrupt`: tabla `acciones` (`abrir_ticket`, `solicitar_vacaciones`).
+- ACL de documentos: un campo `acl_groups` en Qdrant y Azure AI Search; `access_guardrail`
+  re-chequea cada fragmento contra el registro.
+- Auditoría: línea de log JSON; sin tabla `audit_log`. SQLite en local, PostgreSQL en la nube.
+
+## Decisiones (2026-10-01)
+
+| Tema | Decisión |
+|---|---|
+| Checkpointer | PostgreSQL con **serializador cifrado** (AES, clave en Key Vault / `.env`). El estado solo guarda la pregunta ya saneada |
+| Base de datos local | **PostgreSQL siempre** (`make up` lo arranca); SQLite solo en tests unitarios sin RLS |
+| Acciones existentes | **Se sustituyen** por `tickets` y `hr_cases` con `interrupt` (fases 3–4): se retiran la tabla `acciones`, su servicio, su API y `proponer_accion` |
+| Roles y ACL | **Mapear sobre lo actual**: se mantienen `public`/`rrhh`/`finanzas`/`administrador` y se añaden `hr_staff`, `hr_specialist`, `it_support`, `auditor`. Propuesta para la fase 2: codificar la clasificación en `acl_groups` (roles; `dept:<d>`; `user:<id>`) |
+| Token delegado | No hay sistema externo: los **scopes se derivan de los roles** en la app (`authorize`) y `execute_tool` actúa con la identidad autenticada |
+| Vector store | El filtro de política va en la consulta tanto en Qdrant (local) como en AI Search (nube) |
+
+## Fases
+
+1. Registro `AgentSpec`/`ToolPolicy`, subgrafo genérico y `policy_gate` con tests unitarios.
+2. `rag_agent` con filtro ACL en la consulta y re-chequeo (`revoked`, `expires_at`); retirar
+   `access_guardrail`.
+3. PostgreSQL en local, checkpointer cifrado, `audit_log`, `approvals`; `hr_agent` y
+   `hr_cases` con RLS e `interrupt` de confirmación.
+4. `support_agent`, `tickets` con RLS, deduplicación y aprobación de P1.
+5. Supervisor con `Send`, `verifier`, `escalate_human` y caché con `scope_hash`.
+6. Evals de enrutamiento, permisos y prompt injection.
+
+Cada fase termina con tests en verde y un resumen; la siguiente empieza con confirmación.
+
+## Fase 1 — diseño
+
+Piezas nuevas y aisladas; el grafo actual no cambia.
+
+| Pieza | Responsabilidad |
+|---|---|
+| `app/agents/registry.py` | `AgentSpec`, `ToolPolicy` (anexo B + `writes` y `args_model`), `register`, `resolve_mode`. `register` rechaza escrituras en `auto` y agentes duplicados |
+| `app/agents/scopes.py` | Scopes por rol; `authorize` los añade al usuario (único nodo que lo escribe) |
+| `app/agents/policy_gate.py` | `allow` / `deny` / `needs_approval`, determinista: tool del agente, scope, argumentos válidos, presupuesto, modo (`mode_if`) |
+| `app/agents/subgraph.py` | `agent → policy_gate → {execute_tool \| human_approval \| agent con motivo} → sanitize_output → agent`; `interrupt` con `{type, agent, tool, args_preview, risk, expires_at}` y `Command(resume={approved, edited_args?, reason?, approver_id})`; en `approve_staff`, quien aprueba debe tener `approver_role` y no ser el solicitante |
+| `sanitize_output` | Reutiliza `neutralizar` y el enmascarado de PII; marca la salida como `<dato_herramienta>` |
+| `AuditSink` | Una fila por decisión de tool (hash de args, decisión, `approver_id`); en memoria y log (tabla en la fase 3) |
+| Presupuestos | Iteraciones y tiempo en el estado del subgrafo |
