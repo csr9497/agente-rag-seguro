@@ -6,7 +6,7 @@ name: Deploy
 # GH_OAUTH_CLIENT_SECRET del environment dev; ADMINISTRADORES_GITHUB (JSON, opcional) con los
 # primeros administradores (por defecto, el dueño del repositorio). Al terminar carga los
 # documentos de ejemplo (idempotente) y comprueba que la web exige inicio de sesión.
-# Con login de Entra ID (login_proveedor=entra) el stack identidad se aplica con make desplegar.
+# Con login de Entra ID (login_proveedor=entra) el stack identidad se aplica con make deploy.
 #
 # Desactivado hasta que se decida desplegar: requiere la variable de repositorio
 # DEPLOY_AZURE=true (Settings → Variables). Sin ella, todos los jobs se omiten.

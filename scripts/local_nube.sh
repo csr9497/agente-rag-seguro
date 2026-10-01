@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# App en tu equipo contra los recursos de la nube (lo creado por make desplegar o la etapa A):
+# App en tu equipo contra los recursos de la nube (lo creado por make deploy o la etapa A):
 # modelos de Azure OpenAI, AI Search, Blob (originales) y Content Safety. Base de datos local
 # (SQLite en data/nube-local.db): PostgreSQL de la nube solo admite servicios de Azure.
 #
@@ -7,13 +7,13 @@
 #                                   app http://localhost:8090 · Studio en el puerto 2025
 #   ./scripts/local_nube.sh parar   los detiene
 #
-# Lo ejecuta make desplegar al terminar: no hace falta lanzarlo a mano.
-# Requisitos: az login (con los permisos de desarrollador que asigna make desplegar) y uv.
+# Lo ejecuta make deploy al terminar: no hace falta lanzarlo a mano.
+# Requisitos: az login (con los permisos de desarrollador que asigna make deploy) y uv.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-PUERTO="${PUERTO:-8090}"
-PUERTO_STUDIO="${PUERTO_STUDIO:-2025}"
+PUERTO="${PORT:-${PUERTO:-8090}}"
+PUERTO_STUDIO="${STUDIO_PORT:-${PUERTO_STUDIO:-2025}}"
 NUBE_ENV=data/nube.env
 PROYECTO="${LANGSMITH_PROJECT_LOCAL_NUBE:-agente-rag-local-nube}"
 PID_APP=data/.local-nube.pid
@@ -26,8 +26,8 @@ fijar() { # fijar NOMBRE=valor en $NUBE_ENV
   grep -v "^$nombre=" "$NUBE_ENV" > "$NUBE_ENV.tmp" || true
   printf '%s\n' "$1" >> "$NUBE_ENV.tmp" && mv "$NUBE_ENV.tmp" "$NUBE_ENV"
 }
-# Versiones anteriores de make local-nube escribían en .env la búsqueda, Blob y Content
-# Safety de la nube, y make studio / make up quedaban apuntando a ella con el registro local.
+# Versiones anteriores de make cloud-local escribían en .env la búsqueda, Blob y Content
+# Safety de la nube, y make studio / make docker-up quedaban apuntando a ella con el registro local.
 # Si .env tiene el AI Search de este despliegue, se devuelve a local (los modelos se quedan).
 reparar_env_local() {
   local search
@@ -59,7 +59,7 @@ terraform -chdir=infra/platform init -input=false -reconfigure \
   -backend-config=../envs/dev/backend.hcl > /dev/null
 alcance=$(terraform -chdir=infra/platform output -raw alcance 2> /dev/null || true)
 [[ $alcance == completo || $alcance == modelos ]] \
-  || falla "No hay recursos en la nube (alcance='${alcance:-ninguno}'): ejecuta antes make desplegar."
+  || falla "No hay recursos en la nube (alcance='${alcance:-ninguno}'): ejecuta antes make deploy."
 echo "✅ recursos en la nube (alcance=$alcance)"
 
 paso "1/4 Configuración de la nube en $NUBE_ENV (tu .env no se toca)"
@@ -109,4 +109,4 @@ echo "   Aplicación: http://localhost:$PUERTO  (modelos, búsqueda y documentos
 echo "   API:        http://localhost:$PUERTO/api/docs"
 echo "   Studio:     https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:$PUERTO_STUDIO"
 enlace_langsmith "$PROYECTO"
-echo "   Parar: make local-nube-parar"
+echo "   Parar: make cloud-local-stop"

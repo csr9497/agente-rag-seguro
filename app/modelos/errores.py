@@ -115,7 +115,7 @@ def pista(
             return (
                 f"No existe el deployment '{modelo}': AZURE_OPENAI_*_DEPLOYMENT es el nombre del "
                 "deployment (no del modelo); revisa también AZURE_OPENAI_ENDPOINT y "
-                "AZURE_OPENAI_API_VERSION, o despliega los modelos (make levantar)."
+                "AZURE_OPENAI_API_VERSION, o despliega los modelos (make up)."
                 if azure
                 else f"El modelo '{modelo}' no existe en el endpoint o la cuenta no tiene acceso:"
                 " revisa OPENAI_CHAT_MODEL / OPENAI_EMBEDDING_MODEL / OPENAI_LIGERO_MODEL."

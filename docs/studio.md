@@ -6,12 +6,12 @@ aplicación con la que se arranca:
 
 | Arranque | Configuración | URL de Studio |
 |---|---|---|
-| `make levantar` o `make studio` | `.env`: tu entorno local (`data/`, Qdrant…) | https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024 |
-| `make local-nube` | `data/nube.env`: modelos, AI Search, Blob y Content Safety de la nube, registro en `data/nube-local.db` | https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2025 |
+| `make up` o `make studio` | `.env`: tu entorno local (`data/`, Qdrant…) | https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024 |
+| `make deploy` (al terminar) o `make cloud-local` | `data/nube.env`: modelos, AI Search, Blob y Content Safety de la nube, registro en `data/nube-local.db` | https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2025 |
 
 ## Abrirlo
 
-1. Con el entorno levantado (`make levantar`), Studio ya está en marcha en `127.0.0.1:2024`.
+1. Con el entorno levantado (`make up`), Studio ya está en marcha en `127.0.0.1:2024`.
    Si no, arráncalo con `make studio`.
 2. Abre en **Chrome o Edge**:
    https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024
@@ -35,7 +35,7 @@ con la etiqueta `dev`.
 
 Si no rellenas `usuario` ni `top_k`, el primer nodo del grafo de Studio (`entrada_studio`)
 aplica los valores por defecto. Los roles del desplegable son los activos al arrancar Studio;
-si creas un rol nuevo en la aplicación, reinicia Studio (`make apagar` + `make levantar`, o
+si creas un rol nuevo en la aplicación, reinicia Studio (`make down` + `make up`, o
 `pkill -f "langgraph dev"` y `make studio`).
 
 ## Contexto (versión de los guardrails y de los prompts)

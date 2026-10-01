@@ -9,18 +9,18 @@ tenants universitarios los estudiantes no pueden). Los roles se asignan desde la
 Con `az login`, Terraform y Docker:
 
 ```bash
-make desplegar      # make estado-nube · make destruir-nube
+make deploy      # make cloud-status · make cloud-destroy
 ```
 
 Sin más configuración se despliega en **modo prueba**: la web solo es accesible desde tu IP
 pública (el resto de Internet recibe 403), sin login y con todos los roles, como en local.
 Para abrirla a otras personas con login de GitHub, añade a `.env` `GH_OAUTH_CLIENT_ID` y
-`GH_OAUTH_CLIENT_SECRET` (OAuth App, paso 2 de abajo) y repite `make desplegar`.
+`GH_OAUTH_CLIENT_SECRET` (OAuth App, paso 2 de abajo) y repite `make deploy`.
 
 ## App en tu equipo contra los recursos de la nube
 
-`make desplegar` la deja arrancada al terminar, en segundo plano (`make local-nube` la
-rearranca, `make local-nube-parar` la detiene): app en http://localhost:8090 y Studio en
+`make deploy` la deja arrancada al terminar, en segundo plano (`make cloud-local` la
+rearranca, `make cloud-local-stop` la detiene): app en http://localhost:8090 y Studio en
 `https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2025`.
 
 Escribe en `data/nube.env` (no en `.env`) los endpoints y claves de la nube (Key Vault),
@@ -69,8 +69,8 @@ Cada push a `main` (o *Actions → Deploy → Run workflow*) ejecuta
 El resumen del run muestra la URL y el **callback** que hay que poner en la OAuth App
 (`https://<web>/.auth/login/github/callback`); pon también la URL de la web como *Homepage URL*.
 
-Desde tu equipo es lo mismo con `make desplegar`; los valores de cada modo (IP, GitHub,
-Entra ID) están en [comandos.md](comandos.md#make-desplegar).
+Desde tu equipo es lo mismo con `make deploy`; los valores de cada modo (IP, GitHub,
+Entra ID) están en [comandos.md](comandos.md#make-deploy).
 
 ## Acceso y roles
 
@@ -84,7 +84,7 @@ Entra ID) están en [comandos.md](comandos.md#make-desplegar).
 
 ### Alternativa: login con Entra ID
 
-Si tu cuenta puede registrar aplicaciones en el tenant: `LOGIN_PROVEEDOR=entra make desplegar`.
+Si tu cuenta puede registrar aplicaciones en el tenant: `make deploy LOGIN_PROVIDER=entra`.
 El stack [infra/identidad](../infra/identidad) crea el app registration con los app roles
 `administrador`, `rrhh`, `finanzas` y `public` (asignación obligatoria; tú recibes los cuatro;
 más personas en [identidad.tfvars](../infra/envs/dev/identidad.tfvars)).
@@ -93,7 +93,7 @@ más personas en [identidad.tfvars](../infra/envs/dev/identidad.tfvars)).
 
 Coste fijo mientras exista: PostgreSQL Flexible (B1ms), Container Apps (1 réplica mínima de
 backend y web), Container Registry Basic y Log Analytics. AI Search y Content Safety en tier
-gratuito; Azure OpenAI por token. Al terminar las pruebas: `make destruir-nube`.
+gratuito; Azure OpenAI por token. Al terminar las pruebas: `make cloud-destroy`.
 
 ## Problemas frecuentes
 
@@ -106,4 +106,4 @@ gratuito; Azure OpenAI por token. Al terminar las pruebas: `make destruir-nube`.
 | GitHub dice «redirect_uri is not associated» | Pon el callback del resumen del run en la OAuth App |
 | Tras entrar: «Aún no tienes acceso» | Pide a un administrador que te asigne un rol (tu usuario aparece en pantalla) |
 | Respuestas `503` con `codigo` | Error del proveedor de modelos: [modelos.md](modelos.md#errores-del-proveedor) |
-| `make ciclo` se niega | Comparte el estado con la nube: `make destruir-nube` antes (`make levantar` sí funciona: usa los modelos de la nube) |
+| `make cycle` se niega | Comparte el estado con la nube: `make cloud-destroy` antes (`make up` sí funciona: usa los modelos de la nube) |

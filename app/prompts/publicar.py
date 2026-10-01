@@ -5,8 +5,8 @@
 
 Cada prompt (app/prompts/*.md) se sube con su nombre de LangSmith (ver PROMPTS). Si el texto
 no cambió no se crea un commit nuevo, pero la etiqueta se mueve al último: repetirlo es
-inocuo. Lo ejecutan `make prompts-langsmith`, `make levantar`, `make studio`,
-`make local-nube` y `make desplegar` cuando hay LANGSMITH_API_KEY en .env.
+inocuo. Lo ejecutan `make prompts`, `make up`, `make studio`,
+`make cloud-local` y `make deploy` cuando hay LANGSMITH_API_KEY en .env.
 """
 
 import argparse

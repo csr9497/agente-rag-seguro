@@ -1,19 +1,19 @@
 # Funciones compartidas por los scripts de Azure (se cargan con `source`).
 
-# La etapa A (make levantar / make ciclo) y la nube (make desplegar) comparten el estado de
+# La etapa A (make up / make cycle) y la nube (make deploy) comparten el estado de
 # platform: aplicar o destruir la etapa A con la nube desplegada la desmontaría.
 proteger_nube() {
   local alcance
   alcance=$(terraform -chdir=infra/platform output -raw alcance 2> /dev/null || true)
   if [[ $alcance == completo ]]; then
     echo "⛔ Hay un despliegue en la nube (alcance=completo) en este estado de Terraform."
-    echo "   Esta operación lo desmontaría. Usa la nube (make estado-nube) o elimínala antes"
-    echo "   con make destruir-nube."
+    echo "   Esta operación lo desmontaría. Usa la nube (make cloud-status) o elimínala antes"
+    echo "   con make cloud-destroy."
     exit 1
   fi
 }
 
-hay_nube() { # ¿hay un despliegue completo (make desplegar) en el estado de platform?
+hay_nube() { # ¿hay un despliegue completo (make deploy) en el estado de platform?
   [[ $(terraform -chdir=infra/platform output -raw alcance 2> /dev/null || true) == completo ]]
 }
 

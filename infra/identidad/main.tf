@@ -2,7 +2,7 @@
 # app registration con los roles de la app, service principal que exige asignación (solo
 # entran usuarios con algún rol) y secreto del cliente guardado en Key Vault.
 #
-# Se aplica con TU sesión (`make desplegar`): necesita permisos de directorio para registrar
+# Se aplica con TU sesión (`make deploy`): necesita permisos de directorio para registrar
 # aplicaciones, que la identidad de GitHub Actions no tiene.
 
 data "terraform_remote_state" "platform" {
@@ -43,7 +43,7 @@ resource "terraform_data" "validaciones" {
   lifecycle {
     precondition {
       condition     = local.p.alcance == "completo" && local.p.container_app_environment_default_domain != ""
-      error_message = "Aplica antes platform con alcance=completo (make desplegar lo hace)."
+      error_message = "Aplica antes platform con alcance=completo (make deploy lo hace)."
     }
     precondition {
       condition     = alltrue([for a in values(local.asignaciones) : contains(keys(local.roles), a.rol)])

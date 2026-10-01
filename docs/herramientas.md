@@ -26,7 +26,7 @@ por versiones: ver [docs/studio.md](studio.md)), la **caché semántica con perm
 
 ## Herramientas de desarrollo
 
-Con el entorno levantado (`make levantar`), `make accesos` muestra el estado y la URL de cada
+Con el entorno levantado (`make up`), `make status` muestra el estado y la URL de cada
 una. Todo escucha solo en `127.0.0.1`.
 
 | Herramienta | URL | Para qué |
@@ -36,8 +36,8 @@ una. Todo escucha solo en `127.0.0.1`.
 | Estado | http://localhost:8000/ready | Base de datos, modelos e índice; `/health` solo indica que el proceso vive |
 | Topología | http://localhost:8000/grafo | Diagrama del grafo del agente |
 | LangGraph Studio | https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024 | Ejecutar el grafo paso a paso, ver el estado de cada nodo y elegir versiones de guardrails. Guía: [docs/studio.md](studio.md) |
-| LangSmith · trazas | la muestra `make accesos` | Depurar y monitorizar: cada consulta es una traza con sus nodos, llamadas al modelo (tokens, latencia) y guardrails. Filtra por etiquetas `rol:*`, `guardrail`, `guardrail_entrada:v3-politicas` o por feedback `valoracion_usuario` |
-| LangSmith · evaluaciones | la muestra `make accesos` | Dataset `matriz-escenarios` y experimentos: compara versiones del agente y de los guardrails |
+| LangSmith · trazas | la muestra `make status` | Depurar y monitorizar: cada consulta es una traza con sus nodos, llamadas al modelo (tokens, latencia) y guardrails. Filtra por etiquetas `rol:*`, `guardrail`, `guardrail_entrada:v3-politicas` o por feedback `valoracion_usuario` |
+| LangSmith · evaluaciones | la muestra `make status` | Dataset `matriz-escenarios` y experimentos: compara versiones del agente y de los guardrails |
 | Qdrant | http://localhost:6333/dashboard | Ver las colecciones y los fragmentos indexados (con su campo `acl_groups`) |
 
 ### Comandos

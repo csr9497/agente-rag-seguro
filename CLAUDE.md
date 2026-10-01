@@ -13,7 +13,7 @@ Agente LangGraph + RAG con permisos + guardrails, en Azure, con Terraform y CI/C
 - LLM + embeddings: **proveedor configurable** (`MODELOS_PROVEEDOR`): **Azure OpenAI** por
   defecto y en el despliegue, u **OpenAI / endpoint compatible** con clave directa. Mismo SDK
   `openai` (`AzureOpenAI` / `OpenAI`) en `app/modelos/`; errores tipificados (`ModeloError`)
-  y diagnóstico con `make verificar-modelos` (ver docs/modelos.md)
+  y diagnóstico con `make check-models` (ver docs/modelos.md)
 - Retrieval / vector store: **Azure AI Search** (híbrido + security trimming)
 - API: **FastAPI**
 - Estado + auditoría: **PostgreSQL** (sin checkpointer de LangGraph: ver docs/diseno-fase-3.md §4)
@@ -80,7 +80,7 @@ El agente es un grafo LangGraph:
   local (Qdrant/FAISS) a Azure (AI Search) sin reescribir la lógica.
 
 ## Comandos
-- Local: `docker compose up`
+- Local: `make up` (guía de todos los make: docs/comandos.md)
 - Tests: `pytest`
 - Lint / formato: `ruff check` · `ruff format`
 
@@ -92,9 +92,9 @@ conversación, feedback, Prompt Shields (Content Safety), data_query, acciones c
 LangSmith, evaluaciones por capas y CI (GitHub Actions). Terraform listo (`alcance`,
 `vector_store`, Managed Redis, PostgreSQL; stacks platform, identidad y apps) pero **no
 aplicado**: no tocar Azure sin indicación explícita del usuario. Despliegue completo con
-GitHub Actions (deploy.yml, OIDC) o `make desplegar`, con login de GitHub vía Easy Auth (ver
+GitHub Actions (deploy.yml, OIDC) o `make deploy`, con login de GitHub vía Easy Auth (ver
 docs/despliegue.md); el deploy de CI está desactivado hasta `DEPLOY_AZURE=true`. Proveedor de modelos configurable
-(docs/modelos.md). Siguiente: primer `make desplegar` y pruebas en la nube.
+(docs/modelos.md). Siguiente: primer `make deploy` y pruebas en la nube.
 
 ## Cómo trabajar en este repo
 - Antes de codear una feature, confirma en qué fase estamos.

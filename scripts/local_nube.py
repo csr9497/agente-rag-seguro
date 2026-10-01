@@ -1,4 +1,4 @@
-"""Web + API en un solo proceso de tu equipo, contra los recursos de la nube (make local-nube).
+"""Web + API en un solo proceso de tu equipo, contra los recursos de la nube (make cloud-local).
 
 La API va en /api (como detrás de nginx) y la interfaz en /. Fuera de Docker para que
 DefaultAzureCredential use tu `az login` (Blob y Content Safety no admiten claves).

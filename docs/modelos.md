@@ -10,9 +10,9 @@ auditoría no cambian.
 | `azure` (por defecto) | Azure OpenAI; es lo que usa el despliegue en Azure (Terraform) | Clave (solo local) o Entra ID: `az login` en local, Managed Identity en Azure |
 | `openai` | OpenAI o cualquier endpoint compatible con su API (OpenRouter, Groq, vLLM, Ollama…) | `OPENAI_API_KEY` (y `OPENAI_BASE_URL` si no es OpenAI) |
 
-Antes de levantar nada: **`make verificar-modelos`** comprueba los requisitos del proveedor
+Antes de levantar nada: **`make check-models`** comprueba los requisitos del proveedor
 elegido y hace cuatro llamadas mínimas (ver [Capacidades](#capacidades-que-pide-el-código)).
-`SIN_LLAMADAS=1` solo revisa requisitos, sin coste. `make levantar` lo ejecuta y se detiene
+`make check-models NO_CALLS=1` solo revisa requisitos, sin coste. `make up` lo ejecuta y se detiene
 si algo falla.
 
 ## Opción A · Azure OpenAI
@@ -39,9 +39,9 @@ si algo falla.
 ### Uso
 
 ```bash
-make instalar          # comprueba uv, Docker, az, terraform, az login y la suscripción
-make levantar          # crea gpt-4o + ada-002, rellena .env, verifica y arranca todo
-make apagar            # borra los modelos (sin costes)
+make install          # comprueba uv, Docker, az, terraform, az login y la suscripción
+make up          # crea gpt-4o + ada-002, rellena .env, verifica y arranca todo
+make down            # borra los modelos (sin costes)
 ```
 
 Variables (las rellena `make env-from-azure`):
@@ -72,7 +72,7 @@ EMBEDDING_DIMENSIONS=1536
 ```
 
 ```bash
-make instalar && make verificar-modelos && make levantar
+make install && make check-models && make up
 ```
 
 - **Ollama / vLLM local** (sin clave): `OPENAI_BASE_URL=http://host.docker.internal:11434/v1`
@@ -113,5 +113,5 @@ auditoría (hallazgo `servicio_no_disponible`, `modelo:<tipo>`).
 | `servicio_no_disponible` | 502 | 5xx del proveedor | Página de estado del proveedor |
 
 Respuesta de la API: `{"detail": "<mensaje para el usuario>", "codigo": "<codigo>"}`.
-`make verificar-modelos` usa la misma clasificación y omite el resto de pruebas tras un
+`make check-models` usa la misma clasificación y omite el resto de pruebas tras un
 fallo de credenciales, permisos, saldo o conexión.

@@ -1,10 +1,73 @@
 CONDA_ENV ?= agente-rag
 BASE_URL  ?= http://localhost:8000
 
-.PHONY: help setup sync lint fmt test test-postgres integration matriz evals evals-simulado evals-langsmith up down ingest studio prompts-langsmith env-from-azure tf-validate validar-infra verificar-modelos local-nube local-nube-parar desplegar estado-nube destruir-nube ciclo modelos-up modelos-down instalar levantar apagar accesos
+.PHONY: help install check-models up down status docker-up docker-down ingest studio prompts \
+	deploy cloud-status cloud-destroy cloud-local cloud-local-stop env-from-azure check-infra cycle \
+	setup sync lint fmt test test-postgres evals-mock evals evals-langsmith integration matrix tf-validate
 
-help: ## Lista los comandos (detalle y valores: docs/comandos.md)
-	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
+help: ## Lista los comandos (guía completa con valores: docs/comandos.md)
+	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-17s %s\n", $$1, $$2}'
+
+# --- Local ---------------------------------------------------------------------------------
+
+install: ## Primer uso tras clonar: requisitos, dependencias, .env y Terraform
+	./scripts/entorno_local.sh instalar
+
+check-models: ## Credenciales, saldo, modelos y capacidades del proveedor (NO_CALLS=1: sin llamadas)
+	uv run python -m app.modelos.diagnostico $(if $(NO_CALLS),--sin-llamadas,)
+
+up: ## Entorno local completo: modelos + Docker + documentos + Studio, y muestra las URLs
+	./scripts/entorno_local.sh levantar
+
+down: ## Para el entorno local (sin nube desplegada, borra también los modelos de Azure)
+	./scripts/entorno_local.sh apagar
+
+status: ## Estado y URLs del entorno local (app, API, Studio, LangSmith)
+	./scripts/entorno_local.sh accesos
+
+docker-up: ## Solo los contenedores (app, web, Qdrant, Redis), sin preparar modelos
+	docker compose up --build -d
+
+docker-down: ## Para los contenedores
+	docker compose down
+
+ingest: ## Indexa ingestor/sample_docs en el Qdrant local
+	docker compose run --rm ingest
+
+studio: ## Solo LangGraph Studio (:2024) con .env; publica antes los prompts
+	@bash -c 'source scripts/comun.sh && publicar_prompts'
+	uv run langgraph dev --allow-blocking
+
+prompts: ## Publica app/prompts/ en LangSmith (TAG=dev por defecto; TAG=prod para promover)
+	uv run python -m app.prompts.publicar --etiqueta $(or $(TAG),dev)
+
+# --- Azure ---------------------------------------------------------------------------------
+
+deploy: ## Despliega en Azure y deja todo listo: web, prompts, app y Studio locales contra la nube
+	$(if $(LOGIN_PROVIDER),LOGIN_PROVIDER=$(LOGIN_PROVIDER)) $(if $(ALLOWED_IPS),ALLOWED_IPS='$(ALLOWED_IPS)') ./scripts/nube.sh desplegar
+
+cloud-status: ## URL y salud del despliegue en Azure, y enlace de LangSmith
+	./scripts/nube.sh estado
+
+cloud-destroy: ## Elimina todo lo desplegado en Azure (pide confirmación; CONFIRM=yes la omite)
+	./scripts/nube.sh destruir
+
+cloud-local: ## (Re)arranca en segundo plano app (:8090) y Studio (:2025) contra Azure (lo hace deploy)
+	./scripts/local_nube.sh
+
+cloud-local-stop: ## Detiene la app y Studio de cloud-local
+	./scripts/local_nube.sh parar
+
+env-from-azure: ## Rellena .env con endpoints y claves de lo desplegado en Azure (Key Vault)
+	./scripts/env_from_azure.sh
+
+check-infra: ## Comprueba cada servicio desplegado (informe en reports/infra/)
+	uv run python scripts/validar_infra.py
+
+cycle: ## Ciclo de pruebas contra Azure: STEP=on|test|save|off|report|all (defecto all)
+	./scripts/ciclo_pruebas.sh $(or $(STEP),all)
+
+# --- Calidad y entorno ---------------------------------------------------------------------
 
 setup: ## Crea el entorno conda (Python 3.12) y la .venv de uv sobre ese intérprete
 	conda env create -f environment.yml --yes
@@ -29,7 +92,7 @@ test-postgres: ## Paridad con PostgreSQL (levanta el perfil postgres de docker-c
 	TEST_DATABASE_URL=postgresql+psycopg://agente_app:$$(grep '^POSTGRES_PASSWORD=' .env | cut -d= -f2-)@localhost:55432/agente \
 		uv run pytest tests/test_postgres.py -v
 
-evals-simulado: ## Gate de CI en local: app con modelos simulados + evaluaciones por capas
+evals-mock: ## Gate de CI en local: app con modelos simulados + evaluaciones por capas
 	uv run uvicorn tests.integration.servidor_simulado:app --port 8767 & echo $$! > .servidor.pid; \
 	for i in $$(seq 1 30); do curl -sf localhost:8767/api/health >/dev/null && break; sleep 1; done; \
 	uv run python -m evals.ejecutar --base-url http://localhost:8767/api; r=$$?; kill $$(cat .servidor.pid); rm -f .servidor.pid; exit $$r
@@ -37,72 +100,14 @@ evals-simulado: ## Gate de CI en local: app con modelos simulados + evaluaciones
 integration: ## Matriz de escenarios contra BASE_URL (informe en reports/integracion.md)
 	INTEGRATION_BASE_URL=$(BASE_URL) uv run pytest -m integration
 
-evals: ## Evaluaciones por capas contra BASE_URL (umbrales bloqueantes; JUEZ=1 añade el juez LLM)
-	uv run python -m evals.ejecutar --base-url $(BASE_URL) $(if $(JUEZ),--juez,)
+evals: ## Evaluaciones por capas contra BASE_URL (umbrales bloqueantes; JUDGE=1 añade el juez LLM)
+	uv run python -m evals.ejecutar --base-url $(BASE_URL) $(if $(JUDGE),--juez,)
 
-evals-langsmith: ## Igual que evals + dataset y experimento en LangSmith
-	uv run python -m evals.ejecutar --base-url $(BASE_URL) --langsmith $(if $(JUEZ),--juez,)
+evals-langsmith: ## Igual que evals + dataset y experimento en LangSmith (JUDGE=1 opcional)
+	uv run python -m evals.ejecutar --base-url $(BASE_URL) --langsmith $(if $(JUDGE),--juez,)
 
-matriz: ## Informe de cobertura de la matriz sin ejecutar nada
+matrix: ## Informe de cobertura de la matriz sin ejecutar nada
 	uv run python -m tests.integration.evaluador
-
-up: ## Levanta app + web + qdrant + redis
-	docker compose up --build -d
-
-down:
-	docker compose down
-
-ingest: ## Indexa ingestor/sample_docs en el Qdrant local
-	docker compose run --rm ingest
-
-studio: ## LangGraph Studio (http://127.0.0.1:2024) con la configuración de .env; publica los prompts
-	@bash -c 'source scripts/comun.sh && publicar_prompts'
-	uv run langgraph dev --allow-blocking
-
-prompts-langsmith: ## Publica los prompts de app/prompts/ en LangSmith (ETIQUETA=dev por defecto)
-	uv run python -m app.prompts.publicar --etiqueta $(or $(ETIQUETA),dev)
-
-verificar-modelos: ## Requisitos y capacidades del proveedor de modelos (MODELOS_PROVEEDOR)
-	uv run python -m app.modelos.diagnostico $(if $(SIN_LLAMADAS),--sin-llamadas,)
-
-env-from-azure: ## Rellena .env con endpoints y claves de lo desplegado en Azure (desde Key Vault)
-	./scripts/env_from_azure.sh
-
-instalar: ## Primer uso tras clonar: requisitos, dependencias, .env y Terraform
-	./scripts/entorno_local.sh instalar
-
-levantar: ## Todo el entorno: modelos (Azure u OpenAI) + Docker + documentos + Studio, y muestra los accesos
-	./scripts/entorno_local.sh levantar
-
-apagar: ## Para Studio y Docker; con Azure, elimina los modelos y limpia .env (sin costes)
-	./scripts/entorno_local.sh apagar
-
-accesos: ## Estado de cada servicio y sus URLs (app, API, Studio, LangSmith)
-	./scripts/entorno_local.sh accesos
-
-modelos-up: levantar ## Alias de levantar
-modelos-down: apagar ## Alias de apagar
-
-local-nube: ## (Re)arranca en segundo plano la app (:8090) y Studio (:2025) contra Azure; lo hace make desplegar
-	./scripts/local_nube.sh
-
-local-nube-parar: ## Detiene la app y Studio de local-nube
-	./scripts/local_nube.sh parar
-
-desplegar: ## Despliega en Azure y deja todo listo: web, prompts en LangSmith, app y Studio locales contra la nube
-	./scripts/nube.sh desplegar
-
-estado-nube: ## URL y salud del despliegue en Azure
-	./scripts/nube.sh estado
-
-destruir-nube: ## Elimina todo lo desplegado en Azure (pide confirmación)
-	./scripts/nube.sh destruir
-
-validar-infra: ## Comprueba cada servicio desplegado (informe en reports/infra/)
-	uv run python scripts/validar_infra.py
-
-ciclo: ## Ciclo contra Azure: PASO=prender|probar|guardar|apagar|informe|todo
-	./scripts/ciclo_pruebas.sh $(or $(PASO),todo)
 
 tf-validate: ## fmt + validate de los stacks de Terraform
 	terraform fmt -check -recursive infra

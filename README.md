@@ -28,32 +28,33 @@ modelos con `MODELOS_PROVEEDOR` en `.env`:
 
 ```bash
 git clone https://github.com/csr9497/agente-rag-seguro.git && cd agente-rag-seguro
-make instalar           # comprueba requisitos, instala dependencias y crea .env
+make install         # comprueba requisitos, instala dependencias y crea .env
 # edita .env: MODELOS_PROVEEDOR y la clave (opción openai)
-make verificar-modelos  # credenciales, saldo, modelos y capacidades
-make levantar           # app + documentos de ejemplo → http://localhost:8080
+make check-models    # credenciales, saldo, modelos y capacidades
+make up              # app + documentos de ejemplo + Studio → http://localhost:8080
 ```
 
 Elige un rol en la web (Empleado general, Recursos Humanos, Finanzas, Administrador) y
-pregunta. `make apagar` lo detiene todo (con Azure, también borra los modelos).
-Sin modelos, `make up` arranca la interfaz y los permisos (las respuestas dan 503).
+pregunta. `make down` lo detiene todo (con Azure y sin nube desplegada, también borra los
+modelos; con la nube desplegada, `make up` usa sus modelos y no crea nada).
+Sin modelos, `make docker-up` arranca la interfaz y los permisos (las respuestas dan 503).
 
-**App local contra la nube**: `make desplegar` deja además arrancados en tu equipo, en segundo
+**App local contra la nube**: `make deploy` deja además arrancados en tu equipo, en segundo
 plano, la app (http://localhost:8090) y LangGraph Studio usando los modelos, AI Search, Blob y Content
 Safety de Azure, con base de datos local (tu `.env` no cambia).
 
 **LangSmith**: con `LANGSMITH_API_KEY` en `.env`, trazas de cada consulta y los prompts de
-`app/prompts/` publicados como *Prompts* (`make prompts-langsmith`); en Studio eliges qué
+`app/prompts/` publicados como *Prompts* (`make prompts`); en Studio eliges qué
 versión usar en cada ejecución.
 
 **En un servidor remoto** los mismos comandos funcionan igual. Sin login, la app solo escucha
 en `127.0.0.1` del servidor (no se expone a la red): ábrela desde tu equipo con un túnel SSH
-(`make accesos` imprime el comando) y usa las mismas URLs de `localhost`. Para publicarla con
+(`make status` imprime el comando) y usa las mismas URLs de `localhost`. Para publicarla con
 login, despliégala en Azure.
 
 ## Desplegar en Azure
 
-Desde tu equipo, con `az login`, Terraform y Docker: `make desplegar`. Sin más configuración
+Desde tu equipo, con `az login`, Terraform y Docker: `make deploy`. Sin más configuración
 queda en **modo prueba** (solo accesible desde tu IP, sin login); con una OAuth App de GitHub
 en `.env`, pública con login. También con GitHub Actions (credenciales como secrets del
 repositorio y `DEPLOY_AZURE=true`).
@@ -66,19 +67,20 @@ problemas frecuentes: [docs/despliegue.md](docs/despliegue.md).
 
 | Comando | Qué hace |
 |---|---|
-| `make levantar` · `make apagar` | Entorno local completo · pararlo |
-| `make desplegar` · `make destruir-nube` | Publicar en Azure · borrarlo |
-| `make local-nube` | Tu equipo contra los recursos de Azure |
-| `make test` · `make evals-simulado` | Tests · gate de evaluaciones con modelos simulados |
+| `make install` · `make check-models` | Primer uso · comprobar los modelos |
+| `make up` · `make down` · `make status` | Entorno local completo · pararlo · URLs |
+| `make deploy` · `make cloud-status` · `make cloud-destroy` | Publicar en Azure (deja también app y Studio locales contra la nube) · estado · borrarlo |
+| `make prompts` | Prompts de `app/prompts/` a LangSmith |
+| `make test` · `make evals-mock` | Tests · gate de evaluaciones con modelos simulados |
 | `make evals BASE_URL=…` | Evaluaciones con modelos reales contra una app en marcha |
 
-Todos los comandos y los valores que necesita cada uno: [docs/comandos.md](docs/comandos.md).
+Guía de todos los comandos y los valores que necesita cada uno: [docs/comandos.md](docs/comandos.md).
 
 ## Documentación
 
 | | |
 |---|---|
-| [docs/comandos.md](docs/comandos.md) | Todos los `make` y los valores a configurar en cada caso |
+| [docs/comandos.md](docs/comandos.md) | Guía de los `make` y los valores a configurar en cada caso |
 | [docs/modelos.md](docs/modelos.md) | Proveedores de modelos, setup de cada uno y errores (saldo, credenciales, capacidades) |
 | [docs/despliegue.md](docs/despliegue.md) | Despliegue en Azure paso a paso |
 | [docs/arquitectura.md](docs/arquitectura.md) | Grafo del agente, seguridad, API, pruebas, observabilidad e infraestructura |

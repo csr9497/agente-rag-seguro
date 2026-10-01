@@ -125,6 +125,13 @@ informe() {
   uv run python scripts/informe_ciclo.py "$RUN"
 }
 
+# Pasos en inglés (make cycle STEP=…) o en español.
+paso_cli="${1:-}"
+case "$paso_cli" in
+  on) paso_cli=prender ;; test) paso_cli=probar ;; save) paso_cli=guardar ;;
+  off) paso_cli=apagar ;; report) paso_cli=informe ;; all) paso_cli=todo ;;
+esac
+set -- "$paso_cli"
 case "${1:-}" in
   prender | probar | guardar | apagar | informe) "$1" ;;
   todo)

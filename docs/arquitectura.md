@@ -121,8 +121,8 @@ Además:
 |---|---|---|
 | Unitarios | `make test` | Permisos, guardrails, Prompt Shields, tools, caché, Entra ID / Easy Auth, proveedor de modelos, API, persistencia |
 | PostgreSQL | `make test-postgres` | Repositorios y flujo completo contra PostgreSQL 16 |
-| Matriz de integración | `make integration BASE_URL=…` | Escenarios por HTTP (incl. caché entre roles) ([escenarios.yaml](../tests/integration/escenarios.yaml)); canarios entre roles; cobertura por capacidad con `make matriz` |
-| Evaluaciones por capas | `make evals BASE_URL=…` (`JUEZ=1` con el modelo de chat) | Contrato, seguridad, recuperación (recall, MRR), juez LLM; umbrales bloqueantes ([evals/](../evals/)) |
+| Matriz de integración | `make integration BASE_URL=…` | Escenarios por HTTP (incl. caché entre roles) ([escenarios.yaml](../tests/integration/escenarios.yaml)); canarios entre roles; cobertura por capacidad con `make matrix` |
+| Evaluaciones por capas | `make evals BASE_URL=…` (`JUDGE=1` con el modelo de chat) | Contrato, seguridad, recuperación (recall, MRR), juez LLM; umbrales bloqueantes ([evals/](../evals/)) |
 | LangSmith | `make evals-langsmith BASE_URL=…` | Dataset `matriz-escenarios` + experimento |
 | Terraform | `make tf-validate` | fmt, validate y tests de flags con providers simulados |
 
@@ -147,15 +147,15 @@ y metadata de rol, conversación y versión ([app/observabilidad.py](../app/obse
 PostgreSQL (servicio del runner), **gate de evaluaciones** (app con modelos simulados:
 falla si hay fugas entre roles o contrato roto), Terraform (fmt, validate, tests) y build de
 imágenes. [deploy.yml](../.github/workflows/deploy.yml) (OIDC, sin secretos) actualiza el despliegue en
-cada push a `main` si `DEPLOY_AZURE=true`; el primero se hace con `make desplegar`
+cada push a `main` si `DEPLOY_AZURE=true`; el primero se hace con `make deploy`
 ([despliegue.md](despliegue.md)).
 
 ## Ciclo de pruebas en Azure
 
-`make ciclo` (o `PASO=prender|probar|guardar|apagar|informe`) ejecuta el ciclo completo y deja
+`make cycle` (o `STEP=on|test|save|off|report`) ejecuta el ciclo completo y deja
 las evidencias en `reports/ciclos/<fecha>/`:
 
-1. **Prender**: `terraform apply` (etapa A) → `.env` desde Key Vault → `make validar-infra`
+1. **Prender**: `terraform apply` (etapa A) → `.env` desde Key Vault → `make check-infra`
    (chat, embeddings, Key Vault, AI Search, Blob y Prompt Shields, con informe Pydantic).
 2. **Probar**: siembra de documentos (registro + Blob + AI Search) y app local contra Azure;
    **una pasada** de la matriz como experimento de LangSmith con los evaluadores por capas y

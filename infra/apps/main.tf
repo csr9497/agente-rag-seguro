@@ -10,7 +10,7 @@ data "terraform_remote_state" "platform" {
 }
 
 # Login con Entra ID (opcional, login_proveedor=entra): identidad de la app creada por el
-# stack identidad con tu sesión (make desplegar). Con GitHub no hace falta.
+# stack identidad con tu sesión (make deploy). Con GitHub no hace falta.
 data "terraform_remote_state" "identidad" {
   count   = local.entra ? 1 : 0
   backend = "azurerm"
@@ -81,7 +81,7 @@ locals {
     TRAZAS_MODO       = local.langsmith ? "enmascarado" : "apagado"
     CACHE_BACKEND     = contains(local.p.secretos_en_key_vault, "redis-url") ? "redis" : "memoria"
     LANGSMITH_PROJECT = "agente-rag-${local.p.name}"
-    # Prompts de LangSmith con la etiqueta prod (los publica make desplegar); sin LangSmith o
+    # Prompts de LangSmith con la etiqueta prod (los publica make deploy); sin LangSmith o
     # si no existe esa versión, los del repositorio.
     PROMPTS_ORIGEN   = local.langsmith ? "langsmith" : "local"
     PROMPTS_ETIQUETA = "prod"
@@ -120,7 +120,7 @@ resource "terraform_data" "validaciones" {
     }
     precondition {
       condition     = !local.entra || try(local.id.client_id != "", false)
-      error_message = "Login con Entra ID: aplica antes el stack identidad (make desplegar lo hace)."
+      error_message = "Login con Entra ID: aplica antes el stack identidad (make deploy lo hace)."
     }
   }
 }

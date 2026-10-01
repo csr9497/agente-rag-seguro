@@ -11,7 +11,7 @@
 #
 # Requisitos comunes: uv y Docker Desktop abierto.
 #   MODELOS_PROVEEDOR=azure (por defecto): Azure CLI con `az login`, suscripción activa,
-#     Terraform y el estado remoto (bootstrap). levantar/apagar crean y borran los modelos.
+#     Terraform y el estado remoto (bootstrap). make up / make down crean y borran los modelos.
 #   MODELOS_PROVEEDOR=openai: OPENAI_API_KEY (y OPENAI_BASE_URL si no es OpenAI) en .env.
 #     No se toca Azure.
 set -euo pipefail
@@ -62,7 +62,7 @@ instalar() {
   done
   docker info > /dev/null 2>&1 && echo "✅ Docker en marcha" || { echo "⛔ abre Docker Desktop"; falta=1; }
   if [[ $PROVEEDOR == azure ]]; then requisitos_azure || falta=1; fi
-  [[ $falta == 0 ]] || { echo; echo "Resuelve lo marcado con ⛔ y repite: make instalar"; exit 1; }
+  [[ $falta == 0 ]] || { echo; echo "Resuelve lo marcado con ⛔ y repite: make install"; exit 1; }
 
   paso "Dependencias de Python (uv, Python 3.12)"
   uv sync --frozen 2>&1 | tail -1
@@ -86,7 +86,7 @@ instalar() {
       || echo "⛔ define OPENAI_API_KEY (y OPENAI_BASE_URL si no es OpenAI) en .env"
   fi
   mkdir -p data
-  echo; echo "Instalación completa. Siguiente paso: make verificar-modelos y make levantar"
+  echo; echo "Instalación completa. Siguiente paso: make check-models y make up"
 }
 
 esperar() { # esperar URL segundos
@@ -117,7 +117,7 @@ levantar() {
     requisitos_azure > /dev/null || { requisitos_azure; exit 1; }
     [[ -d infra/platform/.terraform ]] || terraform_init
     if hay_nube; then
-      echo "Hay un despliegue en la nube (make desplegar): se usan sus modelos, no se crea nada."
+      echo "Hay un despliegue en la nube (make deploy): se usan sus modelos, no se crea nada."
       paso "2/5 .env con el endpoint y la clave de los modelos de la nube (el resto, local)"
       modelos_de_la_nube && echo "listo"
     else
@@ -134,7 +134,7 @@ levantar() {
 
   paso "Verificación de los modelos (credenciales, saldo, modelos y capacidades)"
   uv run python -m app.modelos.diagnostico \
-    || { echo; echo "Los modelos no están listos: corrige lo anterior y repite make levantar."; exit 1; }
+    || { echo; echo "Los modelos no están listos: corrige lo anterior y repite make up."; exit 1; }
 
   paso "3/5 App, web, Qdrant y Redis en Docker"
   docker compose up --build -d 2>&1 | grep -E "Started|Running|Error" || true
@@ -172,7 +172,7 @@ apagar() {
   paso "Modelos en Azure"
   [[ -d infra/platform/.terraform ]] || terraform_init
   if hay_nube; then
-    echo "Son los del despliegue en la nube: se mantienen (make destruir-nube los elimina)."
+    echo "Son los del despliegue en la nube: se mantienen (make cloud-destroy los elimina)."
     echo; echo "listo."
     return
   fi
@@ -224,7 +224,7 @@ PY
 
    Roles para probar: Empleado general · Recursos Humanos · Finanzas · Administrador
    Evaluación automática:  make evals-langsmith BASE_URL=http://localhost:8000
-   Apagar todo:            make apagar
+   Apagar todo:            make down
 EOF
 }
 

@@ -14,7 +14,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    # Proveedor de modelos (ver app/modelos/ y `make verificar-modelos`):
+    # Proveedor de modelos (ver app/modelos/ y `make check-models`):
     # - azure: Azure OpenAI (AZURE_OPENAI_*). Requiere suscripción, recurso y deployments.
     # - openai: OpenAI o un endpoint compatible (OPENAI_BASE_URL + OPENAI_API_KEY).
     modelos_proveedor: Literal["azure", "openai"] = "azure"

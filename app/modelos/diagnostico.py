@@ -69,7 +69,7 @@ def requisitos_azure(
     else:
         c.append(Comprobacion(
             nombre="Endpoint", estado="error", detalle="AZURE_OPENAI_ENDPOINT vacío",
-            pista="Despliega los modelos (make levantar) o copia el endpoint del recurso de "
+            pista="Despliega los modelos (make up) o copia el endpoint del recurso de "
             "Azure OpenAI (portal → Keys and Endpoint) a .env",
         ))  # fmt: skip
 

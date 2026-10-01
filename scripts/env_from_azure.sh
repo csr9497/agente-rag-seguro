@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Rellena .env para ejecutar la app en local contra lo desplegado en Azure (alcance=modelos o
 # solo_modelos). Sin Key Vault (solo_modelos), la clave de OpenAI se lee con az.
-# ENV_FILE=otro.env escribe en ese fichero en lugar de .env (make local-nube).
+# ENV_FILE=otro.env escribe en ese fichero en lugar de .env (make cloud-local).
 # Requiere: az login, `terraform -chdir=infra/platform init` con el backend remoto y tu object
 # id en developer_principal_ids (roles de Key Vault, OpenAI, Blob e índice).
 set -euo pipefail

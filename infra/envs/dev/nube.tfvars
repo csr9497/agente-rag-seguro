@@ -1,4 +1,4 @@
-# Despliegue completo en Azure (make desplegar): app pública con login de Entra ID.
+# Despliegue completo en Azure (make deploy): app pública con login de Entra ID.
 # Mismo estado que la etapa A (dev/platform.tfstate): amplía los recursos, no los duplica.
 project     = "ragseg"
 environment = "dev"
@@ -28,7 +28,7 @@ chat_model = {
 content_safety     = true
 content_safety_sku = "F0"
 
-# Usuario con acceso de desarrollo (modelos, blobs, índice, secretos). make desplegar lo
+# Usuario con acceso de desarrollo (modelos, blobs, índice, secretos). make deploy lo
 # sustituye por el de tu `az login`; GitHub Actions usa este valor (mantenlo igual que el tuyo
 # para que ambos caminos no se pisen).
 developer_principal_ids = ["772b9ea7-22d9-47ae-a974-5a297aea7ee0"]

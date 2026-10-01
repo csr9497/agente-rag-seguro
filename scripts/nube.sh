@@ -20,7 +20,7 @@ TFVARS="../envs/dev/nube.tfvars"
 BACKEND="../envs/dev/backend.hcl"
 LOG_DIR="data/nube"
 source scripts/comun.sh
-LOGIN_PROVEEDOR="${LOGIN_PROVEEDOR:-}" # vacío: github si hay OAuth App en .env; si no, ip
+LOGIN_PROVEEDOR="${LOGIN_PROVIDER:-${LOGIN_PROVEEDOR:-}}" # vacío: github si hay OAuth App en .env; si no, ip
 
 paso() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 falla() { printf '\n⛔ %s\n' "$1"; exit 1; }
@@ -85,7 +85,7 @@ requisitos_login() {
     local ip
     ip=$(curl -s -m 10 https://api.ipify.org || true)
     [[ $ip =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || falla "No se pudo averiguar tu IP pública (api.ipify.org)."
-    export TF_VAR_ips_permitidas="${IPS_PERMITIDAS:-[\"$ip/32\"]}"
+    export TF_VAR_ips_permitidas="${ALLOWED_IPS:-${IPS_PERMITIDAS:-[\"$ip/32\"]}}"
     echo "✅ modo prueba sin login: la web solo será accesible desde $TF_VAR_ips_permitidas"
     echo "   (para abrirla a otras personas con login de GitHub: GH_OAUTH_CLIENT_ID/SECRET en .env)"
   fi
@@ -194,8 +194,8 @@ desplegar() {
   paso "6/6 Comprobación"
   comprobar
 
-  paso "Tu equipo contra la nube: app y LangGraph Studio (make local-nube)"
-  ./scripts/local_nube.sh || echo "⚠️  no arrancó; repítelo con make local-nube"
+  paso "Tu equipo contra la nube: app y LangGraph Studio (make cloud-local)"
+  ./scripts/local_nube.sh || echo "⚠️  no arrancó; repítelo con make cloud-local"
 }
 
 comprobar() {
@@ -229,7 +229,7 @@ comprobar() {
     echo "   personas desde la app (Roles y permisos → Personas y sus roles)."
   fi
   enlace_langsmith agente-rag-ragseg-dev
-  echo "   Estado: make estado-nube · Eliminar todo: make destruir-nube"
+  echo "   Estado: make cloud-status · Eliminar todo: make cloud-destroy"
 }
 
 estado() {
@@ -241,7 +241,7 @@ estado() {
 
 destruir() {
   requisitos
-  if [[ ${CONFIRMAR:-} != si ]]; then
+  if [[ ${CONFIRM:-${CONFIRMAR:-}} != yes && ${CONFIRMAR:-} != si ]]; then
     read -r -p "Se eliminará TODO lo desplegado en Azure (app, datos, modelos). Escribe 'destruir': " r
     [[ $r == destruir ]] || falla "Cancelado."
   fi
