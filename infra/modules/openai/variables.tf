@@ -27,4 +27,16 @@ variable "embedding" {
   })
 }
 
+variable "ligero" {
+  type = object({
+    deployment_name = string
+    model_name      = string
+    model_version   = string
+    sku_name        = string
+    capacity        = number
+  })
+  description = "Modelo ligero opcional (guardián de guardrails, pruebas de coste/latencia). null = no se crea"
+  default     = null
+}
+
 variable "tags" { type = map(string) }

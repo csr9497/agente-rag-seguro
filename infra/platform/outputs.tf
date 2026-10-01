@@ -7,6 +7,7 @@ output "alcance" { value = var.alcance }
 output "openai_endpoint" { value = module.openai.endpoint }
 output "chat_deployment" { value = module.openai.chat_deployment }
 output "embedding_deployment" { value = module.openai.embedding_deployment }
+output "ligero_deployment" { value = module.openai.ligero_deployment }
 output "embedding_dimensions" { value = var.embedding_dimensions }
 
 output "vector_store" { value = var.vector_store }

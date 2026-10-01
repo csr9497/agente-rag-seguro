@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     azure_openai_api_version: str = "2024-10-21"
     azure_openai_chat_deployment: str = "gpt-4o"
     azure_openai_embedding_deployment: str = "text-embedding-ada-002"
+    # Modelo ligero opcional (p. ej. gpt-4.1-mini): guardián LLM de los guardrails.
+    azure_openai_ligero_deployment: str = ""
     # Con poca cuota (TPM) Azure responde 429 con Retry-After: el SDK espera ese tiempo y
     # reintenta con backoff exponencial hasta este número de veces.
     azure_openai_max_reintentos: int = 6
@@ -86,6 +88,13 @@ class Settings(BaseSettings):
         "auto", "v1-heuristico", "v2-prompt-shields", "v3-politicas", "v4-politicas-shields"
     ] = "auto"
     guardrail_salida: Literal["v1-fuga-prompt", "v2-fuga-sensibles"] = "v2-fuga-sensibles"
+    # Modelo del guardián LLM (v5). Vacío: el ligero si existe; si no, el de chat.
+    modelo_guardian: str = ""
+
+    # Prompts de sistema (app/prompts/): «local» = repositorio; «langsmith» = la etiqueta
+    # PROMPTS_ETIQUETA de cada prompt en LangSmith (con la copia local como respaldo).
+    prompts_origen: Literal["local", "langsmith"] = "local"
+    prompts_etiqueta: str = "prod"
 
     # Fase 1: sin autenticación. El usuario es un stub con estos grupos.
     default_user: str = "anonimo"

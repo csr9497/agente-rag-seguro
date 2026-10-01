@@ -7,3 +7,4 @@ output "primary_access_key" {
   sensitive = true
 }
 output "name" { value = azurerm_cognitive_account.this.name }
+output "ligero_deployment" { value = var.ligero == null ? "" : azurerm_cognitive_deployment.ligero[0].name }

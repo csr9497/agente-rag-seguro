@@ -209,3 +209,17 @@ run "solo_modelos_ignora_azure_search" {
     error_message = "solo_modelos usa Qdrant local aunque vector_store diga azure_search"
   }
 }
+
+run "modelo_ligero_opcional" {
+  command = plan
+  variables {
+    alcance       = "solo_modelos"
+    vector_store  = "qdrant"
+    qdrant_modo   = "local"
+    modelo_ligero = null
+  }
+  assert {
+    condition     = output.ligero_deployment == ""
+    error_message = "modelo_ligero = null no crea el despliegue ligero"
+  }
+}

@@ -50,3 +50,24 @@ resource "azurerm_cognitive_deployment" "chat" {
 
   depends_on = [azurerm_cognitive_deployment.embedding]
 }
+
+# Modelo ligero opcional (p. ej. gpt-4o-mini para el guardián LLM de los guardrails).
+resource "azurerm_cognitive_deployment" "ligero" {
+  count                  = var.ligero == null ? 0 : 1
+  name                   = var.ligero.deployment_name
+  cognitive_account_id   = azurerm_cognitive_account.this.id
+  version_upgrade_option = "OnceCurrentVersionExpired"
+
+  model {
+    format  = "OpenAI"
+    name    = var.ligero.model_name
+    version = var.ligero.model_version
+  }
+
+  sku {
+    name     = var.ligero.sku_name
+    capacity = var.ligero.capacity
+  }
+
+  depends_on = [azurerm_cognitive_deployment.chat]
+}

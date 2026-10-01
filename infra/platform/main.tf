@@ -98,6 +98,7 @@ module "openai" {
   public_network_access_enabled = local.public
   chat                          = var.chat_model
   embedding                     = var.embedding_model
+  ligero                        = var.modelo_ligero
   tags                          = local.tags
 }
 

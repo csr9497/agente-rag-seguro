@@ -24,6 +24,7 @@ else
 fi
 set_var AZURE_OPENAI_CHAT_DEPLOYMENT "$($TF chat_deployment)"
 set_var AZURE_OPENAI_EMBEDDING_DEPLOYMENT "$($TF embedding_deployment)"
+set_var AZURE_OPENAI_LIGERO_DEPLOYMENT "$($TF ligero_deployment)"
 
 VS=$($TF vector_store)
 [[ -z "$($TF search_endpoint)" && "$VS" == "azure_search" ]] && VS=qdrant # solo_modelos

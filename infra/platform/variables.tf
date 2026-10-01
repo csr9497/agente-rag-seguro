@@ -70,6 +70,27 @@ variable "embedding_model" {
   }
 }
 
+variable "modelo_ligero" {
+  type = object({
+    deployment_name = string
+    model_name      = string
+    model_version   = string
+    sku_name        = string
+    capacity        = number
+  })
+  description = "Modelo ligero (guardián LLM de los guardrails; seleccionable en Studio). null = no se crea"
+  # gpt-4o-mini ya no admite despliegues nuevos (retirado el 31-mar-2026): gpt-4.1-mini es su
+  # sucesor directo (sin razonamiento extendido, rápido para clasificar). GlobalStandard: la
+  # suscripción no tiene cuota Standard (regional) para este modelo.
+  default = {
+    deployment_name = "gpt-4.1-mini"
+    model_name      = "gpt-4.1-mini"
+    model_version   = "2025-04-14"
+    sku_name        = "GlobalStandard"
+    capacity        = 100
+  }
+}
+
 variable "embedding_dimensions" {
   type    = number
   default = 1536

@@ -104,6 +104,9 @@ class Hallazgo(BaseModel):
         "autolesion",
         "acoso",
         "dato_sensible",
+        "manipulacion",
+        "ilicito",
+        "fuera_de_ambito",
     ]
     detalle: str
     accion: Literal["bloquear", "enmascarar", "eliminar", "registrar"]

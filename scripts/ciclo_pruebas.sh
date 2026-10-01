@@ -113,7 +113,7 @@ apagar() {
     > "$RUN/terraform-destroy.log" 2>&1
   grep -E "Destroy complete|Error" "$RUN/terraform-destroy.log" | tee -a "$RUN/pasos.log"
   paso "apagar: .env sin los valores de los recursos eliminados (endpoints y claves)"
-  sed -i.bak -E '/^(AZURE_OPENAI_(ENDPOINT|API_KEY|CHAT_DEPLOYMENT|EMBEDDING_DEPLOYMENT)|VECTOR_STORE|AZURE_SEARCH_(ENDPOINT|API_KEY)|CONTENT_SAFETY_ENDPOINT|AZURE_STORAGE_(ACCOUNT_URL|CONTAINER)|QDRANT_(URL|API_KEY))=/d' .env
+  sed -i.bak -E '/^(AZURE_OPENAI_(ENDPOINT|API_KEY|CHAT_DEPLOYMENT|EMBEDDING_DEPLOYMENT|LIGERO_DEPLOYMENT)|VECTOR_STORE|AZURE_SEARCH_(ENDPOINT|API_KEY)|CONTENT_SAFETY_ENDPOINT|AZURE_STORAGE_(ACCOUNT_URL|CONTAINER)|QDRANT_(URL|API_KEY))=/d' .env
   rm -f .env.bak
 }
 
