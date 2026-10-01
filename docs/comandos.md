@@ -125,7 +125,9 @@ Logs de cada paso: `data/nube/`.
 ### `make cloud-status` · `make cloud-destroy`
 `cloud-status`: URL de la web, salud de las apps y enlace de LangSmith. `cloud-destroy`: borra
 todo lo desplegado y para lo que corre en tu equipo contra la nube (pide escribir «destruir»;
-`CONFIRM=yes` lo omite).
+`CONFIRM=yes` lo omite). Reintenta los borrados que Terraform no sabe seguir y, si aun así
+queda algo, elimina el grupo de recursos completo y comprueba en Azure que ya no existe. Solo
+se conserva el estado de Terraform (`rg-ragseg-tfstate`).
 
 ### `make cloud-local` · `make cloud-local-stop`
 **Lo ejecuta `make deploy` al terminar**; a mano solo para rearrancarlo. Deja en segundo plano

@@ -239,33 +239,75 @@ estado() {
   comprobar
 }
 
+# destruir_stack <stack> <args...>: terraform destroy con reintentos. El provider azurerm a
+# veces no sabe seguir el borrado de Container Apps («polling support for the Content-Type ""
+# was not implemented») aunque Azure sí lo completa: el reintento lo comprueba y sigue.
+destruir_stack() {
+  local stack=$1 intento
+  shift
+  mkdir -p "$LOG_DIR"
+  for intento in 1 2 3; do
+    if tf "$stack" destroy -input=false -auto-approve "$@" > "$LOG_DIR/destroy-$stack.log" 2>&1; then
+      echo "✅ $stack eliminado"
+      return 0
+    fi
+    echo "   intento $intento falló (log: $LOG_DIR/destroy-$stack.log); reintentando en 30 s…"
+    sleep 30
+  done
+  grep -E "Error" "$LOG_DIR/destroy-$stack.log" | sort -u | head -5
+  echo "⚠️  $stack: terraform no pudo completar el borrado"
+  return 1
+}
+
 destruir() {
   requisitos
   if [[ ${CONFIRM:-${CONFIRMAR:-}} != yes && ${CONFIRMAR:-} != si ]]; then
     read -r -p "Se eliminará TODO lo desplegado en Azure (app, datos, modelos). Escribe 'destruir': " r
     [[ $r == destruir ]] || falla "Cancelado."
   fi
-  local plataforma identidad
+  local plataforma identidad grupo stack ok=true
   plataforma=$(estado_de platform)
   identidad=$(estado_de identidad)
+  init platform
+  grupo=$(tf platform output -raw resource_group_name 2> /dev/null || true)
   ./scripts/local_nube.sh parar > /dev/null 2>&1 || true
-  paso "1/3 Aplicaciones"
+  paso "1/4 Aplicaciones"
   # Al destruir no se usan: valores de relleno para las validaciones del stack.
   export TF_VAR_github_oauth_client_id=x TF_VAR_github_oauth_client_secret=x TF_VAR_administradores='["x"]' TF_VAR_ips_permitidas='["0.0.0.0/32"]'
   LOGIN_PROVEEDOR=${LOGIN_PROVEEDOR:-github}
   init apps
-  tf apps destroy -input=false -auto-approve -var-file=../envs/dev/apps.tfvars \
+  destruir_stack apps -var-file=../envs/dev/apps.tfvars \
     -var "backend_image=x" -var "web_image=x" \
     -var "platform_state=$plataforma" -var "login_proveedor=$LOGIN_PROVEEDOR" \
-    $([[ $LOGIN_PROVEEDOR == entra ]] && echo "-var identidad_state=$identidad") | grep -E "Destroy complete|Error" || true
-  paso "2/3 Identidad en Entra ID"
-  [[ $LOGIN_PROVEEDOR == entra ]] && init identidad && tf identidad destroy -input=false -auto-approve -var-file=../envs/dev/identidad.tfvars -var "platform_state=$plataforma" | grep -E "Destroy complete|Error" || true
-  paso "3/3 Infraestructura"
-  init platform
-  tf platform destroy -input=false -auto-approve -var-file="$TFVARS" \
+    $([[ $LOGIN_PROVEEDOR == entra ]] && echo "-var identidad_state=$identidad") || ok=false
+  paso "2/4 Identidad en Entra ID"
+  if [[ $LOGIN_PROVEEDOR == entra ]]; then
+    init identidad
+    destruir_stack identidad -var-file=../envs/dev/identidad.tfvars -var "platform_state=$plataforma" || ok=false
+  else
+    echo "no aplica (login $LOGIN_PROVEEDOR)"
+  fi
+  paso "3/4 Infraestructura"
+  destruir_stack platform -var-file="$TFVARS" \
     -var "postgres_location=$(region_postgres || true)" \
-    -var "developer_principal_ids=[\"$(az ad signed-in-user show --query id -o tsv)\"]" | grep -E "Destroy complete|Error" || true
-  echo; echo "listo. Sin recursos en Azure."
+    -var "developer_principal_ids=[\"$(az ad signed-in-user show --query id -o tsv)\"]" || ok=false
+
+  paso "4/4 Comprobación en Azure"
+  if [[ -n $grupo && $(az group exists -n "$grupo") == true ]]; then
+    $ok || echo "Terraform no lo borró todo: se elimina el grupo $grupo completo (unos minutos)…"
+    az group delete -n "$grupo" --yes
+    # El estado de Terraform apuntaba a recursos que ya no existen: se vacía para que el
+    # próximo make deploy empiece de cero.
+    for stack in apps identidad platform; do
+      init "$stack" 2> /dev/null || continue
+      tf "$stack" state list 2> /dev/null | xargs -r -n 20 terraform -chdir="infra/$stack" state rm > /dev/null 2>&1 || true
+    done
+  fi
+  if [[ -n $grupo && $(az group exists -n "$grupo") == true ]]; then
+    falla "El grupo $grupo sigue existiendo: revisa az resource list -g $grupo -o table"
+  fi
+  echo "✅ Sin recursos del despliegue en Azure${grupo:+ (el grupo $grupo ya no existe)}."
+  echo "   Queda el estado de Terraform (rg-ragseg-tfstate, céntimos al mes) para el próximo make deploy."
 }
 
 # `source scripts/nube.sh --solo-funciones` (CI): carga las funciones sin ejecutar nada.
