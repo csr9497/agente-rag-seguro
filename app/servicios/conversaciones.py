@@ -43,8 +43,9 @@ class ServicioConversaciones:
 
     def obtener(self, usuario: Usuario, conversacion_id: str) -> Conversacion:
         conv = self._repo.obtener(conversacion_id)
-        # Ajena (otra persona, aunque tenga el mismo rol): igual que inexistente.
-        if conv is None or (conv.usuario_id is not None and conv.usuario_id != usuario.id):
+        # Ajena (otra persona, aunque tenga el mismo rol) o sin propietario (anterior a la
+        # migración de usuario_id): igual que inexistente.
+        if conv is None or conv.usuario_id != usuario.id:
             raise NoEncontradoError("Conversación no encontrada")
         try:
             self._roles.actuar_como(usuario, conv.rol_id)

@@ -92,6 +92,16 @@ def test_tool_devuelve_propuesta_y_nota(servicio) -> None:
     assert denegada.acciones == [] and "No se pudo preparar" in denegada.nota
 
 
+def test_tool_con_varios_roles_no_elige_uno(servicio) -> None:
+    """Fuera de una conversación (p. ej. /consultar) el usuario puede traer varios roles."""
+    r = ProponerAccion(servicio).ejecutar(
+        ProponerAccionArgs(accion="abrir_ticket", **TICKET),
+        Usuario(id="ana", groups=["public", "rrhh"]), 4,
+    )  # fmt: skip
+    assert r.acciones == [] and "No se pudo preparar" in r.nota
+    assert servicio.listar("public", "ana") == servicio.listar("rrhh", "ana") == []
+
+
 # ------------------------------------------------------------------ agente y API
 def _cliente(retriever, tmp_path, supervisor):
     base = {

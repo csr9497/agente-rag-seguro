@@ -1,16 +1,30 @@
 import logging
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 
+from app.api.dependencias import get_servicios
 from app.config import Settings, get_settings
 from app.deps import build_agente
 from app.main import app, get_agente
+from app.persistencia.repositorios import SqlRepositorioRoles, crear_motor, inicializar
+from app.servicios.roles import ServicioRoles
 
 
 @pytest.fixture
-def client(agente):
+def repo_roles() -> SqlRepositorioRoles:
+    motor = crear_motor("sqlite://")
+    inicializar(motor)  # roles iniciales: administrador, rrhh, finanzas, public
+    return SqlRepositorioRoles(motor)
+
+
+@pytest.fixture
+def client(agente, repo_roles):
     app.dependency_overrides[get_agente] = lambda: agente
+    # /consultar solo usa los roles activos del registro (sin el resto de servicios).
+    servicios = SimpleNamespace(roles=ServicioRoles(repo_roles, seleccion_libre=False))
+    app.dependency_overrides[get_servicios] = lambda: servicios
     yield TestClient(app)  # sin `with`: no se ejecuta el lifespan (no toca Azure)
     app.dependency_overrides.clear()
 
@@ -57,6 +71,26 @@ def test_cabecera_de_grupos_con_identidad_debug(client) -> None:
         "/consultar", json={"pregunta": "bandas salariales"}, headers={"X-Usuario-Grupos": "rrhh"}
     )
     assert r.json()["citas"][0]["fuente"] == "rrhh/bandas-salariales.md"
+
+
+def test_rol_desactivado_deja_de_dar_acceso(client, repo_roles) -> None:
+    rrhh = repo_roles.obtener("rrhh")
+    repo_roles.guardar(rrhh.model_copy(update={"activo": False}))
+    app.dependency_overrides[get_settings] = lambda: Settings(identidad_debug=True)
+    r = client.post(
+        "/consultar", json={"pregunta": "bandas salariales"}, headers={"X-Usuario-Grupos": "rrhh"}
+    )
+    assert r.json()["citas"] == [] and r.json()["sin_contexto"] is True
+
+
+def test_roles_inexistentes_del_token_se_ignoran(client) -> None:
+    app.dependency_overrides[get_settings] = lambda: Settings(identidad_debug=True)
+    r = client.post(
+        "/consultar",
+        json={"pregunta": "bandas salariales"},
+        headers={"X-Usuario-Grupos": "public,inventado"},
+    )
+    assert all(c["fuente"].startswith("public/") for c in r.json()["citas"])
 
 
 def test_sin_azure_openai_responde_503_indicando_que_falta(client, tmp_path) -> None:

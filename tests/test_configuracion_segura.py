@@ -3,7 +3,10 @@
 import re
 from pathlib import Path
 
+import pytest
 import yaml
+
+from app.config import ConfiguracionInseguraError, Settings, validar_seguridad
 
 RAIZ = Path(__file__).parents[1]
 FLAGS_SOLO_LOCAL = (
@@ -94,3 +97,31 @@ def test_umbral_de_cache_estricto_para_ada() -> None:
     from app.config import Settings
 
     assert Settings().cache_umbral >= 0.97
+
+
+ENTRA = {"auth_modo": "entra", "entra_tenant_id": "t", "entra_audiencia": "api://x"}
+
+
+@pytest.mark.parametrize(
+    "kw",
+    [
+        {},  # stub por defecto: la web es pública y todos serían «anonimo»
+        {"auth_modo": "entra"},  # sin tenant ni audiencia
+        {**ENTRA, "identidad_debug": True},
+        {**ENTRA, "seleccion_libre_de_rol": True},
+    ],
+)
+def test_prod_falla_cerrada(kw) -> None:
+    with pytest.raises(ConfiguracionInseguraError):
+        validar_seguridad(Settings(entorno="prod", **kw))
+
+
+def test_prod_con_entra_y_local_sin_restricciones() -> None:
+    validar_seguridad(Settings(entorno="prod", **ENTRA))
+    validar_seguridad(Settings(entorno="local", identidad_debug=True, seleccion_libre_de_rol=True))
+
+
+def test_terraform_exige_entra_id() -> None:
+    contenido = (RAIZ / "infra" / "apps" / "main.tf").read_text(encoding="utf-8")
+    assert re.search(r'AUTH_MODO\s*=\s*"entra"', contenido)
+    assert 'var.entra_audiencia != ""' in contenido  # precondición

@@ -110,6 +110,28 @@ class Settings(BaseSettings):
     seleccion_libre_de_rol: bool = False
 
 
+class ConfiguracionInseguraError(RuntimeError):
+    pass
+
+
+def validar_seguridad(settings: Settings) -> None:
+    """Falla cerrada: en ENTORNO=prod la API no arranca sin Entra ID ni con modos de
+    depuración (identidad por cabecera, selección libre de rol)."""
+    if settings.entorno != "prod":
+        return
+    problemas = []
+    if settings.auth_modo != "entra":
+        problemas.append("AUTH_MODO debe ser 'entra'")
+    elif not (settings.entra_tenant_id and settings.entra_audiencia):
+        problemas.append("faltan ENTRA_TENANT_ID / ENTRA_AUDIENCIA")
+    if settings.identidad_debug:
+        problemas.append("IDENTIDAD_DEBUG no está permitido")
+    if settings.seleccion_libre_de_rol:
+        problemas.append("SELECCION_LIBRE_DE_ROL no está permitido")
+    if problemas:
+        raise ConfiguracionInseguraError(f"Configuración insegura en prod: {'; '.join(problemas)}")
+
+
 @lru_cache
 def get_settings() -> Settings:
     return Settings()

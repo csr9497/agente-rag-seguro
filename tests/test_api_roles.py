@@ -417,6 +417,14 @@ def test_historial_con_rol_no_disponible(client) -> None:
     assert client.get("/conversaciones", params={"rol_id": "fantasma"}).status_code == 403
 
 
+def test_conversacion_sin_propietario_no_es_visible(client, servicios) -> None:
+    """Conversaciones anteriores a la migración (usuario_id NULL): nadie las ve."""
+    antigua = servicios.conversaciones._repo.crear("public")  # sin usuario_id
+    assert client.get(f"/conversaciones/{antigua.id}").status_code == 404
+    r = client.post(f"/conversaciones/{antigua.id}/mensajes", json={"pregunta": "hola"})
+    assert r.status_code == 404
+
+
 def test_migracion_anade_propietario_a_bases_existentes(tmp_path) -> None:
     from sqlalchemy import create_engine, inspect, text
 

@@ -6,6 +6,7 @@ authorize e input_guardrail pueden cortar el flujo directamente hacia audit: tod
 se audita, también las rechazadas.
 """
 
+import html
 import json
 import uuid
 from collections.abc import Callable
@@ -552,4 +553,10 @@ def _requerir_respuesta(estado: EstadoAgente) -> RespuestaConsulta:
 
 
 def _resumen(recuperados: list[ChunkRecuperado], max_chars: int = 400) -> str:
-    return "\n\n".join(f"- ({r.chunk.fuente}) {r.chunk.contenido[:max_chars]}" for r in recuperados)
+    """Fragmentos para el supervisor, delimitados y sin poder abrir o cerrar nuestras etiquetas:
+    son datos, nunca instrucciones (el supervisor puede llamar a proponer_accion)."""
+    return "\n\n".join(
+        f'<fragmento fuente="{html.escape(r.chunk.fuente, quote=True)}">\n'
+        f"{neutralizar(r.chunk.contenido[:max_chars])}\n</fragmento>"
+        for r in recuperados
+    )

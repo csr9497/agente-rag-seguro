@@ -18,17 +18,13 @@ from typing import Any
 
 from langsmith import Client, tracing_context
 
-from app.config import Settings
+from app.config import ConfiguracionInseguraError, Settings
 from app.security.deteccion import TIPOS_PII, enmascarar_pii
 
 logger = logging.getLogger(__name__)
 
 OCULTO = "[oculto]"
 _CLAVES_CONTENIDO = {"contenido", "fragmento"}
-
-
-class ConfiguracionInseguraError(RuntimeError):
-    pass
 
 
 def ocultar(valor: Any) -> Any:

@@ -48,6 +48,11 @@ class ServicioRoles:
             return activos
         return [r for r in activos if r.id in usuario.groups]
 
+    def solo_activos(self, usuario: Usuario) -> Usuario:
+        """El usuario con solo sus roles activos (nunca amplía: ignora la selección libre)."""
+        activos = {r.id for r in self._repo.listar(incluir_inactivos=False)}
+        return usuario.model_copy(update={"groups": [g for g in usuario.groups if g in activos]})
+
     def actuar_como(self, usuario: Usuario, rol_id: str | None) -> Rol:
         if not rol_id:
             raise PermisoDenegadoError("Indica el rol con el que actúas (cabecera X-Rol)")

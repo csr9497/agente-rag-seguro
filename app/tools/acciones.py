@@ -40,6 +40,12 @@ class ProponerAccion:
         self, args: ProponerAccionArgs, usuario: Usuario, top_k: int
     ) -> ResultadoHerramienta:
         datos = args.model_dump(exclude={"accion"}, exclude_none=True, mode="json")
+        if len(usuario.groups) != 1:
+            # La acción se propone y se aprueba con un rol concreto: con varios, no se elige uno
+            # al azar (solo pasa fuera de una conversación, p. ej. /consultar).
+            return ResultadoHerramienta(
+                nota="No se pudo preparar la acción: hazlo desde una conversación con un rol."
+            )
         try:
             propuesta = self._servicio.proponer(args.accion, datos, usuario.groups[0], usuario.id)
         except (PermisoDenegadoError, DatosInvalidosError) as exc:

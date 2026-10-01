@@ -53,8 +53,9 @@ locals {
     # Sin Entra ID todavía: ni selección libre de rol ni gestión de documentos en Azure.
     SELECCION_LIBRE_DE_ROL = "false"
     GESTION_DOCUMENTOS     = "false"
-    # Entra ID: si hay app registration, la API exige token (roles = app roles de Entra).
-    AUTH_MODO       = var.entra_audiencia != "" ? "entra" : "stub"
+    # Entra ID obligatorio: la API exige token (roles = app roles de Entra). Con ENTORNO=prod
+    # la app no arranca sin él (app/config.py: validar_seguridad).
+    AUTH_MODO       = "entra"
     ENTRA_TENANT_ID = var.entra_tenant_id
     ENTRA_AUDIENCIA = var.entra_audiencia
   }
@@ -65,6 +66,10 @@ resource "terraform_data" "validaciones" {
     precondition {
       condition     = local.p.alcance == "completo"
       error_message = "El stack apps requiere que platform se haya desplegado con alcance=completo."
+    }
+    precondition {
+      condition     = var.entra_tenant_id != "" && var.entra_audiencia != ""
+      error_message = "La web es pública: define entra_tenant_id y entra_audiencia (app registration de Entra ID)."
     }
   }
 }

@@ -46,6 +46,6 @@ variable "entra_tenant_id" {
 
 variable "entra_audiencia" {
   type        = string
-  description = "Client ID de la app registration de la API. Vacío = sin autenticación (no recomendado)."
+  description = "Client ID de la app registration de la API. Obligatorio (precondición en main.tf)."
   default     = ""
 }

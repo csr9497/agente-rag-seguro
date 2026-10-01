@@ -9,7 +9,8 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
 from app.api import acciones, admin, conversaciones, documentos, roles
-from app.config import Settings, get_settings
+from app.api.dependencias import ServiciosDep
+from app.config import Settings, get_settings, validar_seguridad
 from app.deps import build_servicios
 from app.graph import topologia
 from app.graph.agente import Agente
@@ -24,7 +25,9 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    servicios = build_servicios(get_settings())
+    settings = get_settings()
+    validar_seguridad(settings)  # en prod, sin Entra ID o con modos de depuración no arranca
+    servicios = build_servicios(settings)
     informe = servicios.verificar_integridad()  # "validar antes de todo"
     logger.info(
         "Integridad al arrancar: %d revisados, %d problemas",
@@ -108,8 +111,11 @@ def consultar(
     body: ConsultaRequest,
     usuario: Annotated[Usuario, Depends(get_usuario)],
     agente: Annotated[Agente, Depends(get_agente)],
+    servicios: ServiciosDep,
 ) -> RespuestaConsulta:
-    # La auditoría la hace el propio grafo (nodo audit), también en consultas rechazadas.
+    # Solo los roles del usuario que siguen activos en el registro: un rol desactivado desde
+    # la interfaz deja de dar acceso también aquí. La auditoría la hace el grafo (nodo audit).
+    usuario = servicios.roles.solo_activos(usuario)
     try:
         return agente.consultar(body.pregunta, usuario, top_k=body.top_k)
     except ProveedorNoConfiguradoError as exc:
