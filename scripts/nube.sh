@@ -30,7 +30,20 @@ source scripts/comun.sh
 PROMPTS_ETIQUETA="${PROMPTS_ETIQUETA:-prod}" # los entornos de CI usan la suya (no mueven prod)
 LOGIN_PROVEEDOR="${LOGIN_PROVIDER:-${LOGIN_PROVEEDOR:-}}" # vacío: github si hay OAuth App en .env; si no, ip
 
-paso() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
+# En GitHub Actions, la sesión de az de azure/login usa un token OIDC que caduca a los
+# 5 minutos (AADSTS700024): platform tarda más. Antes de cada paso se pide un token nuevo.
+# (Terraform no lo necesita: con ARM_USE_OIDC renueva el suyo.)
+refrescar_az() {
+  [[ ${ARM_USE_OIDC:-} == true && -n ${ACTIONS_ID_TOKEN_REQUEST_URL:-} ]] || return 0
+  local token
+  token=$(curl -fsS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+    "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=api://AzureADTokenExchange" \
+    | python3 -c 'import json, sys; print(json.load(sys.stdin)["value"])') || return 0
+  az login --service-principal -u "$ARM_CLIENT_ID" --tenant "$ARM_TENANT_ID" \
+    --federated-token "$token" -o none \
+    && az account set -s "$ARM_SUBSCRIPTION_ID" -o none
+}
+paso() { refrescar_az; printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 falla() { printf '\n⛔ %s\n' "$1"; exit 1; }
 
 leer_backend() { grep -E "^$1 " infra/envs/dev/backend.hcl | sed -E 's/.*= *"(.*)"/\1/'; }
