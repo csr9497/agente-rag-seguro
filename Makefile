@@ -1,7 +1,7 @@
 CONDA_ENV ?= agente-rag
 BASE_URL  ?= http://localhost:8000
 
-.PHONY: help setup sync lint fmt test test-postgres integration matriz evals evals-simulado evals-langsmith up down ingest studio env-from-azure tf-validate validar-infra verificar-modelos desplegar estado-nube destruir-nube ciclo modelos-up modelos-down instalar levantar apagar accesos
+.PHONY: help setup sync lint fmt test test-postgres integration matriz evals evals-simulado evals-langsmith up down ingest studio env-from-azure tf-validate validar-infra verificar-modelos local-nube desplegar estado-nube destruir-nube ciclo modelos-up modelos-down instalar levantar apagar accesos
 
 help: ## Lista los comandos
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-16s %s\n", $$1, $$2}'
@@ -78,6 +78,9 @@ accesos: ## Estado de cada servicio y sus URLs (app, API, Studio, LangSmith)
 
 modelos-up: levantar ## Alias de levantar
 modelos-down: apagar ## Alias de apagar
+
+local-nube: ## App en tu equipo contra los recursos de Azure (http://localhost:8090)
+	./scripts/local_nube.sh
 
 desplegar: ## Despliega todo en Azure (web pública con login de Entra ID) y muestra la URL
 	./scripts/nube.sh desplegar

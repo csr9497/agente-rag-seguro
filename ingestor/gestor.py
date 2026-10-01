@@ -132,6 +132,11 @@ class GestorDocumentos:
         registrado = self._registro.obtener(doc_id) if self._registro else None
         mismos_roles = registrado is None or registrado.roles == acl
         if previo == doc_hash and mismos_roles and not forzar:
+            if self._registro and registrado is None:
+                # Ya indexado pero no registrado (otro registro: p. ej. la app local contra el
+                # índice de la nube, o un registro que falló a mitad): se registra sin reindexar.
+                self._registrar(doc_id, validado.texto, acl, doc_hash, subido_por)
+                validado.avisos.append("registrado (ya estaba indexado)")
             return ResultadoOperacion(doc_id=doc_id, estado="sin_cambios", avisos=validado.avisos)
 
         for rol in acl:
@@ -166,23 +171,39 @@ class GestorDocumentos:
         # Registro después del índice: si fallara, access_guardrail descarta los chunks
         # (no registrados) hasta que un reintento lo complete.
         if self._registro:
-            self._registro.registrar(
-                DocumentoRegistrado(
-                    doc_id=doc_id,
-                    titulo=titulo_de(validado.texto, doc_id),
-                    roles=acl,
-                    doc_hash=doc_hash,
-                    chunks=len(chunks),
-                    subido_por=subido_por,
-                    indexado_en=chunks[0].indexado_en if chunks else "",
-                )
-            )
+            self._registrar(doc_id, validado.texto, acl, doc_hash, subido_por, chunks)
 
         return ResultadoOperacion(
             doc_id=doc_id,
             estado="actualizado" if previo is not None else "indexado",
             chunks=len(chunks),
             avisos=validado.avisos,
+        )
+
+    def _registrar(
+        self,
+        doc_id: str,
+        texto: str,
+        acl: list[str],
+        doc_hash: str,
+        subido_por: str | None,
+        chunks: list | None = None,
+    ) -> None:
+        if chunks is None:  # mismo troceo que al indexar, sin embeddings
+            chunks = chunk_document(
+                doc_id, texto, acl, doc_hash=doc_hash,
+                indexado_en=datetime.now(UTC).isoformat(timespec="seconds"),
+            )  # fmt: skip
+        self._registro.registrar(
+            DocumentoRegistrado(
+                doc_id=doc_id,
+                titulo=titulo_de(texto, doc_id),
+                roles=acl,
+                doc_hash=doc_hash,
+                chunks=len(chunks),
+                subido_por=subido_por,
+                indexado_en=chunks[0].indexado_en if chunks else "",
+            )
         )
 
     def _roles_no_validos(self, acl: list[str]) -> str | None:

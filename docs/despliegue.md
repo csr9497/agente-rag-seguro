@@ -17,6 +17,19 @@ pública (el resto de Internet recibe 403), sin login y con todos los roles, com
 Para abrirla a otras personas con login de GitHub, añade a `.env` `GH_OAUTH_CLIENT_ID` y
 `GH_OAUTH_CLIENT_SECRET` (OAuth App, paso 2 de abajo) y repite `make desplegar`.
 
+## App en tu equipo contra los recursos de la nube
+
+```bash
+make local-nube     # http://localhost:8090
+```
+
+Rellena `.env` con los endpoints y claves de la nube (Key Vault), registra en una base local
+(`data/nube-local.db`) los documentos que hay en Blob —sin volver a calcular embeddings— y
+arranca web y API en un proceso de tu equipo. Usa los modelos, AI Search, Blob y Content
+Safety de Azure con tu `az login`; la base de datos es local porque PostgreSQL de la nube solo
+admite servicios de Azure (conversaciones y roles asignados no se comparten con la nube).
+Trazas en el proyecto de LangSmith `agente-rag-local-nube`.
+
 ## Con GitHub Actions: una vez
 
 Todo se guarda en GitHub: repositorio → *Settings → Secrets and variables → Actions*.
