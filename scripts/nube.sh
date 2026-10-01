@@ -64,8 +64,14 @@ requisitos() {
 
 requisitos_login() {
   if [[ $LOGIN_PROVEEDOR == github ]]; then
+    local var # también desde .env (no se sube a git): GH_OAUTH_CLIENT_ID=… / GH_OAUTH_CLIENT_SECRET=…
+    for var in GH_OAUTH_CLIENT_ID GH_OAUTH_CLIENT_SECRET ADMINISTRADORES_GITHUB; do
+      if [[ -z ${!var:-} && -f .env ]] && grep -qE "^$var=.+" .env; then
+        export "$var=$(grep -E "^$var=" .env | tail -1 | cut -d= -f2- | sed -E "s/^['\"]//; s/['\"]$//")"
+      fi
+    done
     [[ -n ${GH_OAUTH_CLIENT_ID:-} && -n ${GH_OAUTH_CLIENT_SECRET:-} ]] \
-      || falla "Login con GitHub: exporta GH_OAUTH_CLIENT_ID y GH_OAUTH_CLIENT_SECRET (OAuth App, ver docs/despliegue.md)."
+      || falla "Login con GitHub: añade GH_OAUTH_CLIENT_ID y GH_OAUTH_CLIENT_SECRET a .env (OAuth App de GitHub, ver docs/despliegue.md)."
     export TF_VAR_github_oauth_client_id=$GH_OAUTH_CLIENT_ID TF_VAR_github_oauth_client_secret=$GH_OAUTH_CLIENT_SECRET
     export TF_VAR_administradores="${ADMINISTRADORES_GITHUB:-[\"$(git remote get-url origin | sed -E 's#.*[:/]([^/]+)/[^/]+$#\1#')\"]}"
     echo "✅ login con GitHub · administradores: $TF_VAR_administradores"
