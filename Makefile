@@ -43,14 +43,15 @@ prompts: ## Publica app/prompts/ en LangSmith (TAG=dev por defecto; TAG=prod par
 
 # --- Azure ---------------------------------------------------------------------------------
 
+# ENV=dev|staging|main (defecto dev): entorno de Azure, con sus propios recursos y estado.
 deploy: ## Despliega en Azure y deja todo listo: web, prompts, app y Studio locales contra la nube
-	$(if $(LOGIN_PROVIDER),LOGIN_PROVIDER=$(LOGIN_PROVIDER)) $(if $(ALLOWED_IPS),ALLOWED_IPS='$(ALLOWED_IPS)') ./scripts/nube.sh desplegar
+	ENTORNO=$(or $(ENV),dev) $(if $(LOGIN_PROVIDER),LOGIN_PROVIDER=$(LOGIN_PROVIDER)) $(if $(ALLOWED_IPS),ALLOWED_IPS='$(ALLOWED_IPS)') ./scripts/nube.sh desplegar
 
 cloud-status: ## URL y salud del despliegue en Azure, y enlace de LangSmith
-	./scripts/nube.sh estado
+	ENTORNO=$(or $(ENV),dev) ./scripts/nube.sh estado
 
 cloud-destroy: ## Elimina todo lo desplegado en Azure (pide confirmación; CONFIRM=yes la omite)
-	./scripts/nube.sh destruir
+	ENTORNO=$(or $(ENV),dev) ./scripts/nube.sh destruir
 
 cloud-local: ## (Re)arranca en segundo plano app (:8090) y Studio (:2025) contra Azure (lo hace deploy)
 	./scripts/local_nube.sh

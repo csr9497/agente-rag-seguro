@@ -4,6 +4,11 @@
 #   ./scripts/nube.sh desplegar   # platform → identidad → imágenes → apps → documentos → URL
 #   ./scripts/nube.sh estado      # URL, salud de las apps y última siembra
 #   ./scripts/nube.sh destruir    # elimina todo lo desplegado (pide confirmación)
+#   ./scripts/nube.sh url         # URL de la web desplegada (para los tests)
+#   ./scripts/nube.sh limpiar     # red de seguridad: borra lo que quede de cualquier entorno
+#
+# ENTORNO=dev|staging|main (defecto dev): cada entorno tiene sus recursos (rg-ragseg-<entorno>)
+# y su estado (<entorno>/*.tfstate). Los usa el pipeline de GitHub Actions (nube.yml).
 #
 # Requisitos: Azure CLI con `az login` (suscripción activa y permisos de Owner, o Contributor +
 # User Access Administrator), Terraform ≥ 1.9, Docker con buildx y el estado remoto de
@@ -18,8 +23,11 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 TFVARS="../envs/dev/nube.tfvars"
 BACKEND="../envs/dev/backend.hcl"
-LOG_DIR="data/nube"
+ENTORNO="${ENTORNO:-dev}"
+[[ $ENTORNO =~ ^(dev|staging|main)$ ]] || { echo "ENTORNO debe ser dev, staging o main (es «$ENTORNO»)"; exit 1; }
+LOG_DIR="data/nube/$ENTORNO"
 source scripts/comun.sh
+PROMPTS_ETIQUETA="${PROMPTS_ETIQUETA:-prod}" # los entornos de CI usan la suya (no mueven prod)
 LOGIN_PROVEEDOR="${LOGIN_PROVIDER:-${LOGIN_PROVEEDOR:-}}" # vacío: github si hay OAuth App en .env; si no, ip
 
 paso() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
@@ -27,12 +35,12 @@ falla() { printf '\n⛔ %s\n' "$1"; exit 1; }
 
 leer_backend() { grep -E "^$1 " infra/envs/dev/backend.hcl | sed -E 's/.*= *"(.*)"/\1/'; }
 estado_de() { # ubicación del estado de un stack, como objeto HCL para -var
-  printf '{resource_group_name="%s",storage_account_name="%s",container_name="%s",key="dev/%s.tfstate"}' \
+  printf '{resource_group_name="%s",storage_account_name="%s",container_name="%s",key="%s/%s.tfstate"}' \
     "$(leer_backend resource_group_name)" "$(leer_backend storage_account_name)" \
-    "$(leer_backend container_name)" "$1"
+    "$(leer_backend container_name)" "$ENTORNO" "$1"
 }
 tf() { local stack=$1; shift; terraform -chdir="infra/$stack" "$@"; }
-init() { tf "$1" init -input=false -reconfigure -backend-config="$BACKEND" -backend-config="key=dev/$1.tfstate" > /dev/null; }
+init() { tf "$1" init -input=false -reconfigure -backend-config="$BACKEND" -backend-config="key=$ENTORNO/$1.tfstate" > /dev/null; }
 aplicar() { # aplicar <stack> <args...>: muestra el resumen y deja el log completo
   local stack=$1; shift
   mkdir -p "$LOG_DIR"
@@ -61,6 +69,13 @@ requisitos() {
   [[ -f infra/envs/dev/backend.hcl ]] || falla "Falta el estado remoto: ejecuta infra/bootstrap/bootstrap.sh una vez."
   export ARM_SUBSCRIPTION_ID
   ARM_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+}
+
+# Acceso de desarrollo (modelos, blobs, índice, secretos) para quien despliega con az login. En
+# CI despliega una identidad de servicio: se mantiene el valor de nube.tfvars.
+var_desarrolladores() {
+  [[ $(az account show --query user.type -o tsv) == user ]] || return 0
+  echo "developer_principal_ids=[\"$(az ad signed-in-user show --query id -o tsv)\"]"
 }
 
 requisitos_login() {
@@ -127,8 +142,8 @@ esperar_job() { # esperar_job <job> <grupo>: hasta Succeeded/Failed (10 min)
 desplegar() {
   requisitos
   requisitos_login
-  local yo plataforma identidad tag acr login
-  yo=$(az ad signed-in-user show --query id -o tsv)
+  local desarrolladores plataforma identidad tag acr login
+  desarrolladores=$(var_desarrolladores)
   plataforma=$(estado_de platform)
   identidad=$(estado_de identidad)
 
@@ -137,7 +152,8 @@ desplegar() {
   pg=$(region_postgres) || falla "Tu suscripción no puede crear PostgreSQL Flexible en ninguna región probada (define POSTGRES_LOCATION=<región> y repite)."
   echo "PostgreSQL en $pg"
   init platform
-  aplicar platform -var-file="$TFVARS" -var "developer_principal_ids=[\"$yo\"]" -var "postgres_location=$pg" \
+  aplicar platform -var-file="$TFVARS" -var "environment=$ENTORNO" -var "postgres_location=$pg" \
+    ${desarrolladores:+-var "$desarrolladores"} \
     || falla "Falló platform (log: $LOG_DIR/platform.log)."
 
   if [[ $LOGIN_PROVEEDOR == github ]]; then
@@ -170,8 +186,8 @@ desplegar() {
   echo "backend:$tag · web:$tag"
 
   if [[ -n ${LANGSMITH_API_KEY:-} ]]; then
-    echo "Prompts en LangSmith (la app de la nube usa la etiqueta prod):"
-    publicar_prompts dev prod
+    echo "Prompts en LangSmith (la app de la nube usa la etiqueta $PROMPTS_ETIQUETA):"
+    if [[ $PROMPTS_ETIQUETA == prod ]]; then publicar_prompts dev prod; else publicar_prompts "$PROMPTS_ETIQUETA"; fi
   fi
 
   paso "4/6 Aplicaciones (web con login, backend interno, jobs de ingesta)"
@@ -179,6 +195,7 @@ desplegar() {
   aplicar apps -var-file=../envs/dev/apps.tfvars \
     -var "backend_image=$login/backend:$tag" -var "web_image=$login/web:$tag" \
     -var "app_version=$tag" -var "platform_state=$plataforma" -var "login_proveedor=$LOGIN_PROVEEDOR" \
+    -var "prompts_etiqueta=$PROMPTS_ETIQUETA" \
     $([[ $LOGIN_PROVEEDOR == entra ]] && echo "-var identidad_state=$identidad") \
     || falla "Falló apps (log: $LOG_DIR/apps.log)."
 
@@ -194,8 +211,11 @@ desplegar() {
   paso "6/6 Comprobación"
   comprobar
 
-  paso "Tu equipo contra la nube: app y LangGraph Studio (make cloud-local)"
-  ./scripts/local_nube.sh || echo "⚠️  no arrancó; repítelo con make cloud-local"
+  # La app y Studio locales usan el entorno dev; en CI no hay equipo al que arrancarlos.
+  if [[ $ENTORNO == dev && -z ${CI:-} ]]; then
+    paso "Tu equipo contra la nube: app y LangGraph Studio (make cloud-local)"
+    ./scripts/local_nube.sh || echo "⚠️  no arrancó; repítelo con make cloud-local"
+  fi
 }
 
 comprobar() {
@@ -228,15 +248,20 @@ comprobar() {
     echo "   Inicia sesión: los administradores tienen todos los roles y asignan roles a otras"
     echo "   personas desde la app (Roles y permisos → Personas y sus roles)."
   fi
-  enlace_langsmith agente-rag-ragseg-dev
-  echo "   Estado: make cloud-status · Eliminar todo: make cloud-destroy"
+  enlace_langsmith "agente-rag-ragseg-$ENTORNO"
+  echo "   Estado: make cloud-status · Eliminar todo: make cloud-destroy (ENV=$ENTORNO)"
 }
 
 estado() {
   requisitos > /dev/null
   init apps
-  paso "Despliegue en la nube"
+  paso "Despliegue en la nube ($ENTORNO)"
   comprobar
+}
+
+url() {
+  init apps
+  tf apps output -raw web_url
 }
 
 # destruir_stack <stack> <args...>: terraform destroy con reintentos. El provider azurerm a
@@ -262,10 +287,10 @@ destruir_stack() {
 destruir() {
   requisitos
   if [[ ${CONFIRM:-${CONFIRMAR:-}} != yes && ${CONFIRMAR:-} != si ]]; then
-    read -r -p "Se eliminará TODO lo desplegado en Azure (app, datos, modelos). Escribe 'destruir': " r
+    read -r -p "Se eliminará TODO lo desplegado en Azure, entorno $ENTORNO (app, datos, modelos). Escribe 'destruir': " r
     [[ $r == destruir ]] || falla "Cancelado."
   fi
-  local plataforma identidad grupo stack ok=true
+  local plataforma identidad grupo stack desarrolladores ok=true
   plataforma=$(estado_de platform)
   identidad=$(estado_de identidad)
   init platform
@@ -273,7 +298,7 @@ destruir() {
   # Un destroy a medias borra los outputs pero deja recursos: el nombre sale entonces del estado.
   [[ -n $grupo ]] || grupo=$(tf platform state show -no-color azurerm_resource_group.this 2> /dev/null |
     sed -nE 's/^ +name += "(.*)"$/\1/p' || true)
-  ./scripts/local_nube.sh parar > /dev/null 2>&1 || true
+  [[ $ENTORNO != dev ]] || ./scripts/local_nube.sh parar > /dev/null 2>&1 || true
   paso "1/4 Aplicaciones"
   # Al destruir no se usan: valores de relleno para las validaciones del stack.
   export TF_VAR_github_oauth_client_id=x TF_VAR_github_oauth_client_secret=x TF_VAR_administradores='["x"]' TF_VAR_ips_permitidas='["0.0.0.0/32"]'
@@ -291,14 +316,16 @@ destruir() {
     echo "no aplica (login $LOGIN_PROVEEDOR)"
   fi
   paso "3/4 Infraestructura"
-  destruir_stack platform -var-file="$TFVARS" \
+  desarrolladores=$(var_desarrolladores)
+  destruir_stack platform -var-file="$TFVARS" -var "environment=$ENTORNO" \
     -var "postgres_location=$(region_postgres || true)" \
-    -var "developer_principal_ids=[\"$(az ad signed-in-user show --query id -o tsv)\"]" || ok=false
+    ${desarrolladores:+-var "$desarrolladores"} || ok=false
 
   paso "4/4 Comprobación en Azure"
   if [[ -n $grupo && $(az group exists -n "$grupo") == true ]]; then
     $ok || echo "Terraform no lo borró todo: se elimina el grupo $grupo completo (unos minutos)…"
     az group delete -n "$grupo" --yes
+    purgar_borrados
     ok=false
   fi
   if ! $ok; then
@@ -316,10 +343,51 @@ destruir() {
   echo "   Queda el estado de Terraform (rg-ragseg-tfstate, céntimos al mes) para el próximo make deploy."
 }
 
+# Un `az group delete` deja Azure OpenAI, Content Safety y Key Vault en borrado suave: siguen
+# ocupando la cuota (y el único Content Safety F0 de la suscripción) hasta purgarlos.
+purgar_borrados() {
+  local nombre region id
+  # id: …/locations/<región>/resourceGroups/<grupo>/deletedAccounts/<nombre>
+  az cognitiveservices account list-deleted --query "[?contains(name,'ragseg')].[name,location,id]" -o tsv |
+    while read -r nombre region id; do
+      az cognitiveservices account purge -n "$nombre" -l "$region" \
+        -g "$(sed -E 's#.*/resourceGroups/([^/]+)/.*#\1#' <<< "$id")" -o none && echo "   purgado $nombre" || true
+    done
+  az keyvault list-deleted --query "[?contains(name,'ragseg')].name" -o tsv | while read -r nombre; do
+    az keyvault purge -n "$nombre" -o none && echo "   purgado $nombre" || true
+  done
+}
+
+# limpiar: borra lo que quede de cualquier entorno (grupos rg-<project>-<entorno>, recursos en
+# borrado suave y su estado de Terraform). La usa la limpieza nocturna de GitHub Actions.
+limpiar() {
+  requisitos > /dev/null
+  local entorno grupo cuenta contenedor blob
+  cuenta=$(leer_backend storage_account_name)
+  contenedor=$(leer_backend container_name)
+  for entorno in dev staging main; do
+    grupo="rg-ragseg-$entorno"
+    if [[ $(az group exists -n "$grupo") == true ]]; then
+      echo "⚠️  $grupo seguía encendido: se elimina"
+      az group delete -n "$grupo" --yes
+    fi
+    # Estado de Terraform del entorno: apunta a recursos que ya no existen.
+    az storage blob list --account-name "$cuenta" -c "$contenedor" --prefix "$entorno/" \
+      --auth-mode login --query "[].name" -o tsv | while read -r blob; do
+      az storage blob lease break --account-name "$cuenta" -c "$contenedor" -b "$blob" \
+        --auth-mode login -o none 2> /dev/null || true
+      az storage blob delete --account-name "$cuenta" -c "$contenedor" -n "$blob" \
+        --auth-mode login -o none && echo "   estado $blob eliminado"
+    done
+  done
+  purgar_borrados
+  echo "✅ Sin entornos ragseg encendidos en Azure."
+}
+
 # `source scripts/nube.sh --solo-funciones` (CI): carga las funciones sin ejecutar nada.
 [[ ${1:-} == --solo-funciones ]] && return 0
 
 case "${1:-}" in
-  desplegar | estado | destruir) "$1" ;;
+  desplegar | estado | destruir | url | limpiar) "$1" ;;
   *) sed -n '2,10p' "$0"; exit 1 ;;
 esac

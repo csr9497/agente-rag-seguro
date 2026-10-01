@@ -39,6 +39,12 @@ variable "app_version" {
   default     = "desconocida"
 }
 
+variable "prompts_etiqueta" {
+  type        = string
+  description = "Etiqueta de los prompts en LangSmith que usa la app (los entornos de CI usan la suya para no mover prod)"
+  default     = "prod"
+}
+
 variable "login_proveedor" {
   type        = string
   description = "Login de la web: github (OAuth App, roles asignados en la app), entra (app registration con app roles) o ip (prueba sin login, solo desde ips_permitidas)"
