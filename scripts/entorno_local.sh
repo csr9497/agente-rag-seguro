@@ -113,7 +113,7 @@ levantar() {
 
   mkdir -p data
   if [[ $PROVEEDOR == azure ]]; then
-    paso "1/5 Modelos en Azure (gpt-4o + text-embedding-3-small)"
+    paso "1/5 Modelos en Azure (gpt-4o + text-embedding-ada-002)"
     requisitos_azure > /dev/null || { requisitos_azure; exit 1; }
     [[ -d infra/platform/.terraform ]] || terraform_init
     if hay_nube; then

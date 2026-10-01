@@ -40,7 +40,7 @@ si algo falla.
 
 ```bash
 make install          # comprueba uv, Docker, az, terraform, az login y la suscripción
-make up          # crea gpt-4o + text-embedding-3-small, rellena .env, verifica y arranca todo
+make up          # crea gpt-4o + ada-002, rellena .env, verifica y arranca todo
 make down            # borra los modelos (sin costes)
 ```
 
@@ -51,7 +51,7 @@ MODELOS_PROVEEDOR=azure
 AZURE_OPENAI_ENDPOINT=https://<recurso>.openai.azure.com/
 AZURE_OPENAI_API_KEY=            # vacío = Entra ID (az login / Managed Identity)
 AZURE_OPENAI_CHAT_DEPLOYMENT=gpt-4o           # nombre del deployment, no del modelo
-AZURE_OPENAI_EMBEDDING_DEPLOYMENT=text-embedding-3-small
+AZURE_OPENAI_EMBEDDING_DEPLOYMENT=text-embedding-ada-002
 ```
 
 Prompt Shields (Azure AI Content Safety) es independiente del proveedor de modelos: es
@@ -67,7 +67,7 @@ MODELOS_PROVEEDOR=openai
 OPENAI_API_KEY=sk-...
 OPENAI_BASE_URL=                 # vacío = OpenAI; p. ej. https://openrouter.ai/api/v1
 OPENAI_CHAT_MODEL=gpt-4o
-OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+OPENAI_EMBEDDING_MODEL=text-embedding-ada-002
 EMBEDDING_DIMENSIONS=1536
 ```
 
@@ -78,12 +78,13 @@ make install && make check-models && make up
 - **Ollama / vLLM local** (sin clave): `OPENAI_BASE_URL=http://host.docker.internal:11434/v1`
   para la app en Docker (`http://localhost:11434/v1` desde el host). El modelo de chat debe
   admitir tool calling y salida estructurada.
-- **Embeddings: el mismo modelo con los dos proveedores** (`text-embedding-3-small`, 1536
+- **Embeddings: el mismo modelo con los dos proveedores** (`text-embedding-ada-002`, 1536
   dimensiones), así cambiar `MODELOS_PROVEEDOR` no invalida el índice. Los vectores de
   modelos distintos no son comparables aunque tengan la misma dimensión: la búsqueda
   devuelve fragmentos al azar (puntuaciones ≈0) **sin dar error**. Si cambias de modelo de
-  embeddings, **reindexa** (y ajusta `EMBEDDING_DIMENSIONS` si cambia la dimensión, p. ej.
-  `text-embedding-3-large` = 3072; eso sí lo detecta la app con `capacidad_no_soportada`).
+  embeddings, cámbialo en los dos proveedores y **reindexa** (y ajusta
+  `EMBEDDING_DIMENSIONS` si cambia la dimensión, p. ej. `text-embedding-3-large` = 3072; eso
+  sí lo detecta la app con `capacidad_no_soportada`).
 
 ## Capacidades que pide el código
 

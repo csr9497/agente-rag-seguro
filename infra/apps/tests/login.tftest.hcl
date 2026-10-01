@@ -26,7 +26,7 @@ override_data {
       secretos_en_key_vault        = ["database-url"]
       openai_endpoint              = "https://oai.openai.azure.com/"
       chat_deployment              = "gpt-4o"
-      embedding_deployment         = "text-embedding-3-small"
+      embedding_deployment         = "text-embedding-ada-002"
       ligero_deployment            = ""
       embedding_dimensions         = 1536
       vector_store                 = "azure_search"

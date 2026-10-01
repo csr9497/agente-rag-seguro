@@ -26,16 +26,16 @@ class Settings(BaseSettings):
     openai_base_url: str = ""  # vacío = https://api.openai.com/v1
     openai_api_key: SecretStr | None = None
     openai_chat_model: str = "gpt-4o"
-    # Mismo modelo de embeddings con OpenAI y con Azure: un índice creado con un proveedor
+    # El mismo modelo de embeddings que en Azure (ada-002): un índice creado con un proveedor
     # sigue valiendo con el otro (con modelos distintos la búsqueda devuelve ruido sin error).
-    openai_embedding_model: str = "text-embedding-3-small"  # 1536 dimensiones
+    openai_embedding_model: str = "text-embedding-ada-002"  # 1536 dimensiones
     openai_ligero_model: str = ""
 
     azure_openai_endpoint: str = ""
     azure_openai_api_key: SecretStr | None = None
     azure_openai_api_version: str = "2024-10-21"
     azure_openai_chat_deployment: str = "gpt-4o"
-    azure_openai_embedding_deployment: str = "text-embedding-3-small"
+    azure_openai_embedding_deployment: str = "text-embedding-ada-002"
     # Modelo ligero opcional (p. ej. gpt-4.1-mini): guardián LLM de los guardrails.
     azure_openai_ligero_deployment: str = ""
     embedding_dimensions: int = 1536
@@ -68,10 +68,9 @@ class Settings(BaseSettings):
     max_turnos_historial: int = 3
     # Caché semántica con permisos (clave = roles + huella de documentos visibles + versión).
     cache_semantica: bool = True
-    # text-embedding-3-small (medido): misma pregunta con otra grafía 0.915 · paráfrasis 0.863 ·
-    # compuesta vs. una de sus partes 0.722 · pregunta vecina 0.604. 0.90 sirve la caché solo
-    # para la misma pregunta, con margen frente a las vecinas.
-    cache_umbral: float = 0.90
+    # ada-002 puntúa ~0.95 preguntas distintas pero cercanas (p. ej. una pregunta compuesta y
+    # una de sus partes): 0.97 evita servir la respuesta de la vecina (prueba en Azure).
+    cache_umbral: float = 0.97
     cache_backend: Literal["memoria", "redis"] = "memoria"
     redis_url: SecretStr = SecretStr("redis://localhost:6379/0")
     cache_ttl_s: int = 86400
