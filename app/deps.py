@@ -13,6 +13,7 @@ from app.acciones.servicio import ServicioAcciones
 from app.agents.hr import HerramientasHR, SqlRepositorioCasosRRHH, crear_hr_agent
 from app.agents.rag import HerramientasRag, crear_rag_agent
 from app.agents.registry import RegistroAgentes
+from app.agents.support import HerramientasSoporte, SqlRepositorioTickets, crear_support_agent
 from app.cache.semantica import CacheMemoria, CacheRedis, CacheSemantica, alcance_de_permisos
 from app.config import Settings
 from app.datos.catalogo import CONSULTAS, permisos_por_consulta
@@ -245,6 +246,8 @@ def build_registro_agentes(servicios: Servicios) -> RegistroAgentes:
     if servicios.motor.dialect.name == "postgresql":
         casos = SqlRepositorioCasosRRHH(servicios.motor)
         registro.register(crear_hr_agent(HerramientasHR(casos, rag, servicios.registro)))
+        tickets = SqlRepositorioTickets(servicios.motor)
+        registro.register(crear_support_agent(HerramientasSoporte(tickets, rag)))
     return registro
 
 

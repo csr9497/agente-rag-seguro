@@ -1,6 +1,6 @@
 # Asistente multiagente seguro (RAG + RR.HH. + Soporte)
 
-**Fecha:** 2026-10-01 · **Estado:** fases 1, 2 y 3 terminadas (2026-10-01) · **Spec de origen:** la entregada por el
+**Fecha:** 2026-10-01 · **Estado:** fases 1 a 4 terminadas (2026-10-01) · **Spec de origen:** la entregada por el
 usuario («SPEC — Asistente multiagente seguro»), que se resume aquí con las decisiones tomadas.
 
 ## Punto de partida (lo que había)
@@ -79,3 +79,14 @@ Piezas nuevas y aisladas; el grafo actual no cambia.
 | `hr_agent` (`app/agents/hr.py`) | `search_hr_policies` (solo público/interno), `get_my_hr_cases` (sin resumen de confidenciales), `create_hr_case` y `add_hr_case_note` (`confirm_user`); devuelve solo el ID. Sin PostgreSQL no se registra (fallo cerrado) |
 
 **Pendiente para la fase 5:** conectar el checkpointer y `approvals` al grafo principal (y la clave en Key Vault en Azure), una tarea periódica que llame a `vencer()` y la API para aprobar desde la web.
+
+## Fase 4 — support_agent (hecha)
+
+| Pieza | Qué hace |
+|---|---|
+| `tickets` / `ticket_comments` | RLS: el solicitante y la cola de `it_support`; RR.HH. no los ve (y soporte no ve `hr_cases`). Solo SELECT/INSERT; comentarios solo en tickets propios abiertos |
+| `app/agents/support.py` | `search_it_kb` (público/interno, compartida con RR.HH. en `HerramientasRag.search_public_internal`), `search_my_tickets` (parecidos abiertos propios, para deduplicar), `create_ticket` (`confirm_user`; P1 → `approve_staff` de `it_support`, nunca el solicitante), `add_ticket_comment` |
+| Base de conocimiento | Tres artículos públicos de ejemplo (`public/ti-*.md`): VPN, contraseña, portátil. Sin colección aparte |
+| Resumen al supervisor | Los identificadores creados se añaden siempre (no dependen de que el LLM los mencione) |
+
+**Cambio de plan:** la retirada de las acciones antiguas (`proponer_accion`, tabla `acciones`, su API y su UI) pasa a la fase 5: la web aún usa el grafo anterior y se quedaría sin abrir tickets hasta que el supervisor nuevo los gestione.

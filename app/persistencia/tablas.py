@@ -171,6 +171,32 @@ hr_case_notes = Table(
     Column("created_at", String(32), nullable=False),
 )
 
+# Tickets de soporte (support_agent), con RLS: su solicitante y la cola de it_support.
+tickets = Table(
+    "tickets",
+    metadata,
+    Column("id", String(36), primary_key=True),
+    Column("requester_id", String(160), nullable=False, index=True),  # del token
+    Column("category", String(40), nullable=False),
+    Column("priority", String(4), nullable=False),  # P1 (crítico, lo aprueba it_support) … P4
+    Column("title", String(200), nullable=False),
+    Column("steps", Text, nullable=False),  # qué pasa y qué se probó
+    Column("status", String(16), nullable=False),  # open | closed (lo cierra soporte, no un agente)
+    Column("created_by_agent", String(64), nullable=False),
+    Column("trace_id", String(64), nullable=False),
+    Column("created_at", String(32), nullable=False),
+)
+
+ticket_comments = Table(
+    "ticket_comments",
+    metadata,
+    Column("id", String(36), primary_key=True),
+    Column("ticket_id", ForeignKey("tickets.id"), nullable=False, index=True),
+    Column("author_id", String(160), nullable=False),
+    Column("comment", Text, nullable=False),
+    Column("created_at", String(32), nullable=False),
+)
+
 # Departamento(s) de cada persona: dan acceso a los documentos internos de ese departamento.
 usuario_departamentos = Table(
     "usuario_departamentos",

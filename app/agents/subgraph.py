@@ -450,6 +450,9 @@ class _Subgrafo:
         if self._spec.returns == "id_only" and estado.ids:
             return ", ".join(estado.ids)
         texto = "Se agotó el presupuesto del agente." if agotado else (final or "")
+        if faltan := [i for i in estado.ids if i not in texto]:
+            # Lo que se creó no depende de que el LLM lo mencione: el supervisor lo recibe.
+            texto = f"{texto} (identificadores: {', '.join(faltan)})".strip()
         return enmascarar_pii(texto, TIPOS_PII)[0]
 
 

@@ -24,7 +24,6 @@ from app.persistencia import tablas as t
 from app.persistencia.repositorios import RepositorioDocumentos
 from app.persistencia.rls import sesion_rls
 from app.prompts import local
-from app.security.acl import clasificacion
 
 HR_PROMPT = local("hr_agent")
 
@@ -118,12 +117,7 @@ class HerramientasHR:
 
     def search_hr_policies(self, args: BuscarDocumentosArgs, ctx: ContextoTool) -> dict[str, Any]:
         """Políticas de RR.HH.: solo documentos públicos o internos que el usuario puede leer."""
-        fragmentos = []
-        for f in self._rag.search_documents(args, ctx)["fragmentos"]:
-            doc = self._registro.obtener(f["doc_id"])
-            if doc and clasificacion(doc.roles) in ("publico", "interno"):
-                fragmentos.append({**f, "n": len(fragmentos) + 1})
-        return {"fragmentos": fragmentos}
+        return self._rag.search_public_internal(args, ctx)
 
     def get_my_hr_cases(self, args: SinArgs, ctx: ContextoTool) -> dict[str, Any]:
         """Estado de los casos propios; de los confidenciales no se da el resumen (regla 9)."""

@@ -33,6 +33,17 @@ POLITICAS = [
     ("hr_case_notes", "requester_notes_own_open", "INSERT",
      f"WITH CHECK (author_id = {_USUARIO} AND EXISTS (SELECT 1 FROM hr_cases c "  # noqa: S608
      f"WHERE c.id = case_id AND c.requester_id = {_USUARIO} AND c.status = 'open'))"),
+    # Tickets: su solicitante y la cola de it_support (RR.HH. no los ve).
+    ("tickets", "requester_reads_own_tickets", "SELECT", f"USING (requester_id = {_USUARIO})"),
+    ("tickets", "it_support_reads_queue", "SELECT",
+     f"USING ({_TIENE_ROL.format(rol='it_support')})"),
+    ("tickets", "requester_inserts_own_ticket", "INSERT",
+     f"WITH CHECK (requester_id = {_USUARIO})"),
+    ("ticket_comments", "comments_read_with_ticket", "SELECT",
+     "USING (EXISTS (SELECT 1 FROM tickets k WHERE k.id = ticket_id))"),
+    ("ticket_comments", "requester_comments_own_open", "INSERT",
+     f"WITH CHECK (author_id = {_USUARIO} AND EXISTS (SELECT 1 FROM tickets k "  # noqa: S608
+     f"WHERE k.id = ticket_id AND k.requester_id = {_USUARIO} AND k.status = 'open'))"),
 ]  # fmt: skip
 TABLAS_RLS = sorted({tabla for tabla, *_ in POLITICAS})
 

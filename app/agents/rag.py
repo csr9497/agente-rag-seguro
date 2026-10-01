@@ -77,6 +77,18 @@ class HerramientasRag:
             })  # fmt: skip
         return {"fragmentos": fragmentos}
 
+    def search_public_internal(
+        self, args: BuscarDocumentosArgs, ctx: ContextoTool
+    ) -> dict[str, Any]:
+        """Colecciones de RR.HH. y de TI: solo documentos públicos o internos que el usuario
+        puede leer (nunca confidenciales ni restringidos, aunque su rol los vea)."""
+        fragmentos = []
+        for f in self.search_documents(args, ctx)["fragmentos"]:
+            doc = self._registro.obtener(f["doc_id"])
+            if doc and clasificacion(doc.roles) in ("publico", "interno"):
+                fragmentos.append({**f, "n": len(fragmentos) + 1})
+        return {"fragmentos": fragmentos}
+
     def get_document_metadata(self, args: MetadatosArgs, ctx: ContextoTool) -> dict[str, Any]:
         doc = self._registro.obtener(args.doc_id)
         if doc is None or not self._visible(doc, list(ctx.user.acl)):
