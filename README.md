@@ -40,9 +40,10 @@ Sin modelos, `make up` arranca la interfaz y los permisos (las respuestas dan 50
 
 ## Desplegar en Azure
 
-Con GitHub Actions (OIDC, sin claves): crea una OAuth App de GitHub para el login, guarda su
-client ID y secret en el environment `dev` y activa `DEPLOY_AZURE=true`. Cada push a `main`
-despliega infraestructura, imágenes, apps y documentos de ejemplo. Desde tu equipo:
+Con GitHub Actions: guarda las credenciales de Azure como secrets del repositorio (las crea
+`scripts/credenciales_azure.sh` desde la Cloud Shell), crea una OAuth App de GitHub para el
+login y activa `DEPLOY_AZURE=true`. Cada push a `main` despliega infraestructura, imágenes,
+apps y documentos de ejemplo. Desde tu equipo:
 `make desplegar` (requiere `az login`, Terraform y Docker).
 
 La web queda pública **con login obligatorio** (GitHub; Entra ID opcional): sin roles no se ve

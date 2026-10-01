@@ -1,7 +1,6 @@
 name: Deploy
 
-# Actualización del despliegue en Azure: infraestructura (platform) → imágenes → apps.
-# Autenticación con OIDC (sin secretos); variables creadas por infra/bootstrap/bootstrap.sh.
+# Despliegue en Azure: infraestructura (platform) → imágenes → apps → documentos de ejemplo.
 #
 # Login de la web con GitHub (OAuth App): variable GH_OAUTH_CLIENT_ID y secret
 # GH_OAUTH_CLIENT_SECRET del environment dev; ADMINISTRADORES_GITHUB (JSON, opcional) con los
@@ -29,18 +28,22 @@ concurrency:
   group: deploy-dev
   cancel-in-progress: false
 
+# Credenciales de Azure (secrets del repositorio): AZURE_CLIENT_ID, AZURE_TENANT_ID,
+# AZURE_SUBSCRIPTION_ID y AZURE_CLIENT_SECRET (service principal). Sin AZURE_CLIENT_SECRET se
+# usa OIDC (identidad del bootstrap, sin contraseña). Ver docs/despliegue.md.
 env:
-  ARM_USE_OIDC: "true"
-  ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
-  ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
-  ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID || vars.AZURE_CLIENT_ID }}
+  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID || vars.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID || vars.AZURE_SUBSCRIPTION_ID }}
+  ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+  ARM_USE_OIDC: ${{ secrets.AZURE_CLIENT_SECRET == '' && 'true' || 'false' }}
   TF_IN_AUTOMATION: "true"
+  # Estado remoto de Terraform (infra/envs/dev/backend.hcl); las variables TFSTATE_* lo cambian.
   BACKEND_CONFIG: >-
-    -backend-config=resource_group_name=${{ vars.TFSTATE_RG }}
-    -backend-config=storage_account_name=${{ vars.TFSTATE_ACCOUNT }}
-    -backend-config=container_name=${{ vars.TFSTATE_CONTAINER }}
+    -backend-config=resource_group_name=${{ vars.TFSTATE_RG || 'rg-ragseg-tfstate' }}
+    -backend-config=storage_account_name=${{ vars.TFSTATE_ACCOUNT || 'stragsegtf08894c' }}
+    -backend-config=container_name=${{ vars.TFSTATE_CONTAINER || 'tfstate' }}
     -backend-config=use_azuread_auth=true
-    -backend-config=use_oidc=true
 
 jobs:
   platform:
@@ -60,7 +63,7 @@ jobs:
       - name: terraform apply (platform)
         working-directory: infra/platform
         run: |
-          terraform init -input=false $BACKEND_CONFIG -backend-config=key=dev/platform.tfstate
+          terraform init -input=false $BACKEND_CONFIG -backend-config=use_oidc=$ARM_USE_OIDC -backend-config=key=dev/platform.tfstate
           terraform apply -input=false -auto-approve -var-file=../envs/dev/nube.tfvars
         env:
           TF_VAR_langsmith_api_key: ${{ secrets.LANGSMITH_API_KEY }}
@@ -79,11 +82,18 @@ jobs:
     environment: dev
     steps:
       - uses: actions/checkout@v7
-      - uses: azure/login@v3
+      - name: az login (service principal)
+        if: env.ARM_USE_OIDC == 'false'
+        uses: azure/login@v3
         with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          creds: '{"clientId":"${{ env.ARM_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ env.ARM_SUBSCRIPTION_ID }}","tenantId":"${{ env.ARM_TENANT_ID }}"}'
+      - name: az login (OIDC)
+        if: env.ARM_USE_OIDC == 'true'
+        uses: azure/login@v3
+        with:
+          client-id: ${{ env.ARM_CLIENT_ID }}
+          tenant-id: ${{ env.ARM_TENANT_ID }}
+          subscription-id: ${{ env.ARM_SUBSCRIPTION_ID }}
       - run: az acr login --name ${{ needs.platform.outputs.acr_name }}
       - uses: docker/setup-buildx-action@v4
       - uses: docker/build-push-action@v7
@@ -116,20 +126,27 @@ jobs:
           TF_VAR_github_oauth_client_secret: ${{ secrets.GH_OAUTH_CLIENT_SECRET }}
           TF_VAR_administradores: ${{ vars.ADMINISTRADORES_GITHUB || format('["{0}"]', github.repository_owner) }}
         run: |
-          terraform init -input=false $BACKEND_CONFIG -backend-config=key=dev/apps.tfstate
+          terraform init -input=false $BACKEND_CONFIG -backend-config=use_oidc=$ARM_USE_OIDC -backend-config=key=dev/apps.tfstate
           terraform apply -input=false -auto-approve \
             -var-file=../envs/dev/apps.tfvars \
             -var="backend_image=${REGISTRY}/backend:${GITHUB_SHA}" \
             -var="web_image=${REGISTRY}/web:${GITHUB_SHA}" \
             -var="app_version=${GITHUB_SHA}" \
-            -var='platform_state={resource_group_name="${{ vars.TFSTATE_RG }}",storage_account_name="${{ vars.TFSTATE_ACCOUNT }}",container_name="${{ vars.TFSTATE_CONTAINER }}",key="dev/platform.tfstate"}'
+            -var='platform_state={resource_group_name="${{ vars.TFSTATE_RG || 'rg-ragseg-tfstate' }}",storage_account_name="${{ vars.TFSTATE_ACCOUNT || 'stragsegtf08894c' }}",container_name="${{ vars.TFSTATE_CONTAINER || 'tfstate' }}",key="dev/platform.tfstate"}'
           echo "### Web: $(terraform output -raw web_url)" >> "$GITHUB_STEP_SUMMARY"
           echo "Callback de la OAuth App de GitHub: $(terraform output -raw web_url)/.auth/login/github/callback" >> "$GITHUB_STEP_SUMMARY"
-      - uses: azure/login@v3
+      - name: az login (service principal)
+        if: env.ARM_USE_OIDC == 'false'
+        uses: azure/login@v3
         with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          creds: '{"clientId":"${{ env.ARM_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ env.ARM_SUBSCRIPTION_ID }}","tenantId":"${{ env.ARM_TENANT_ID }}"}'
+      - name: az login (OIDC)
+        if: env.ARM_USE_OIDC == 'true'
+        uses: azure/login@v3
+        with:
+          client-id: ${{ env.ARM_CLIENT_ID }}
+          tenant-id: ${{ env.ARM_TENANT_ID }}
+          subscription-id: ${{ env.ARM_SUBSCRIPTION_ID }}
       - name: Documentos de ejemplo (registro + Blob + índice; idempotente)
         working-directory: infra/apps
         run: |
