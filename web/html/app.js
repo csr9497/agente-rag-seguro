@@ -159,16 +159,27 @@ function salirDelRol() {
 }
 
 // ------------------------------------------------------------------ cabecera
+// En local no hay login (rol libre); desplegada, el login lo hace Easy Auth de Azure.
+const LOCAL = ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname);
+
+function cerrarSesion() {
+  if (LOCAL) return null;
+  return el("a", { class: "btn btn-ghost", href: "/.auth/logout?post_logout_redirect_uri=/" }, "Cerrar sesión");
+}
+
 function pintarCabecera() {
   const cont = $("header-actions");
-  if (!estado.rol) { cont.replaceChildren(el("span", { class: "hint" }, "Elige un rol para empezar")); return; }
+  if (!estado.rol) {
+    cont.replaceChildren(...[el("span", { class: "hint" }, "Elige un rol para empezar"), cerrarSesion()].filter(Boolean));
+    return;
+  }
   const cambiar = el("button", { class: "btn btn-ghost", type: "button" }, "Cambiar rol");
   cambiar.addEventListener("click", salirDelRol);
   const nueva = el("button", { class: "btn btn-secondary", type: "button" }, icono("i-new"), "Nueva conversación");
   nueva.addEventListener("click", () => elegirRol(estado.rol));
-  cont.replaceChildren(
+  cont.replaceChildren(...[
     el("span", { class: "role-chip" }, icono("i-users"), el("span", {}, "Rol: ", el("strong", {}, estado.rol.nombre))),
-    cambiar, nueva);
+    cambiar, nueva, cerrarSesion()].filter(Boolean));
 }
 
 // ------------------------------------------------------------------ chat
@@ -752,4 +763,7 @@ $("visor-cerrar").addEventListener("click", () => $("visor").close());
 // Clic en el fondo (fuera del panel) también cierra; Esc lo gestiona el propio <dialog>.
 $("visor").addEventListener("click", (ev) => { if (ev.target === $("visor")) $("visor").close(); });
 
+document.querySelector(".env").textContent = LOCAL
+  ? "Entorno local · selección de rol libre (modo demo)"
+  : "Sesión iniciada con tu cuenta de la organización · solo ves los roles que tienes asignados";
 iniciar();

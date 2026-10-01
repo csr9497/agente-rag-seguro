@@ -34,7 +34,7 @@ class SupervisorPorPalabras:
                 tool_calls=[], mensaje_asistente={"role": "assistant", "content": "LISTO"}
             )
         contenido = next(m["content"] for m in mensajes if m["role"] == "user")
-        pregunta = contenido.split("<pregunta>")[-1].lower()
+        pregunta = contenido.split("<pregunta>")[-1].split("</pregunta>")[0].strip().lower()
         if pregunta.strip(" ¡!¿?.").startswith(("hola", "gracias", "adiós", "buenos días")):
             nombre, args = "conversacion", {"tipo": "saludo"}
         elif any(p in pregunta for p in ("receta", "pizza", "fútbol", "chiste")):

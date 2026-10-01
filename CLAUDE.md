@@ -88,9 +88,11 @@ permisos gestionados desde la UI, access_guardrail contra el registro, integrida
 índice↔registro, guardrails, caché semántica con permisos (memoria/Redis), memoria de
 conversación, feedback, Prompt Shields (Content Safety), data_query, acciones con aprobación humana, Entra ID (JWT), trazas
 LangSmith, evaluaciones por capas y CI (GitHub Actions). Terraform listo (`alcance`,
-`vector_store`, Managed Redis, PostgreSQL) pero **no aplicado**: no tocar Azure sin indicación
-explícita del usuario. El deploy de CI está desactivado hasta `DEPLOY_AZURE=true`.
-Siguiente: etapa A en Azure (modelos + Storage + AI Search Free).
+`vector_store`, Managed Redis, PostgreSQL; stacks platform, identidad y apps) pero **no
+aplicado**: no tocar Azure sin indicación explícita del usuario. Despliegue completo con
+`make desplegar` (login con Easy Auth + Entra ID, ver docs/despliegue.md); el deploy de CI
+está desactivado hasta `DEPLOY_AZURE=true`. Proveedor de modelos configurable
+(docs/modelos.md). Siguiente: primer `make desplegar` y pruebas en la nube.
 
 ## Cómo trabajar en este repo
 - Antes de codear una feature, confirma en qué fase estamos.
