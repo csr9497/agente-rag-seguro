@@ -64,11 +64,18 @@ requisitos() {
 
 requisitos_login() {
   local var # también desde .env (no se sube a git): GH_OAUTH_CLIENT_ID=… / GH_OAUTH_CLIENT_SECRET=…
-  for var in GH_OAUTH_CLIENT_ID GH_OAUTH_CLIENT_SECRET ADMINISTRADORES_GITHUB; do
+  for var in GH_OAUTH_CLIENT_ID GH_OAUTH_CLIENT_SECRET ADMINISTRADORES_GITHUB LANGSMITH_API_KEY; do
     if [[ -z ${!var:-} && -f .env ]] && grep -qE "^$var=.+" .env; then
       export "$var=$(grep -E "^$var=" .env | tail -1 | cut -d= -f2- | sed -E "s/^['\"]//; s/['\"]$//")"
     fi
   done
+  # Trazas en LangSmith (modo enmascarado en la nube): la clave va a Key Vault.
+  if [[ -n ${LANGSMITH_API_KEY:-} ]]; then
+    export TF_VAR_langsmith_api_key=$LANGSMITH_API_KEY
+    echo "✅ trazas en LangSmith (proyecto agente-rag-ragseg-dev, enmascaradas)"
+  else
+    echo "ℹ️  sin LANGSMITH_API_KEY en .env: la app en la nube no enviará trazas a LangSmith"
+  fi
   if [[ -z $LOGIN_PROVEEDOR ]]; then
     if [[ -n ${GH_OAUTH_CLIENT_ID:-} ]]; then LOGIN_PROVEEDOR=github; else LOGIN_PROVEEDOR=ip; fi
   fi
@@ -104,6 +111,17 @@ region_postgres() {
     fi
   done
   return 1
+}
+
+enlace_langsmith() { # enlace directo al proyecto de trazas de la nube (si hay clave)
+  [[ -n ${LANGSMITH_API_KEY:-$(grep -E '^LANGSMITH_API_KEY=.+' .env 2> /dev/null | cut -d= -f2-)} ]] || return 0
+  LANGSMITH_API_KEY=${LANGSMITH_API_KEY:-$(grep -E '^LANGSMITH_API_KEY=' .env | tail -1 | cut -d= -f2-)} \
+    uv run python - << 'PY' 2> /dev/null || echo "   LangSmith: https://smith.langchain.com (proyecto agente-rag-ragseg-dev)"
+from langsmith import Client
+c = Client()
+p = c.read_project(project_name="agente-rag-ragseg-dev")
+print(f"   LangSmith: https://smith.langchain.com/o/{p.tenant_id}/projects/p/{p.id}")
+PY
 }
 
 esperar_job() { # esperar_job <job> <grupo>: hasta Succeeded/Failed (10 min)
@@ -212,6 +230,7 @@ comprobar() {
     echo "   Inicia sesión: los administradores tienen todos los roles y asignan roles a otras"
     echo "   personas desde la app (Roles y permisos → Personas y sus roles)."
   fi
+  enlace_langsmith
   echo "   Estado: make estado-nube · Eliminar todo: make destruir-nube"
 }
 
