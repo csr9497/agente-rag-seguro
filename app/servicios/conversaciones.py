@@ -2,6 +2,7 @@
 consultados, los citados y cuántos fragmentos se descartaron por permisos."""
 
 import logging
+from collections.abc import Callable
 
 from app.graph.agente import Agente
 from app.models.schemas import Turno, Usuario
@@ -12,6 +13,7 @@ from app.persistencia.modelos import (
     ResumenConversacion,
 )
 from app.persistencia.repositorios import RepositorioConversaciones
+from app.security.acl import grupos_efectivos
 from app.security.deteccion import TIPOS_PII, enmascarar_pii
 from app.servicios.errores import NoEncontradoError, PermisoDenegadoError
 from app.servicios.roles import ServicioRoles
@@ -26,11 +28,13 @@ class ServicioConversaciones:
         roles: ServicioRoles,
         agente: Agente,
         max_turnos: int = 3,
+        departamentos_de: Callable[[str], list[str]] = lambda _: [],
     ) -> None:
         self._repo = repo
         self._roles = roles
         self._agente = agente
         self._max_turnos = max_turnos
+        self._departamentos_de = departamentos_de
 
     def iniciar(self, usuario: Usuario, rol_id: str) -> Conversacion:
         rol = self._roles.actuar_como(usuario, rol_id)
@@ -56,10 +60,12 @@ class ServicioConversaciones:
 
     def preguntar(self, usuario: Usuario, conversacion_id: str, pregunta: str) -> MensajeGuardado:
         conv = self.obtener(usuario, conversacion_id)
-        # El agente solo recibe el rol de la conversación: nunca más grupos que ese.
+        # El agente recibe el rol de la conversación (nunca otro) más los grupos que dan acceso
+        # a documentos internos («dept:») y restringidos («user:») de esta persona.
+        grupos = grupos_efectivos(usuario.id, [conv.rol_id], self._departamentos_de(usuario.id))
         resultado = self._agente.consultar_detallado(
             pregunta,
-            Usuario(id=usuario.id, groups=[conv.rol_id]),
+            Usuario(id=usuario.id, groups=grupos),
             conversacion_id=conv.id,
             historial=self._historial(conv),
         )

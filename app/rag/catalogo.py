@@ -10,6 +10,8 @@ from collections.abc import Iterable, Mapping
 
 from pydantic import BaseModel, Field
 
+from app.security.acl import es_rol
+
 
 class CatalogoRol(BaseModel):
     roles: list[str] = Field(default_factory=list, description="«Nombre: descripción» de cada rol")
@@ -52,7 +54,7 @@ def construir_catalogo(
     ids = {titulo: doc_id for doc_id, titulo, de in documentos if set(de) & set(grupos)}
     visibles = sorted(ids)
     descritos = []
-    for rol in grupos:
+    for rol in (g for g in grupos if es_rol(g)):  # «dept:»/«user:» no son roles
         nombre, descripcion = roles.get(rol, (rol, ""))
         descritos.append(f"{nombre}: {descripcion}" if descripcion else nombre)
     consultables = [

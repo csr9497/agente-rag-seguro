@@ -1,6 +1,6 @@
 # Asistente multiagente seguro (RAG + RR.HH. + Soporte)
 
-**Fecha:** 2026-10-01 · **Estado:** fase 1 terminada (2026-10-01) · **Spec de origen:** la entregada por el
+**Fecha:** 2026-10-01 · **Estado:** fases 1 y 2 terminadas (2026-10-01) · **Spec de origen:** la entregada por el
 usuario («SPEC — Asistente multiagente seguro»), que se resume aquí con las decisiones tomadas.
 
 ## Punto de partida (lo que había)
@@ -52,3 +52,16 @@ Piezas nuevas y aisladas; el grafo actual no cambia.
 | `sanitize_output` | Reutiliza `neutralizar` y el enmascarado de PII; marca la salida como `<dato_herramienta>` |
 | `AuditSink` | Una fila por decisión de tool (hash de args, decisión, `approver_id`); en memoria y log (tabla en la fase 3) |
 | Presupuestos | Iteraciones y tiempo en el estado del subgrafo |
+
+## Fase 2 — rag_agent (hecha)
+
+| Pieza | Qué hace |
+|---|---|
+| `app/security/acl.py` | ACL en `acl_groups`: rol (confidencial), `dept:<d>` (interno), `user:<id>` (restringido), `public`. Grupos efectivos del usuario = rol + `dept:` + `user:`. Solo formatos sin comillas, comas ni espacios (acaban en filtros OData) |
+| Registro | `documentos.revocado` y `documentos.expira_en` (migración aditiva); `documento_departamentos`, `documento_usuarios`, `usuario_departamentos` (`DEPARTAMENTOS_INICIALES`) y `solicitudes_acceso` |
+| Ingesta | `<documento>.acl.json` junto al original (roles, departamentos, usuarios, expira_en); departamentos inexistentes se rechazan |
+| `VerificadorRegistro` | Además rechaza documentos revocados o caducados (también en el grafo actual) |
+| Caché | El alcance se calcula con lo que el usuario ve AHORA: revocar o caducar un documento lo cambia (antes no: fallo latente corregido); `user:` no fragmenta la caché salvo que dé acceso a algo |
+| `app/agents/rag.py` | `search_documents` (filtro en la consulta + re-chequeo en la tool), `get_document_metadata` (ajeno = inexistente), `request_document_access` (`confirm_user`; misma respuesta exista o no el documento). Registrado en `build_registro_agentes` |
+
+**Decisión:** `access_guardrail` se mantiene en el grafo actual hasta la fase 5 (opción A); `rag_agent` no lo necesita.

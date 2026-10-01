@@ -10,6 +10,7 @@ from sqlalchemy import (
     String,
     Table,
     Text,
+    false,
 )
 
 metadata = MetaData()
@@ -60,13 +61,57 @@ documentos = Table(
     Column("motivo_estado", Text),
     Column("subido_por", String(64)),
     Column("indexado_en", String(32), nullable=False),
+    # Re-chequeo antes de generar: un documento revocado o caducado deja de verse aunque
+    # siga en el índice.
+    Column("revocado", Boolean, nullable=False, server_default=false()),
+    Column("expira_en", String(32)),
 )
 
+# ACL del documento (app/security/acl.py): roles (confidencial), departamentos (interno) y
+# usuarios (restringido). En el índice van juntos en acl_groups («dept:<d>», «user:<id>»).
 documento_roles = Table(
     "documento_roles",
     metadata,
     Column("doc_id", ForeignKey("documentos.doc_id", ondelete="CASCADE"), primary_key=True),
     Column("rol_id", ForeignKey("roles.id"), primary_key=True),
+)
+
+documento_departamentos = Table(
+    "documento_departamentos",
+    metadata,
+    Column("doc_id", ForeignKey("documentos.doc_id", ondelete="CASCADE"), primary_key=True),
+    Column("departamento_id", ForeignKey("departamentos.id"), primary_key=True),
+)
+
+documento_usuarios = Table(
+    "documento_usuarios",
+    metadata,
+    Column("doc_id", ForeignKey("documentos.doc_id", ondelete="CASCADE"), primary_key=True),
+    Column("usuario_id", String(128), primary_key=True),
+)
+
+# Solicitudes de acceso a documentos (rag_agent.request_document_access). doc_id y
+# propietario solo se rellenan si el título coincide: la respuesta al usuario es la misma.
+solicitudes_acceso = Table(
+    "solicitudes_acceso",
+    metadata,
+    Column("id", String(36), primary_key=True),
+    Column("solicitante_id", String(160), nullable=False, index=True),
+    Column("titulo", String(200), nullable=False),
+    Column("motivo", Text, nullable=False),
+    Column("doc_id", String(400)),
+    Column("propietario_id", String(160)),
+    Column("estado", String(16), nullable=False),  # pendiente | concedida | denegada
+    Column("trace_id", String(64)),
+    Column("creada_en", String(32), nullable=False),
+)
+
+# Departamento(s) de cada persona: dan acceso a los documentos internos de ese departamento.
+usuario_departamentos = Table(
+    "usuario_departamentos",
+    metadata,
+    Column("usuario_id", String(160), primary_key=True),
+    Column("departamento_id", ForeignKey("departamentos.id"), primary_key=True),
 )
 
 conversaciones = Table(

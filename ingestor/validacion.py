@@ -18,6 +18,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.security.acl import entrada_valida
 from app.security.deteccion import CONTROL, INVISIBLES, detectar_inyeccion
 
 EXTENSIONES_PERMITIDAS = frozenset({".md", ".txt"})
@@ -73,7 +74,7 @@ def validar_documento(
     if roles is not None:
         if not roles:
             return _rechazo(doc_id, "roles: el documento debe tener al menos un rol")
-        if invalidos := [r for r in roles if not _GRUPO.match(r)]:
+        if invalidos := [r for r in roles if not entrada_valida(r)]:
             return _rechazo(doc_id, f"roles: identificadores no válidos {invalidos}")
         acl = sorted(set(roles))
 

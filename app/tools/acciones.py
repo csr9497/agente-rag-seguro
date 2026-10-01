@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.acciones.modelos import CATALOGO, TipoAccion
 from app.acciones.servicio import ServicioAcciones
 from app.models.schemas import Usuario
+from app.security.acl import es_rol
 from app.servicios.errores import DatosInvalidosError, PermisoDenegadoError
 from app.tools.base import ResultadoHerramienta
 
@@ -40,14 +41,15 @@ class ProponerAccion:
         self, args: ProponerAccionArgs, usuario: Usuario, top_k: int
     ) -> ResultadoHerramienta:
         datos = args.model_dump(exclude={"accion"}, exclude_none=True, mode="json")
-        if len(usuario.groups) != 1:
+        roles = [g for g in usuario.groups if es_rol(g)]  # sin «dept:»/«user:»
+        if len(roles) != 1:
             # La acción se propone y se aprueba con un rol concreto: con varios, no se elige uno
             # al azar (solo pasa fuera de una conversación, p. ej. /consultar).
             return ResultadoHerramienta(
                 nota="No se pudo preparar la acción: hazlo desde una conversación con un rol."
             )
         try:
-            propuesta = self._servicio.proponer(args.accion, datos, usuario.groups[0], usuario.id)
+            propuesta = self._servicio.proponer(args.accion, datos, roles[0], usuario.id)
         except (PermisoDenegadoError, DatosInvalidosError) as exc:
             return ResultadoHerramienta(nota=f"No se pudo preparar la acción: {exc}")
         return ResultadoHerramienta(

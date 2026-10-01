@@ -23,7 +23,10 @@ def repo_roles() -> SqlRepositorioRoles:
 def client(agente, repo_roles):
     app.dependency_overrides[get_agente] = lambda: agente
     # /consultar solo usa los roles activos del registro (sin el resto de servicios).
-    servicios = SimpleNamespace(roles=ServicioRoles(repo_roles, seleccion_libre=False))
+    servicios = SimpleNamespace(
+        roles=ServicioRoles(repo_roles, seleccion_libre=False),
+        departamentos=SimpleNamespace(de=lambda _: []),
+    )
     app.dependency_overrides[get_servicios] = lambda: servicios
     yield TestClient(app)  # sin `with`: no se ejecuta el lifespan (no toca Azure)
     app.dependency_overrides.clear()

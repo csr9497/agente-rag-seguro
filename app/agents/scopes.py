@@ -9,6 +9,8 @@ from collections.abc import Iterable
 
 from pydantic import BaseModel, ConfigDict
 
+from app.security.acl import grupos_efectivos
+
 # Lo que puede hacer cualquier empleado sobre lo suyo.
 _EMPLEADO = frozenset({
     "docs:read", "docs:request",
@@ -38,10 +40,15 @@ class UserContext(BaseModel):
     id: str
     roles: tuple[str, ...]
     scopes: frozenset[str]
+    # Grupos efectivos para la ACL de documentos (rol + «dept:» + «user:», app/security/acl.py).
+    acl: tuple[str, ...] = ()
 
 
-def contexto_de_usuario(user_id: str, roles: Iterable[str]) -> UserContext:
+def contexto_de_usuario(
+    user_id: str, roles: Iterable[str], departamentos: Iterable[str] = ()
+) -> UserContext:
     """Roles desconocidos no aportan scopes (deny by default)."""
     roles = tuple(roles)
     scopes: frozenset[str] = frozenset().union(*(ROLE_SCOPES.get(r, frozenset()) for r in roles))
-    return UserContext(id=user_id, roles=roles, scopes=scopes)
+    acl = tuple(grupos_efectivos(user_id, roles, departamentos))
+    return UserContext(id=user_id, roles=roles, scopes=scopes, acl=acl)

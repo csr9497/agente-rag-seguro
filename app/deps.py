@@ -10,6 +10,8 @@ from qdrant_client import QdrantClient
 from sqlalchemy import Engine
 
 from app.acciones.servicio import ServicioAcciones
+from app.agents.rag import HerramientasRag, crear_rag_agent
+from app.agents.registry import RegistroAgentes
 from app.cache.semantica import CacheMemoria, CacheRedis, CacheSemantica, alcance_de_permisos
 from app.config import Settings
 from app.datos.catalogo import CONSULTAS, permisos_por_consulta
@@ -21,8 +23,10 @@ from app.persistencia.repositorios import (
     RepositorioDocumentos,
     RepositorioRoles,
     SqlRepositorioConversaciones,
+    SqlRepositorioDepartamentosUsuario,
     SqlRepositorioDocumentos,
     SqlRepositorioRoles,
+    SqlRepositorioSolicitudesAcceso,
     crear_motor,
     inicializar,
 )
@@ -142,6 +146,10 @@ class Servicios:
     repo_roles: RepositorioRoles
     retriever: Retriever
     acciones: ServicioAcciones
+    departamentos: SqlRepositorioDepartamentosUsuario
+    solicitudes: SqlRepositorioSolicitudesAcceso
+    embedder: Embedder
+    settings: Settings
 
     def verificar_integridad(self) -> InformeIntegridad:
         return verificar_integridad(self.retriever, self.registro, self.repo_roles)
@@ -163,6 +171,8 @@ def build_servicios(
     inicializar(motor)
     repo_roles = SqlRepositorioRoles(motor)
     registro = SqlRepositorioDocumentos(motor)
+    departamentos = SqlRepositorioDepartamentosUsuario(motor)
+    departamentos.iniciales(settings.departamentos_iniciales)
     cache, alcance = None, None
     if settings.cache_semantica:
         version = f"{settings.modelos_proveedor}:{settings.modelo_chat}:{settings.app_version}"
@@ -196,16 +206,43 @@ def build_servicios(
             almacen=build_almacen(settings),
             shields=shields,
             shields_fallo=settings.content_safety_fallo,
+            departamentos=departamentos.existentes,
         ),
         roles=roles,
         conversaciones=ServicioConversaciones(
-            SqlRepositorioConversaciones(motor), roles, agente, settings.max_turnos_historial
+            SqlRepositorioConversaciones(motor),
+            roles,
+            agente,
+            settings.max_turnos_historial,
+            departamentos_de=departamentos.de,
         ),
         registro=registro,
         repo_roles=repo_roles,
         retriever=retriever,
         acciones=ServicioAcciones(motor),
+        departamentos=departamentos,
+        solicitudes=SqlRepositorioSolicitudesAcceso(motor),
+        embedder=embedder,
+        settings=settings,
     )
+
+
+def build_registro_agentes(servicios: Servicios) -> RegistroAgentes:
+    """Agentes de la orquestación multiagente (ver app/agents/). Agregar uno es registrarlo
+    aquí: el grafo principal no cambia."""
+    registro = RegistroAgentes()
+    registro.register(
+        crear_rag_agent(
+            HerramientasRag(
+                servicios.embedder, servicios.retriever, servicios.registro,
+                VerificadorRegistro(servicios.registro, permisos_por_consulta()),
+                servicios.solicitudes,
+                top_k=servicios.settings.retrieval_top_k,
+                min_score=servicios.settings.min_score,
+            )
+        )
+    )  # fmt: skip
+    return registro
 
 
 def build_prompts(settings: Settings) -> RegistroPrompts:

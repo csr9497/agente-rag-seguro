@@ -104,3 +104,36 @@ class GuardrailQueBloquea:
             hallazgo = Hallazgo(tipo="inyeccion", detalle=self.palabra, accion="bloquear")
             return Veredicto(permitido=False, texto=texto, hallazgos=[hallazgo])
         return Veredicto(permitido=True, texto=texto)
+
+
+class GuionLLM:
+    """LLM con tool-calling por guion: turnos[i] son las llamadas de la iteración i; al acabar
+    responde `final` sin herramientas."""
+
+    def __init__(self, turnos: list[list[tuple[str, dict | str]]], final: str = "Hecho.") -> None:
+        self.turnos, self.final = turnos, final
+        self.llamadas: list[list[dict[str, Any]]] = []
+
+    def decidir(self, mensajes, herramientas, obligar_herramienta=False) -> DecisionSupervisor:  # noqa: ANN001
+        self.llamadas.append([dict(m) for m in mensajes])
+        self.herramientas = herramientas
+        i = len(self.llamadas) - 1
+        if i >= len(self.turnos):
+            return DecisionSupervisor(
+                tool_calls=[], mensaje_asistente={"role": "assistant", "content": self.final}
+            )
+        calls = [
+            ToolCall(id=f"c{i}{j}", nombre=n, argumentos=a if isinstance(a, str) else json.dumps(a))
+            for j, (n, a) in enumerate(self.turnos[i])
+        ]
+        return DecisionSupervisor(
+            tool_calls=calls,
+            mensaje_asistente={
+                "role": "assistant", "content": None,
+                "tool_calls": [
+                    {"id": c.id, "type": "function",
+                     "function": {"name": c.nombre, "arguments": c.argumentos}}
+                    for c in calls
+                ],
+            },
+        )  # fmt: skip

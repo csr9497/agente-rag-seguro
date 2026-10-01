@@ -17,6 +17,7 @@ from app.graph.agente import Agente
 from app.modelos.errores import ModeloError, clasificar
 from app.models.schemas import ConsultaRequest, RespuestaConsulta, Usuario
 from app.retrieval.no_configurado import ProveedorNoConfiguradoError
+from app.security.acl import grupos_efectivos
 from app.security.identity import get_usuario
 from app.servicios.errores import DatosInvalidosError, NoEncontradoError, PermisoDenegadoError
 
@@ -149,6 +150,13 @@ def consultar(
     # Solo los roles del usuario que siguen activos en el registro: un rol desactivado desde
     # la interfaz deja de dar acceso también aquí. La auditoría la hace el grafo (nodo audit).
     usuario = servicios.roles.solo_activos(usuario)
+    usuario = usuario.model_copy(
+        update={
+            "groups": grupos_efectivos(
+                usuario.id, usuario.groups, servicios.departamentos.de(usuario.id)
+            )
+        }
+    )
     try:
         return agente.consultar(body.pregunta, usuario, top_k=body.top_k)
     except ProveedorNoConfiguradoError as exc:

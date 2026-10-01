@@ -10,6 +10,7 @@ Lo usan el CLI de ingesta y la API (/documentos):
 
 import hashlib
 import logging
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
 from typing import Literal
@@ -21,6 +22,7 @@ from app.persistencia.almacen import AlmacenDocumentos
 from app.persistencia.modelos import DocumentoRegistrado
 from app.persistencia.repositorios import RepositorioDocumentos, RepositorioRoles
 from app.retrieval.base import Embedder, Retriever
+from app.security.acl import es_rol
 from app.security.content_safety import (
     ClienteShields,
     ContentSafetyError,
@@ -77,7 +79,10 @@ class GestorDocumentos:
         almacen: AlmacenDocumentos | None = None,
         shields: ClienteShields | None = None,
         shields_fallo: Literal["cerrado", "abierto"] = "cerrado",
+        departamentos: Callable[[], set[str]] | None = None,
     ) -> None:
+        # Departamentos existentes: una ACL con «dept:<d>» desconocido se rechaza.
+        self._departamentos = departamentos
         self._embedder = embedder
         self._retriever = retriever
         self._registro = registro
@@ -113,6 +118,7 @@ class GestorDocumentos:
         forzar: bool = False,
         roles: list[str] | None = None,
         subido_por: str | None = None,
+        expira_en: str | None = None,
     ) -> ResultadoOperacion:
         validado = validar_documento(doc_id, datos, roles=roles)
         if not validado.aceptado or validado.texto is None:
@@ -131,11 +137,20 @@ class GestorDocumentos:
         previo = self._retriever.document_hash(doc_id)
         registrado = self._registro.obtener(doc_id) if self._registro else None
         mismos_roles = registrado is None or registrado.roles == acl
+        if registrado is not None and registrado.expira_en != expira_en and previo == doc_hash:
+            # Solo cambia la caducidad: se actualiza el registro sin reindexar.
+            self._registrar(doc_id, validado.texto, acl, doc_hash, subido_por, expira_en=expira_en)
+            if mismos_roles and not forzar:
+                return ResultadoOperacion(
+                    doc_id=doc_id, estado="actualizado", avisos=validado.avisos
+                )
         if previo == doc_hash and mismos_roles and not forzar:
             if self._registro and registrado is None:
                 # Ya indexado pero no registrado (otro registro: p. ej. la app local contra el
                 # índice de la nube, o un registro que falló a mitad): se registra sin reindexar.
-                self._registrar(doc_id, validado.texto, acl, doc_hash, subido_por)
+                self._registrar(
+                    doc_id, validado.texto, acl, doc_hash, subido_por, expira_en=expira_en
+                )
                 validado.avisos.append("registrado (ya estaba indexado)")
             return ResultadoOperacion(doc_id=doc_id, estado="sin_cambios", avisos=validado.avisos)
 
@@ -171,7 +186,9 @@ class GestorDocumentos:
         # Registro después del índice: si fallara, access_guardrail descarta los chunks
         # (no registrados) hasta que un reintento lo complete.
         if self._registro:
-            self._registrar(doc_id, validado.texto, acl, doc_hash, subido_por, chunks)
+            self._registrar(
+                doc_id, validado.texto, acl, doc_hash, subido_por, chunks, expira_en=expira_en
+            )
 
         return ResultadoOperacion(
             doc_id=doc_id,
@@ -188,6 +205,7 @@ class GestorDocumentos:
         doc_hash: str,
         subido_por: str | None,
         chunks: list | None = None,
+        expira_en: str | None = None,
     ) -> None:
         if chunks is None:  # mismo troceo que al indexar, sin embeddings
             chunks = chunk_document(
@@ -202,16 +220,21 @@ class GestorDocumentos:
                 doc_hash=doc_hash,
                 chunks=len(chunks),
                 subido_por=subido_por,
+                expira_en=expira_en,
                 indexado_en=chunks[0].indexado_en if chunks else "",
             )
         )
 
     def _roles_no_validos(self, acl: list[str]) -> str | None:
-        if self._roles is None:
-            return None
-        activos = {r.id for r in self._roles.listar(incluir_inactivos=False)}
-        if faltan := [r for r in acl if r not in activos]:
-            return f"roles: no existen o están inactivos {faltan}"
+        if self._roles is not None:
+            activos = {r.id for r in self._roles.listar(incluir_inactivos=False)}
+            if faltan := [r for r in acl if es_rol(r) and r not in activos]:
+                return f"roles: no existen o están inactivos {faltan}"
+        if self._departamentos is not None:
+            existentes = self._departamentos()
+            deptos = [g.removeprefix("dept:") for g in acl if g.startswith("dept:")]
+            if faltan := [d for d in deptos if d not in existentes]:
+                return f"departamentos: no existen {faltan}"
         return None
 
     def eliminar(self, doc_id: str) -> ResultadoOperacion:
@@ -241,7 +264,9 @@ class GestorDocumentos:
                     doc_id=crudo.doc_id, estado="rechazado", motivos=[crudo.motivo_descarte]
                 )
             else:
-                r = self.indexar(crudo.doc_id, crudo.datos, roles=crudo.roles)
+                r = self.indexar(
+                    crudo.doc_id, crudo.datos, roles=crudo.roles, expira_en=crudo.expira_en
+                )
             _log(r)
             operaciones.append(r)
 

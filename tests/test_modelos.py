@@ -204,7 +204,8 @@ def test_api_responde_con_el_tipo_de_error_y_audita(crear_agente, caplog) -> Non
     from app.api.dependencias import get_servicios
 
     app.dependency_overrides[get_servicios] = lambda: SimpleNamespace(
-        roles=SimpleNamespace(solo_activos=lambda u: u)
+        roles=SimpleNamespace(solo_activos=lambda u: u),
+        departamentos=SimpleNamespace(de=lambda _: []),
     )
     try:
         with caplog.at_level(logging.INFO):

@@ -32,7 +32,9 @@ from app.persistencia.modelos import (
     MensajeGuardado,
     ResumenConversacion,
     Rol,
+    SolicitudAcceso,
 )
+from app.security.acl import es_rol
 
 _CAMPOS_DATOS = {
     "citas",
@@ -70,6 +72,7 @@ class RepositorioDocumentos(Protocol):
         self, rol_id: str | None = None, estado: EstadoDocumento | None = None
     ) -> list[DocumentoRegistrado]: ...
     def marcar_estado(self, doc_id: str, estado: EstadoDocumento, motivo: str | None) -> None: ...
+    def marcar_revocado(self, doc_id: str, revocado: bool) -> None: ...
     def eliminar(self, doc_id: str) -> bool: ...
 
 
@@ -146,6 +149,14 @@ def _migrar(motor: Engine) -> None:
     if "usuario_id" not in columnas:
         with motor.begin() as c:
             c.execute(text("ALTER TABLE conversaciones ADD COLUMN usuario_id VARCHAR(128)"))
+    columnas = {c["name"] for c in inspect(motor).get_columns("documentos")}
+    with motor.begin() as c:
+        if "revocado" not in columnas:
+            c.execute(
+                text("ALTER TABLE documentos ADD COLUMN revocado BOOLEAN NOT NULL DEFAULT FALSE")
+            )
+        if "expira_en" not in columnas:
+            c.execute(text("ALTER TABLE documentos ADD COLUMN expira_en VARCHAR(32)"))
 
 
 def inicializar(motor: Engine) -> None:
@@ -246,12 +257,28 @@ class SqlRepositorioDocumentos:
         self._motor = motor
 
     def registrar(self, doc: DocumentoRegistrado) -> None:
+        """La ACL se reparte en sus tablas: roles, departamentos (FK) y usuarios."""
         datos = doc.model_dump(exclude={"roles"})
+        roles = [g for g in doc.roles if es_rol(g)]
+        deptos = [g.removeprefix("dept:") for g in doc.roles if g.startswith("dept:")]
+        usuarios = [g.removeprefix("user:") for g in doc.roles if g.startswith("user:")]
         with self._motor.begin() as c:
             c.execute(delete(t.documentos).where(t.documentos.c.doc_id == doc.doc_id))
             c.execute(insert(t.documentos).values(**datos))
+            for tabla, columna, valores in (
+                (t.documento_roles, "rol_id", roles),
+                (t.documento_departamentos, "departamento_id", deptos),
+                (t.documento_usuarios, "usuario_id", usuarios),
+            ):
+                if valores:
+                    c.execute(insert(tabla), [{"doc_id": doc.doc_id, columna: v} for v in valores])
+
+    def marcar_revocado(self, doc_id: str, revocado: bool) -> None:
+        with self._motor.begin() as c:
             c.execute(
-                insert(t.documento_roles), [{"doc_id": doc.doc_id, "rol_id": r} for r in doc.roles]
+                update(t.documentos)
+                .where(t.documentos.c.doc_id == doc_id)
+                .values(revocado=revocado)
             )
 
     def obtener(self, doc_id: str) -> DocumentoRegistrado | None:
@@ -283,11 +310,80 @@ class SqlRepositorioDocumentos:
             consulta = consulta.where(condicion)
         with self._motor.connect() as c:
             filas = c.execute(consulta).mappings().all()
-            roles = c.execute(select(t.documento_roles)).all()
-        return [
-            DocumentoRegistrado(**fila, roles=[r for d, r in roles if d == fila["doc_id"]])
-            for fila in filas
-        ]
+            acl: dict[str, list[str]] = {}
+            for prefijo, tabla in (
+                ("", t.documento_roles),
+                ("dept:", t.documento_departamentos),
+                ("user:", t.documento_usuarios),
+            ):
+                for doc_id, valor in c.execute(select(tabla)).all():
+                    acl.setdefault(doc_id, []).append(f"{prefijo}{valor}")
+        return [DocumentoRegistrado(**fila, roles=acl.get(fila["doc_id"], [])) for fila in filas]
+
+
+# ------------------------------------------------------------------ solicitudes de acceso
+class SqlRepositorioSolicitudesAcceso:
+    def __init__(self, motor: Engine) -> None:
+        self._motor = motor
+
+    def crear(self, solicitud: SolicitudAcceso) -> SolicitudAcceso:
+        guardada = solicitud.model_copy(
+            update={"id": solicitud.id or str(uuid.uuid4()), "creada_en": ahora()}
+        )
+        with self._motor.begin() as c:
+            c.execute(insert(t.solicitudes_acceso).values(**guardada.model_dump()))
+        return guardada
+
+    def de_solicitante(self, solicitante_id: str) -> list[SolicitudAcceso]:
+        with self._motor.connect() as c:
+            filas = c.execute(
+                select(t.solicitudes_acceso)
+                .where(t.solicitudes_acceso.c.solicitante_id == solicitante_id)
+                .order_by(t.solicitudes_acceso.c.creada_en)
+            ).mappings()
+            return [SolicitudAcceso(**f) for f in filas]
+
+
+# ------------------------------------------------------------------ departamentos de personas
+class SqlRepositorioDepartamentosUsuario:
+    def __init__(self, motor: Engine) -> None:
+        self._motor = motor
+
+    def de(self, usuario_id: str) -> list[str]:
+        with self._motor.connect() as c:
+            filas = c.execute(
+                select(t.usuario_departamentos.c.departamento_id)
+                .where(t.usuario_departamentos.c.usuario_id == usuario_id)
+                .order_by(t.usuario_departamentos.c.departamento_id)
+            ).all()
+        return [f[0] for f in filas]
+
+    def existentes(self) -> set[str]:
+        with self._motor.connect() as c:
+            return {f[0] for f in c.execute(select(t.departamentos.c.id)).all()}
+
+    def iniciales(self, asignaciones: dict[str, list[str]]) -> None:
+        """Arranque: añade lo que falte (nunca quita) e ignora departamentos inexistentes."""
+        existentes = self.existentes()
+        for usuario_id, deptos in asignaciones.items():
+            usuario_id = usuario_id.strip().lower()
+            actuales = set(self.de(usuario_id))
+            if nuevos := (set(deptos) & existentes) - actuales:
+                self.asignar(usuario_id, sorted(actuales | nuevos))
+
+    def asignar(self, usuario_id: str, departamentos: list[str]) -> None:
+        """Sustituye los departamentos de la persona (FK: deben existir)."""
+        with self._motor.begin() as c:
+            c.execute(
+                delete(t.usuario_departamentos).where(
+                    t.usuario_departamentos.c.usuario_id == usuario_id
+                )
+            )
+            if departamentos:
+                c.execute(
+                    insert(t.usuario_departamentos),
+                    [{"usuario_id": usuario_id, "departamento_id": d} for d in set(departamentos)],
+                )
 
 
 # ------------------------------------------------------------------ conversaciones

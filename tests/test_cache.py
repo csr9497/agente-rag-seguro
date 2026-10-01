@@ -209,3 +209,40 @@ def test_respuestas_sin_contexto_no_se_cachean(entorno) -> None:
     c.llm.salida = RespuestaLLM(respuesta="No lo sé", citas_usadas=[], encontrado=False)
     assert s.agente.consultar("¿Capital de Francia?", PUBLIC).sin_contexto
     assert not s.agente.consultar_detallado("¿Capital de Francia?", PUBLIC).desde_cache
+
+
+def test_revocar_un_documento_cambia_el_alcance(entorno) -> None:
+    """Una respuesta construida con un documento revocado no puede volver a servirse."""
+    s, _ = entorno
+    antes = alcance_de_permisos(s.registro, ["public"], "v1")
+    doc = next(d for d in s.registro.listar() if "public" in d.roles)
+    s.registro.marcar_revocado(doc.doc_id, True)
+    assert alcance_de_permisos(s.registro, ["public"], "v1") != antes
+
+
+def test_un_documento_que_caduca_cambia_el_alcance(entorno) -> None:
+    from datetime import UTC, datetime
+
+    s, _ = entorno
+    doc = next(d for d in s.registro.listar() if "public" in d.roles)
+    s.registro.registrar(doc.model_copy(update={"expira_en": "2026-10-15T00:00:00+00:00"}))
+    vigente = alcance_de_permisos(
+        s.registro, ["public"], "v1", ahora=datetime(2026, 10, 1, tzinfo=UTC)
+    )
+    caducado = alcance_de_permisos(
+        s.registro, ["public"], "v1", ahora=datetime(2026, 10, 16, tzinfo=UTC)
+    )
+    assert vigente != caducado
+
+
+def test_misma_visibilidad_comparte_alcance_y_un_permiso_individual_no(entorno) -> None:
+    """user:<id> en los grupos no fragmenta la caché salvo que dé acceso a algo."""
+    s, _ = entorno
+    ana = alcance_de_permisos(s.registro, ["public", "user:github:ana"], "v1")
+    luis = alcance_de_permisos(s.registro, ["public", "user:github:luis"], "v1")
+    assert ana == luis
+    doc = next(d for d in s.registro.listar() if "rrhh" in d.roles)
+    s.registro.registrar(doc.model_copy(update={"roles": ["rrhh", "user:github:ana"]}))
+    assert alcance_de_permisos(s.registro, ["public", "user:github:ana"], "v1") != (
+        alcance_de_permisos(s.registro, ["public", "user:github:luis"], "v1")
+    )

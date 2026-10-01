@@ -93,6 +93,9 @@ class Settings(BaseSettings):
     # Roles que se asignan al arrancar (si faltan) a personas concretas, p. ej. el primer
     # administrador con login de GitHub: {"github:usuario": ["administrador", "public"]}.
     asignaciones_iniciales: dict[str, list[str]] = {}
+    # Departamento(s) de cada persona al arrancar (DEPARTAMENTOS_INICIALES, JSON): dan acceso a
+    # los documentos internos de ese departamento. Solo añade; los inexistentes se ignoran.
+    departamentos_iniciales: dict[str, list[str]] = {}
     entra_tenant_id: str = ""
     entra_audiencia: str = Field(default="", description="Client ID o App ID URI de la API")
     entra_claim_roles: str = "roles"
