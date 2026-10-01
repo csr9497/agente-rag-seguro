@@ -98,3 +98,4 @@ tf-validate: ## fmt + validate de los stacks de Terraform
 	terraform fmt -check -recursive infra
 	for s in platform identidad apps; do terraform -chdir=infra/$$s init -backend=false -input=false >/dev/null && terraform -chdir=infra/$$s validate; done
 	terraform -chdir=infra/platform test
+	terraform -chdir=infra/apps test

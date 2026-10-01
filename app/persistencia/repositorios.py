@@ -58,6 +58,9 @@ class RepositorioRoles(Protocol):
     def listar(self, incluir_inactivos: bool = True) -> list[Rol]: ...
     def obtener(self, rol_id: str) -> Rol | None: ...
     def guardar(self, rol: Rol) -> Rol: ...
+    def roles_de_usuario(self, usuario_id: str) -> list[str]: ...
+    def asignaciones(self) -> dict[str, list[str]]: ...
+    def asignar(self, usuario_id: str, roles: list[str], por: str) -> None: ...
 
 
 class RepositorioDocumentos(Protocol):
@@ -186,6 +189,33 @@ class SqlRepositorioRoles:
 
     def obtener(self, rol_id: str) -> Rol | None:
         return next((r for r in self.listar() if r.id == rol_id), None)
+
+    # ------------------------------------------------------------ asignaciones a personas
+    def roles_de_usuario(self, usuario_id: str) -> list[str]:
+        consulta = select(t.usuario_roles.c.rol_id).where(
+            t.usuario_roles.c.usuario_id == usuario_id
+        )
+        with self._motor.connect() as c:
+            return sorted(c.execute(consulta).scalars())
+
+    def asignaciones(self) -> dict[str, list[str]]:
+        with self._motor.connect() as c:
+            filas = c.execute(select(t.usuario_roles.c.usuario_id, t.usuario_roles.c.rol_id)).all()
+        resultado: dict[str, list[str]] = {}
+        for usuario, rol in sorted(filas):
+            resultado.setdefault(usuario, []).append(rol)
+        return resultado
+
+    def asignar(self, usuario_id: str, roles: list[str], por: str) -> None:
+        """Sustituye los roles asignados a la persona (lista vacía = sin roles)."""
+        with self._motor.begin() as c:
+            c.execute(delete(t.usuario_roles).where(t.usuario_roles.c.usuario_id == usuario_id))
+            if roles:
+                c.execute(
+                    insert(t.usuario_roles),
+                    [{"usuario_id": usuario_id, "rol_id": r, "asignado_por": por,
+                      "asignado_en": ahora()} for r in sorted(set(roles))],
+                )  # fmt: skip
 
     def guardar(self, rol: Rol) -> Rol:
         rol = rol if rol.creado_en else rol.model_copy(update={"creado_en": ahora()})

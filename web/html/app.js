@@ -28,6 +28,8 @@ const estado = {
   historial: [],       // mis conversaciones con el rol activo (resúmenes)
   aviso: null,         // aviso en el chat { tipo, titulo, texto } (sustituye a alert())
   errorCarga: null,    // no se pudieron cargar los roles
+  yo: null,            // { id, roles }: identidad de la sesión (para pedir acceso)
+  asignaciones: [],    // roles asignados a personas (solo administrador)
 };
 
 // ------------------------------------------------------------------ utilidades
@@ -101,6 +103,8 @@ async function iniciar() {
   try { r = await api("roles", { conRol: false }); } catch (err) { r = { ok: false, status: 0, cuerpo: null }; }
   estado.errorCarga = r.ok ? null : (r.status ? mensajeError(r) : "No hay conexión con el servidor");
   estado.roles = r.ok ? r.cuerpo : [];
+  const yo = await api("yo", { conRol: false }).catch(() => ({ ok: false }));
+  estado.yo = yo.ok ? yo.cuerpo : null;
   const guardada = leer("conversacion");
   if (guardada) {
     const rc = await api(`conversaciones/${encodeURIComponent(guardada)}`, { conRol: false });
@@ -115,13 +119,16 @@ async function iniciar() {
 
 async function cargarDatosDelRol() {
   if (!estado.rol) return;
-  const [docs, todos] = await Promise.all([
+  const admin = puede("administrar_roles");
+  const [docs, todos, asignaciones] = await Promise.all([
     api("documentos"),
-    puede("administrar_roles") ? api("roles/todos") : Promise.resolve({ ok: false }),
+    admin ? api("roles/todos") : Promise.resolve({ ok: false }),
+    admin ? api("roles/asignaciones") : Promise.resolve({ ok: false }),
     cargarHistorial(),
   ]);
   estado.docs = docs.ok ? docs.cuerpo : [];
   estado.todos = todos.ok ? todos.cuerpo : [];
+  estado.asignaciones = asignaciones.ok ? asignaciones.cuerpo : [];
 }
 
 async function cargarHistorial() {
@@ -182,6 +189,12 @@ function pintarCabecera() {
     cambiar, nueva, cerrarSesion()].filter(Boolean));
 }
 
+function sinRoles() {
+  if (!estado.yo) return el("p", { class: "hint" }, "No tienes roles disponibles.");
+  return notice("info", "i-lock", "Aún no tienes acceso",
+    el("span", {}, "Pide a un administrador que te asigne un rol. Tu usuario es ", el("strong", { class: "mono" }, estado.yo.id), "."));
+}
+
 // ------------------------------------------------------------------ chat
 function pintarChat() {
   const body = $("chat-body");
@@ -207,7 +220,7 @@ function pintarChat() {
     });
     body.replaceChildren(...[aviso].filter(Boolean), el("div", { class: "role-picker" },
       el("p", {}, "¿Con qué rol quieres consultar? Solo verás respuestas basadas en los documentos de ese rol."),
-      tarjetas.length ? el("div", { class: "role-cards" }, tarjetas) : el("p", { class: "hint" }, "No tienes roles disponibles.")));
+      tarjetas.length ? el("div", { class: "role-cards" }, tarjetas) : sinRoles()));
     return;
   }
   $("chat-sub").textContent = `Con permisos de ${estado.rol.nombre} · ${estado.docs.length} documentos disponibles`;
@@ -649,6 +662,7 @@ function pintarRoles() {
     ? "Como administrador puedes crear roles y asignar permisos."
     : "Qué puede hacer este rol. Solo un rol administrador puede cambiarlo.";
   $("new-role").hidden = !admin;
+  pintarPersonas(admin);
   $("role-list").replaceChildren(...lista.flatMap((r) => {
     let editarBtn = null;
     const desc = el("span", { class: "role-item-desc" }, r.descripcion || "Sin descripción.",
@@ -667,6 +681,50 @@ function pintarRoles() {
       desc, editarBtn);
     return admin && estado.editando === r.id ? [li, editorRol(r)] : [li];
   }));
+}
+
+function pintarPersonas(admin) {
+  $("personas").hidden = !admin;
+  if (!admin) return;
+  const roles = estado.todos.filter((x) => x.activo);
+  const fila = (a) => {
+    const editar = el("button", { class: "link role-item-edit", type: "button" }, "Editar");
+    editar.addEventListener("click", () => { formPersona(a.usuario_id, a.roles); });
+    return el("li", { class: "role-item" },
+      el("span", { class: "role-item-name mono" }, a.usuario_id),
+      el("span", { class: "role-item-desc" }, a.roles.length ? a.roles.map(nombreRol).join(", ") : "Sin roles"),
+      editar);
+  };
+  const lista = estado.asignaciones.length
+    ? el("ul", { class: "role-list" }, estado.asignaciones.map(fila))
+    : el("p", { class: "hint" }, "Nadie tiene roles asignados desde la app.");
+  const form = el("form", { class: "stack", id: "persona-form" });
+  $("personas-body").replaceChildren(
+    el("p", { class: "hint" }, "Quien inicia sesión sin roles ve su usuario (p. ej. github:nombre) para pedir acceso."),
+    lista, form);
+  function formPersona(usuario = "", marcados = []) {
+    const chips = roles.map((x) => el("label", { class: "chip" },
+      el("input", { type: "checkbox", value: x.id, checked: marcados.includes(x.id) }),
+      el("span", {}, icono("i-check"), x.nombre)));
+    const input = el("input", { type: "text", id: "persona-id", value: usuario, required: true, placeholder: "github:nombre", maxLength: 160 });
+    const error = el("p", { class: "form-error", role: "alert" });
+    const boton = el("button", { class: "btn btn-secondary", type: "submit" }, "Guardar roles");
+    form.replaceChildren(
+      el("div", { class: "field" }, el("label", { for: "persona-id" }, "Usuario"), input),
+      el("fieldset", { class: "roles-pick" }, el("legend", {}, "Roles"), el("div", { class: "chips" }, chips),
+        el("p", { class: "hint" }, "Sin ningún rol marcado, la persona pierde el acceso.")),
+      error, boton);
+    form.onsubmit = async (ev) => {
+      ev.preventDefault();
+      const elegidos = [...form.querySelectorAll(".chips input:checked")].map((i) => i.value);
+      boton.disabled = true;
+      const r = await api(`roles/asignaciones/${encodeURIComponent(input.value.trim())}`, { metodo: "PUT", json: { roles: elegidos } });
+      boton.disabled = false;
+      if (!r.ok) { error.textContent = mensajeError(r); return; }
+      await refrescarRoles();
+    };
+  }
+  formPersona();
 }
 
 function editorRol(r) {

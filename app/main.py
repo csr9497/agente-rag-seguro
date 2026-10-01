@@ -124,6 +124,14 @@ def ready(request: Request, settings: Annotated[Settings, Depends(get_settings)]
     )
 
 
+@app.get("/yo")
+def yo(
+    usuario: Annotated[Usuario, Depends(get_usuario)], servicios: ServiciosDep
+) -> dict[str, object]:
+    """Quién soy y qué roles tengo (para pedir acceso a un administrador)."""
+    return {"id": usuario.id, "roles": servicios.roles.solo_activos(usuario).groups}
+
+
 @app.post("/consultar", response_model=RespuestaConsulta)
 def consultar(
     body: ConsultaRequest,

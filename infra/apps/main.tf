@@ -9,8 +9,10 @@ data "terraform_remote_state" "platform" {
   }
 }
 
-# Identidad de la app en Entra ID (stack identidad, aplicado con tu sesión por make desplegar).
+# Login con Entra ID (opcional, login_proveedor=entra): identidad de la app creada por el
+# stack identidad con tu sesión (make desplegar). Con GitHub no hace falta.
 data "terraform_remote_state" "identidad" {
+  count   = local.entra ? 1 : 0
   backend = "azurerm"
   config = {
     resource_group_name  = var.identidad_state.resource_group_name
@@ -28,8 +30,16 @@ resource "random_password" "proxy" {
 }
 
 locals {
-  p  = data.terraform_remote_state.platform.outputs
-  id = data.terraform_remote_state.identidad.outputs
+  p     = data.terraform_remote_state.platform.outputs
+  entra = var.login_proveedor == "entra"
+  id    = local.entra ? data.terraform_remote_state.identidad[0].outputs : null
+  # Secreto del cliente OAuth que lee Easy Auth (nombre de secreto de la Container App).
+  secreto_login = local.entra ? "microsoft-provider-authentication-secret" : "github-provider-authentication-secret"
+  # Primeros administradores (con todos los roles para poder probar cada perfil); el resto de
+  # personas recibe roles desde la app.
+  asignaciones_iniciales = local.entra ? {} : {
+    for u in var.administradores : "github:${lower(u)}" => ["administrador", "rrhh", "finanzas", "public"]
+  }
 
   qdrant_efimero = local.p.vector_store == "qdrant" && local.p.qdrant_modo == "container_efimero"
   qdrant_url = (
@@ -72,10 +82,11 @@ locals {
     # Sin Entra ID todavía: ni selección libre de rol ni gestión de documentos en Azure.
     SELECCION_LIBRE_DE_ROL = "false"
     GESTION_DOCUMENTOS     = "false"
-    # Login obligatorio: Easy Auth (Entra ID) en la web; el backend toma la identidad del
-    # principal que reenvía nginx con PROXY_SECRETO. Con ENTORNO=prod la app no arranca sin
-    # ello (app/config.py: validar_seguridad).
-    AUTH_MODO = "easyauth"
+    # Login obligatorio: Easy Auth (GitHub o Entra ID) en la web; el backend toma la identidad
+    # del principal que reenvía nginx con PROXY_SECRETO. Con ENTORNO=prod la app no arranca
+    # sin ello (app/config.py: validar_seguridad).
+    AUTH_MODO              = "easyauth"
+    ASIGNACIONES_INICIALES = jsonencode(local.asignaciones_iniciales)
   }
 }
 
@@ -86,8 +97,16 @@ resource "terraform_data" "validaciones" {
       error_message = "El stack apps requiere que platform se haya desplegado con alcance=completo."
     }
     precondition {
-      condition     = local.id.client_id != "" && local.id.tenant_id != ""
-      error_message = "La web es pública: aplica antes el stack identidad (make desplegar lo hace)."
+      condition     = local.entra || (var.github_oauth_client_id != "" && var.github_oauth_client_secret != "")
+      error_message = "Login con GitHub: define github_oauth_client_id y github_oauth_client_secret (OAuth App, ver docs/despliegue.md)."
+    }
+    precondition {
+      condition     = local.entra || length(var.administradores) > 0
+      error_message = "Indica al menos un administrador (usuario de GitHub) en administradores."
+    }
+    precondition {
+      condition     = !local.entra || try(local.id.client_id != "", false)
+      error_message = "Login con Entra ID: aplica antes el stack identidad (make desplegar lo hace)."
     }
   }
 }
@@ -212,10 +231,10 @@ resource "azurerm_container_app" "web" {
     value = random_password.proxy.result
   }
 
-  # Secreto del cliente de Entra ID para Easy Auth (nombre fijo que espera authConfigs).
+  # Secreto del cliente OAuth para Easy Auth, leído de Key Vault con la identidad de la web.
   secret {
-    name                = "microsoft-provider-authentication-secret"
-    key_vault_secret_id = "${local.p.key_vault_uri}secrets/${local.id.secreto_key_vault}"
+    name                = local.secreto_login
+    key_vault_secret_id = local.entra ? "${local.p.key_vault_uri}secrets/${try(local.id.secreto_key_vault, "")}" : try(azurerm_key_vault_secret.github_oauth[0].versionless_id, "")
     identity            = local.p.web_identity_id
   }
 
@@ -258,8 +277,9 @@ resource "azurerm_container_app" "web" {
   }
 }
 
-# Login obligatorio en la web (Easy Auth de Container Apps con Entra ID). Sin sesión, redirige
-# al login; solo entran usuarios con algún rol asignado (app_role_assignment_required).
+# Login obligatorio en la web (Easy Auth de Container Apps con GitHub o Entra ID). Sin sesión,
+# redirige al login. Con GitHub cualquiera puede iniciar sesión, pero sin roles no ve nada
+# (deny by default) hasta que un administrador se los asigna desde la app.
 resource "azapi_resource" "web_auth" {
   type      = "Microsoft.App/containerApps/authConfigs@2024-03-01"
   name      = "current"
@@ -270,27 +290,44 @@ resource "azapi_resource" "web_auth" {
       platform = { enabled = true }
       globalValidation = {
         unauthenticatedClientAction = "RedirectToLoginPage"
-        redirectToProvider          = "azureactivedirectory"
+        redirectToProvider          = local.entra ? "azureactivedirectory" : "github"
         excludedPaths               = ["/healthz"]
       }
-      identityProviders = {
+      # jsondecode: las dos ramas tienen formas distintas (un proveedor u otro).
+      identityProviders = jsondecode(local.entra ? jsonencode({
         azureActiveDirectory = {
           enabled = true
           registration = {
-            clientId                = local.id.client_id
-            clientSecretSettingName = "microsoft-provider-authentication-secret"
-            openIdIssuer            = "https://login.microsoftonline.com/${local.id.tenant_id}/v2.0"
+            clientId                = try(local.id.client_id, "")
+            clientSecretSettingName = local.secreto_login
+            openIdIssuer            = "https://login.microsoftonline.com/${try(local.id.tenant_id, "")}/v2.0"
           }
           validation = {
-            allowedAudiences = [local.id.client_id, "api://${local.id.client_id}"]
+            allowedAudiences = [try(local.id.client_id, ""), "api://${try(local.id.client_id, "")}"]
           }
         }
-      }
+        }) : jsonencode({
+        gitHub = {
+          enabled = true
+          registration = {
+            clientId                = var.github_oauth_client_id
+            clientSecretSettingName = local.secreto_login
+          }
+        }
+      }))
       login = {
         preserveUrlFragmentsForLogins = false
       }
     }
   }
+}
+
+# Regla 3: el secreto de la OAuth App de GitHub vive en Key Vault (lo escribe quien despliega).
+resource "azurerm_key_vault_secret" "github_oauth" {
+  count        = local.entra ? 0 : 1
+  name         = "github-oauth-client-secret"
+  value        = var.github_oauth_client_secret
+  key_vault_id = local.p.key_vault_id
 }
 
 # ---------------------------------------------------------------- Qdrant efímero (opcional)

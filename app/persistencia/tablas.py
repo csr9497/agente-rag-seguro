@@ -38,6 +38,17 @@ rol_publica_para = Table(
     Column("destino_id", ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True),
 )
 
+# Roles asignados a personas desde la app (login sin roles en el token, p. ej. GitHub). Se
+# suman a los roles del token (app roles de Entra ID), nunca los sustituyen.
+usuario_roles = Table(
+    "usuario_roles",
+    metadata,
+    Column("usuario_id", String(160), primary_key=True),
+    Column("rol_id", ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True),
+    Column("asignado_por", String(160), nullable=False),
+    Column("asignado_en", String(32), nullable=False),
+)
+
 documentos = Table(
     "documentos",
     metadata,

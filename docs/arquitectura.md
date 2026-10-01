@@ -52,7 +52,7 @@ Permisos en el dato, no en el prompt (regla 1 del CLAUDE.md), en cuatro barreras
 
 1. **Al indexar**: un documento necesita ≥ 1 rol existente y activo.
 2. **Al empezar**: la conversación queda fijada a un rol que el usuario puede usar (app roles
-   de Entra ID en Azure; selección libre solo en local).
+   de Entra ID o asignados desde la app en Azure; selección libre solo en local).
 3. **En el índice**: filtro por rol en Qdrant / AI Search (filtro OData validado contra inyección).
 4. **`access_guardrail`**: cada fragmento se contrasta con el registro. Una prueba de mutación
    confirma que, sin esta barrera, un índice manipulado filtraría datos de RRHH.
@@ -85,8 +85,10 @@ Además:
 - **Caché con permisos** (regla 2): nunca se sirve a otro rol; subir, borrar o poner en
   cuarentena un documento la invalida; no se usa con historial, datos internos ni acciones.
 - **Login** ([app/security/identity.py](../app/security/identity.py)): en Azure, Easy Auth de
-  Container Apps (Entra ID) en la web y `AUTH_MODO=easyauth` en el backend, que solo acepta el
-  principal si llega de nginx con `PROXY_SECRETO` (ingress interno). `AUTH_MODO=entra` valida
+  Container Apps en la web (GitHub por defecto, o Entra ID) y `AUTH_MODO=easyauth` en el
+  backend, que solo acepta el principal si llega de nginx con `PROXY_SECRETO` (ingress
+  interno). Roles = app roles del token (Entra ID) + los asignados a la persona desde la app
+  (`/roles/asignaciones`, auditado); sin roles no hay acceso. `AUTH_MODO=entra` valida
   un JWT RS256 (JWKS, emisor, audiencia, caducidad; sin `alg: none` ni HS256) para clientes de
   API. Con `ENTORNO=prod` la API no arranca sin login ni con modos de depuración.
 - **Secretos** (regla 3): solo en Key Vault o `.env` local (ignorado por git). Managed
@@ -101,6 +103,8 @@ Además:
 |---|---|---|
 | GET | `/roles` | Roles que el usuario puede usar |
 | GET/POST/PATCH | `/roles/todos`, `/roles`, `/roles/{id}` | Solo `administrar_roles` (`X-Rol`) |
+| GET / PUT | `/roles/asignaciones`, `/roles/asignaciones/{usuario}` | Roles de cada persona; solo `administrar_roles`; auditado |
+| GET | `/yo` | Usuario de la sesión y sus roles |
 | POST | `/conversaciones` | `{"rol_id"}` |
 | GET | `/conversaciones/{id}` | Historial |
 | POST | `/conversaciones/{id}/mensajes` | `{"pregunta"}` → respuesta, citas, documentos consultados, acciones |

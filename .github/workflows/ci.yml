@@ -98,7 +98,9 @@ jobs:
             terraform -chdir=infra/$stack validate
           done
       - name: test de flags (sin credenciales ni llamadas a Azure)
-        run: terraform -chdir=infra/platform test
+        run: |
+          terraform -chdir=infra/platform test
+          terraform -chdir=infra/apps test
 
   docker:
     name: Build de imágenes

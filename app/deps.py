@@ -172,6 +172,7 @@ def build_servicios(
         cache=cache, alcance_cache=alcance, motor=motor, shields=shields,
     )  # fmt: skip
     roles = ServicioRoles(repo_roles, settings.seleccion_libre_de_rol)
+    roles.asignaciones_iniciales(settings.asignaciones_iniciales)
     return Servicios(
         agente=agente,
         gestor=GestorDocumentos(

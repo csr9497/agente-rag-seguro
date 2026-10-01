@@ -18,7 +18,9 @@ Agente LangGraph + RAG con permisos + guardrails, en Azure, con Terraform y CI/C
 - API: **FastAPI**
 - Estado + auditoría: **PostgreSQL** (sin checkpointer de LangGraph: ver docs/diseno-fase-3.md §4)
 - Caché semántica: **Azure Cache for Redis** (permission-aware)
-- Identidad: **Entra ID** (roles/grupos en el token)
+- Identidad: login con **Easy Auth** de Container Apps: **GitHub** por defecto (roles
+  asignados a cada persona desde la app, tabla `usuario_roles`) o **Entra ID** (app roles en
+  el token) si el tenant permite registrar aplicaciones
 - Guardrails: **Azure AI Content Safety** (prompt shields) + detección de PII
 - Secretos: **Azure Key Vault** + Managed Identity
 - Contenedores: **Docker** (multi-stage)
@@ -90,8 +92,8 @@ conversación, feedback, Prompt Shields (Content Safety), data_query, acciones c
 LangSmith, evaluaciones por capas y CI (GitHub Actions). Terraform listo (`alcance`,
 `vector_store`, Managed Redis, PostgreSQL; stacks platform, identidad y apps) pero **no
 aplicado**: no tocar Azure sin indicación explícita del usuario. Despliegue completo con
-`make desplegar` (login con Easy Auth + Entra ID, ver docs/despliegue.md); el deploy de CI
-está desactivado hasta `DEPLOY_AZURE=true`. Proveedor de modelos configurable
+GitHub Actions (deploy.yml, OIDC) o `make desplegar`, con login de GitHub vía Easy Auth (ver
+docs/despliegue.md); el deploy de CI está desactivado hasta `DEPLOY_AZURE=true`. Proveedor de modelos configurable
 (docs/modelos.md). Siguiente: primer `make desplegar` y pruebas en la nube.
 
 ## Cómo trabajar en este repo

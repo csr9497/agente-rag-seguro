@@ -39,6 +39,35 @@ variable "app_version" {
   default     = "desconocida"
 }
 
+variable "login_proveedor" {
+  type        = string
+  description = "Login de la web: github (OAuth App, roles asignados en la app) o entra (app registration con app roles)"
+  default     = "github"
+  validation {
+    condition     = contains(["github", "entra"], var.login_proveedor)
+    error_message = "login_proveedor debe ser github o entra."
+  }
+}
+
+variable "github_oauth_client_id" {
+  type        = string
+  description = "Client ID de la OAuth App de GitHub (login_proveedor=github)"
+  default     = ""
+}
+
+variable "github_oauth_client_secret" {
+  type        = string
+  description = "Client secret de la OAuth App de GitHub; se guarda en Key Vault"
+  default     = ""
+  sensitive   = true
+}
+
+variable "administradores" {
+  type        = list(string)
+  description = "Usuarios de GitHub que arrancan como administradores (con todos los roles)"
+  default     = []
+}
+
 variable "identidad_state" {
   type = object({
     resource_group_name  = string
@@ -46,5 +75,6 @@ variable "identidad_state" {
     container_name       = string
     key                  = string
   })
-  description = "Ubicación del estado del stack identidad (app registration de Entra ID)"
+  description = "Ubicación del estado del stack identidad (solo login_proveedor=entra)"
+  default     = null
 }

@@ -183,3 +183,15 @@ def test_easyauth_rechaza(principal, secreto) -> None:
     with pytest.raises(HTTPException) as e:
         _usuario_easyauth(principal, secreto)
     assert e.value.status_code == 401
+
+
+def test_easyauth_github_sin_roles_en_el_token() -> None:
+    principal = _principal([("urn:github:login", "Ana-Dev"), ("urn:github:id", "123")])
+    import base64
+    import json
+
+    cuerpo = json.loads(base64.b64decode(principal))
+    cuerpo["auth_typ"] = "github"
+    cuerpo["name_typ"] = "urn:github:login"
+    u = _usuario_easyauth(base64.b64encode(json.dumps(cuerpo).encode()).decode(), SECRETO)
+    assert u.id == "github:ana-dev" and u.groups == []

@@ -3,9 +3,11 @@ name: Deploy
 # Actualización del despliegue en Azure: infraestructura (platform) → imágenes → apps.
 # Autenticación con OIDC (sin secretos); variables creadas por infra/bootstrap/bootstrap.sh.
 #
-# El primer despliegue se hace con `make desplegar` (tu sesión): crea además la identidad de
-# la app en Entra ID (stack identidad), que esta identidad de GitHub no puede crear. Después,
-# este workflow actualiza platform, imágenes y apps en cada push a main.
+# Login de la web con GitHub (OAuth App): variable GH_OAUTH_CLIENT_ID y secret
+# GH_OAUTH_CLIENT_SECRET del environment dev; ADMINISTRADORES_GITHUB (JSON, opcional) con los
+# primeros administradores (por defecto, el dueño del repositorio). Al terminar carga los
+# documentos de ejemplo (idempotente) y comprueba que la web exige inicio de sesión.
+# Con login de Entra ID (login_proveedor=entra) el stack identidad se aplica con make desplegar.
 #
 # Desactivado hasta que se decida desplegar: requiere la variable de repositorio
 # DEPLOY_AZURE=true (Settings → Variables). Sin ella, todos los jobs se omiten.
@@ -15,7 +17,7 @@ on:
   workflow_dispatch:
     inputs:
       run_ingest:
-        description: Ejecutar el job de ingesta al terminar
+        description: Reindexar también desde Blob al terminar
         type: boolean
         default: false
 
@@ -110,6 +112,9 @@ jobs:
         working-directory: infra/apps
         env:
           REGISTRY: ${{ needs.platform.outputs.acr_login_server }}
+          TF_VAR_github_oauth_client_id: ${{ vars.GH_OAUTH_CLIENT_ID }}
+          TF_VAR_github_oauth_client_secret: ${{ secrets.GH_OAUTH_CLIENT_SECRET }}
+          TF_VAR_administradores: ${{ vars.ADMINISTRADORES_GITHUB || format('["{0}"]', github.repository_owner) }}
         run: |
           terraform init -input=false $BACKEND_CONFIG -backend-config=key=dev/apps.tfstate
           terraform apply -input=false -auto-approve \
@@ -117,16 +122,39 @@ jobs:
             -var="backend_image=${REGISTRY}/backend:${GITHUB_SHA}" \
             -var="web_image=${REGISTRY}/web:${GITHUB_SHA}" \
             -var="app_version=${GITHUB_SHA}" \
-            -var='platform_state={resource_group_name="${{ vars.TFSTATE_RG }}",storage_account_name="${{ vars.TFSTATE_ACCOUNT }}",container_name="${{ vars.TFSTATE_CONTAINER }}",key="dev/platform.tfstate"}' \
-            -var='identidad_state={resource_group_name="${{ vars.TFSTATE_RG }}",storage_account_name="${{ vars.TFSTATE_ACCOUNT }}",container_name="${{ vars.TFSTATE_CONTAINER }}",key="dev/identidad.tfstate"}'
+            -var='platform_state={resource_group_name="${{ vars.TFSTATE_RG }}",storage_account_name="${{ vars.TFSTATE_ACCOUNT }}",container_name="${{ vars.TFSTATE_CONTAINER }}",key="dev/platform.tfstate"}'
           echo "### Web: $(terraform output -raw web_url)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Callback de la OAuth App de GitHub: $(terraform output -raw web_url)/.auth/login/github/callback" >> "$GITHUB_STEP_SUMMARY"
       - uses: azure/login@v3
-        if: ${{ inputs.run_ingest }}
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-      - name: Ejecutar ingesta
+      - name: Documentos de ejemplo (registro + Blob + índice; idempotente)
+        working-directory: infra/apps
+        run: |
+          job="$(terraform output -raw sembrar_job_name)"
+          grupo="$(terraform output -raw resource_group_name)"
+          az containerapp job start -n "$job" -g "$grupo" -o none
+          for i in $(seq 1 60); do
+            estado=$(az containerapp job execution list -n "$job" -g "$grupo" --query "[0].properties.status" -o tsv)
+            [[ $estado == Succeeded || $estado == Failed ]] && break
+            sleep 10
+          done
+          echo "Siembra: $estado" | tee -a "$GITHUB_STEP_SUMMARY"
+          [[ $estado == Succeeded ]] || { az containerapp job logs show -n "$job" -g "$grupo" --container sembrar 2>&1 | tail -50; exit 1; }
+      - name: Comprobación (la web exige inicio de sesión)
+        working-directory: infra/apps
+        run: |
+          url="$(terraform output -raw web_url)"
+          for i in $(seq 1 30); do
+            codigo=$(curl -s -o /dev/null -w "%{http_code}" "$url/" || true)
+            [[ $codigo == 302 || $codigo == 401 ]] && break
+            sleep 10
+          done
+          echo "Web $url → $codigo" | tee -a "$GITHUB_STEP_SUMMARY"
+          [[ $codigo == 302 || $codigo == 401 ]]
+      - name: Reindexar desde Blob
         if: ${{ inputs.run_ingest }}
         working-directory: infra/apps
         run: |

@@ -40,17 +40,14 @@ Sin modelos, `make up` arranca la interfaz y los permisos (las respuestas dan 50
 
 ## Desplegar en Azure
 
-Requisitos: suscripción activa, `az login` con permisos de Owner y para registrar
-aplicaciones en Entra ID, Terraform y Docker.
+Con GitHub Actions (OIDC, sin claves): crea una OAuth App de GitHub para el login, guarda su
+client ID y secret en el environment `dev` y activa `DEPLOY_AZURE=true`. Cada push a `main`
+despliega infraestructura, imágenes, apps y documentos de ejemplo. Desde tu equipo:
+`make desplegar` (requiere `az login`, Terraform y Docker).
 
-```bash
-make desplegar      # infraestructura + login de Entra ID + imágenes + apps + documentos → URL
-make estado-nube    # URL y salud
-make destruir-nube  # elimina todo
-```
-
-La web queda pública **con login obligatorio**: solo entran usuarios con un rol asignado (quien
-despliega recibe todos). Detalle, costes y acceso de otras personas: [docs/despliegue.md](docs/despliegue.md).
+La web queda pública **con login obligatorio** (GitHub; Entra ID opcional): sin roles no se ve
+nada, y los administradores asignan roles a cada persona desde la app. Pasos, costes y
+problemas frecuentes: [docs/despliegue.md](docs/despliegue.md).
 
 ## Comandos
 

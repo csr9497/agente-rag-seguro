@@ -6,14 +6,20 @@
 #   ./scripts/nube.sh destruir    # elimina todo lo desplegado (pide confirmación)
 #
 # Requisitos: Azure CLI con `az login` (suscripción activa y permisos de Owner, o Contributor +
-# User Access Administrator, y poder registrar aplicaciones en Entra ID), Terraform ≥ 1.9,
-# Docker con buildx y el estado remoto de Terraform (infra/bootstrap, una vez).
+# User Access Administrator), Terraform ≥ 1.9, Docker con buildx y el estado remoto de
+# Terraform (infra/bootstrap, una vez).
+#
+# Login de la web (LOGIN_PROVEEDOR):
+#   github (por defecto): OAuth App de GitHub en GH_OAUTH_CLIENT_ID y GH_OAUTH_CLIENT_SECRET
+#     (variables de entorno, nunca en el repo); ADMINISTRADORES_GITHUB='["usuario"]'.
+#   entra: app registration creada aquí (stack identidad); tu cuenta debe poder registrar apps.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 TFVARS="../envs/dev/nube.tfvars"
 BACKEND="../envs/dev/backend.hcl"
 LOG_DIR="data/nube"
+LOGIN_PROVEEDOR="${LOGIN_PROVEEDOR:-github}"
 
 paso() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 falla() { printf '\n⛔ %s\n' "$1"; exit 1; }
@@ -56,6 +62,16 @@ requisitos() {
   ARM_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
 }
 
+requisitos_login() {
+  if [[ $LOGIN_PROVEEDOR == github ]]; then
+    [[ -n ${GH_OAUTH_CLIENT_ID:-} && -n ${GH_OAUTH_CLIENT_SECRET:-} ]] \
+      || falla "Login con GitHub: exporta GH_OAUTH_CLIENT_ID y GH_OAUTH_CLIENT_SECRET (OAuth App, ver docs/despliegue.md)."
+    export TF_VAR_github_oauth_client_id=$GH_OAUTH_CLIENT_ID TF_VAR_github_oauth_client_secret=$GH_OAUTH_CLIENT_SECRET
+    export TF_VAR_administradores="${ADMINISTRADORES_GITHUB:-[\"$(git remote get-url origin | sed -E 's#.*[:/]([^/]+)/[^/]+$#\1#')\"]}"
+    echo "✅ login con GitHub · administradores: $TF_VAR_administradores"
+  fi
+}
+
 esperar_job() { # esperar_job <job> <grupo>: hasta Succeeded/Failed (10 min)
   local estado=""
   for _ in $(seq 1 60); do
@@ -68,6 +84,7 @@ esperar_job() { # esperar_job <job> <grupo>: hasta Succeeded/Failed (10 min)
 
 desplegar() {
   requisitos
+  requisitos_login
   local yo plataforma identidad tag acr login
   yo=$(az ad signed-in-user show --query id -o tsv)
   plataforma=$(estado_de platform)
@@ -78,6 +95,9 @@ desplegar() {
   aplicar platform -var-file="$TFVARS" -var "developer_principal_ids=[\"$yo\"]" \
     || falla "Falló platform (log: $LOG_DIR/platform.log)."
 
+  if [[ $LOGIN_PROVEEDOR == github ]]; then
+    paso "2/6 Login con GitHub (OAuth App): no hace falta registrar nada en Entra ID"
+  else
   paso "2/6 Identidad en Entra ID (app registration, roles y login)"
   init identidad
   if ! aplicar identidad -var-file=../envs/dev/identidad.tfvars -var "platform_state=$plataforma"; then
@@ -87,6 +107,7 @@ desplegar() {
     # Key Vault tarda en propagar los permisos recién asignados: un reintento basta.
     echo "   reintentando en 60 s…"; sleep 60
     aplicar identidad -var-file=../envs/dev/identidad.tfvars -var "platform_state=$plataforma" || falla "Falló identidad (log: $LOG_DIR/identidad.log)."
+  fi
   fi
 
   paso "3/6 Imágenes (linux/amd64) en Azure Container Registry"
@@ -105,7 +126,8 @@ desplegar() {
   init apps
   aplicar apps -var-file=../envs/dev/apps.tfvars \
     -var "backend_image=$login/backend:$tag" -var "web_image=$login/web:$tag" \
-    -var "app_version=$tag" -var "platform_state=$plataforma" -var "identidad_state=$identidad" \
+    -var "app_version=$tag" -var "platform_state=$plataforma" -var "login_proveedor=$LOGIN_PROVEEDOR" \
+    $([[ $LOGIN_PROVEEDOR == entra ]] && echo "-var identidad_state=$identidad") \
     || falla "Falló apps (log: $LOG_DIR/apps.log)."
 
   paso "5/6 Documentos de ejemplo (registro + Blob + índice; idempotente)"
@@ -141,8 +163,9 @@ comprobar() {
   cat << EOF
 
    Aplicación: $url
-   Inicia sesión con tu cuenta de Entra ID: tienes los roles administrador, rrhh, finanzas y
-   public. Para dar acceso a otras personas: docs/despliegue.md (asignaciones).
+   Callback de la OAuth App de GitHub: $url/.auth/login/github/callback
+   Inicia sesión: los administradores tienen todos los roles y asignan roles a otras
+   personas desde la app (Roles y permisos → Personas y sus roles).
    Estado: make estado-nube · Eliminar todo: make destruir-nube
 EOF
 }
@@ -164,13 +187,15 @@ destruir() {
   plataforma=$(estado_de platform)
   identidad=$(estado_de identidad)
   paso "1/3 Aplicaciones"
+  # Al destruir no se usan: valores de relleno para las validaciones del stack.
+  export TF_VAR_github_oauth_client_id=x TF_VAR_github_oauth_client_secret=x TF_VAR_administradores='["x"]'
   init apps
   tf apps destroy -input=false -auto-approve -var-file=../envs/dev/apps.tfvars \
     -var "backend_image=x" -var "web_image=x" \
-    -var "platform_state=$plataforma" -var "identidad_state=$identidad" | grep -E "Destroy complete|Error" || true
+    -var "platform_state=$plataforma" -var "login_proveedor=$LOGIN_PROVEEDOR" \
+    $([[ $LOGIN_PROVEEDOR == entra ]] && echo "-var identidad_state=$identidad") | grep -E "Destroy complete|Error" || true
   paso "2/3 Identidad en Entra ID"
-  init identidad
-  tf identidad destroy -input=false -auto-approve -var-file=../envs/dev/identidad.tfvars -var "platform_state=$plataforma" | grep -E "Destroy complete|Error" || true
+  [[ $LOGIN_PROVEEDOR == entra ]] && init identidad && tf identidad destroy -input=false -auto-approve -var-file=../envs/dev/identidad.tfvars -var "platform_state=$plataforma" | grep -E "Destroy complete|Error" || true
   paso "3/3 Infraestructura"
   init platform
   tf platform destroy -input=false -auto-approve -var-file="$TFVARS" \
