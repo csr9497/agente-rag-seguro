@@ -29,10 +29,10 @@ authorize / input_guardrail ──(sin rol / bloqueada)────────�
 | `authorize` | Deny by default: sin rol no hay contexto |
 | `input_guardrail` | Bloquea inyección de prompt y texto oculto; enmascara PII (email, teléfono, IBAN, tarjeta con Luhn, DNI/NIE). Con `CONTENT_SAFETY_ENDPOINT`, además **Prompt Shields** sobre el texto ya enmascarado |
 | `cache_lookup` / `cache_store` | Caché semántica; clave = rol + huella de sus documentos visibles + modelo/versión |
-| `supervisor` | Modelo de chat con tool-calling; decide qué tools usar (hasta 3 iteraciones) |
+| `supervisor` | Modelo de chat con tool-calling; decide qué tools usar (hasta 3 iteraciones). Recibe el **catálogo del rol** (sus documentos con identificador y sus datos internos) para distinguir lo de la empresa de lo ajeno |
 | `tools` | Ejecuta las tools (abajo); los roles salen del estado, nunca de los argumentos del LLM |
 | `access_guardrail` | Contrasta **cada** fragmento con el registro de documentos (roles, hash, estado) antes de que el LLM lo vea |
-| `generate` | Respuesta con citas `[n]` y salida estructurada Pydantic; sin contexto, no llama al LLM |
+| `generate` | Respuesta con citas `[n]` y salida estructurada Pydantic. **Sin información** (nada visible, fragmentos sin la respuesta, «¿qué puedes hacer?» o tema ajeno), el LLM **orienta** con el catálogo del rol: qué sí puede consultar y preguntas de ejemplo, sin conocimiento general ni fragmentos ([app/rag/orientacion.py](../app/rag/orientacion.py)) |
 | `output_guardrail` | Bloquea fugas del prompt de sistema y enmascara PII sensible |
 | `audit` | Registra toda consulta, también las bloqueadas, con sus hallazgos |
 

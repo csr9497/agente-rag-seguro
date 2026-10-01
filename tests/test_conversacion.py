@@ -5,7 +5,9 @@ import json
 
 import pytest
 
+from app.modelos.errores import ModeloError
 from app.models.schemas import Usuario
+from app.rag.catalogo import CatalogoRol
 from app.tools.conversacion import PLANTILLAS, ResponderConversacion
 from tests.fakes import FakeLLM, FakeSupervisor
 
@@ -16,7 +18,7 @@ def _supervisor(tipo: str) -> FakeSupervisor:
     return FakeSupervisor([[("conversacion", json.dumps({"tipo": tipo}))]])
 
 
-@pytest.mark.parametrize("tipo", sorted(PLANTILLAS))
+@pytest.mark.parametrize("tipo", ["saludo", "agradecimiento", "despedida"])
 def test_plantilla_sin_llm_ni_citas(crear_agente, tipo) -> None:
     llm = FakeLLM()
     r = crear_agente(
@@ -24,6 +26,32 @@ def test_plantilla_sin_llm_ni_citas(crear_agente, tipo) -> None:
     ).consultar("hola", PUBLIC)
     assert r.respuesta == PLANTILLAS[tipo] and r.conversacional
     assert r.citas == [] and llm.llamadas == []
+
+
+@pytest.mark.parametrize("tipo", ["ayuda", "fuera_de_ambito"])
+def test_ayuda_y_fuera_de_ambito_orientan_con_el_catalogo(crear_agente, tipo) -> None:
+    """No responde con conocimiento general: el LLM explica qué SÍ puede consultar el rol."""
+    llm = FakeLLM()
+    catalogo = CatalogoRol(documentos=["Política de vacaciones"])
+    r = crear_agente(
+        supervisor=_supervisor(tipo), llm=llm, herramientas=[ResponderConversacion()],
+        catalogo=lambda grupos: catalogo,
+    ).consultar("dame una receta de pasta", PUBLIC)  # fmt: skip
+    assert r.conversacional and r.sin_contexto and r.citas == []
+    assert "Política de vacaciones" in r.respuesta
+    assert len(llm.llamadas) == 1 and f"<motivo>\n{tipo}\n</motivo>" in llm.llamadas[0][1]
+
+
+def test_si_la_orientacion_falla_queda_la_plantilla(crear_agente) -> None:
+    class LLMQueFalla:
+        def responder(self, system, user):  # noqa: ANN001, ANN202
+            raise ModeloError("servicio_no_disponible", "openai", "gpt-4o", "caído")
+
+    r = crear_agente(
+        supervisor=_supervisor("fuera_de_ambito"), llm=LLMQueFalla(),
+        herramientas=[ResponderConversacion()],
+    ).consultar("receta de pasta", PUBLIC)  # fmt: skip
+    assert r.respuesta == PLANTILLAS["fuera_de_ambito"] and r.conversacional
 
 
 def test_tipo_no_valido_no_produce_plantilla(crear_agente) -> None:

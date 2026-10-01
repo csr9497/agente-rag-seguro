@@ -38,7 +38,20 @@ class FakeLLM:
 
     def responder(self, system: str, user: str) -> RespuestaLLM:
         self.llamadas.append((system, user))
+        if "<catalogo>" in user:  # orientación sin información: repite el catálogo recibido
+            catalogo = user.split("<catalogo>")[1].split("</catalogo>")[0].strip()
+            return RespuestaLLM(
+                respuesta=f"No tengo esa información. Puedo ayudarte con:\n{catalogo}",
+                citas_usadas=[],
+                encontrado=False,
+            )
         return self.salida
+
+
+def sin_fragmentos(llm: FakeLLM) -> bool:
+    """Ningún fragmento de documento llegó al LLM: como mucho, la orientación sin información
+    (catálogo del rol, motivo y pregunta; app/rag/orientacion.py)."""
+    return all("<fragmento" not in user for _, user in llm.llamadas)
 
 
 class FakeSupervisor:

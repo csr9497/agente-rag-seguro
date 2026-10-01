@@ -34,6 +34,10 @@ PLANTILLAS: dict[str, str] = {
     ),
 }
 
+# Con estos tipos el LLM orienta con el catálogo del rol (app/rag/orientacion.py); la plantilla
+# queda de respaldo si el modelo falla.
+ORIENTADAS = ("ayuda", "fuera_de_ambito")
+
 
 class ConversacionArgs(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -43,9 +47,9 @@ class ConversacionArgs(BaseModel):
 class ResponderConversacion:
     nombre = "conversacion"
     descripcion = (
-        "Respuesta fija para saludos, agradecimientos, despedidas, «¿qué puedes hacer?» o "
-        "mensajes sin relación con la empresa (fuera_de_ambito). NUNCA para preguntas sobre "
-        "contenido de documentos o datos."
+        "Saludos, agradecimientos, despedidas, «¿qué puedes hacer?» (ayuda) o mensajes sin "
+        "relación con la empresa (fuera_de_ambito: se orienta al usuario sobre lo que sí puede "
+        "consultar). NUNCA para preguntas sobre contenido de documentos o datos."
     )
     args_model = ConversacionArgs
 

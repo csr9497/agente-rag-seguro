@@ -29,8 +29,10 @@ from app.modelos.errores import ModeloError, es_filtro_de_contenido
 from app.models.schemas import ChunkRecuperado, Hallazgo, RespuestaConsulta, Turno, Usuario
 from app.observabilidad import traza_consulta, usuario_seudonimo
 from app.prompts.registro import RegistroPrompts
+from app.rag.catalogo import CatalogoRol, construir_catalogo
 from app.rag.generacion import generar_respuesta, respuesta_sin_contexto
-from app.rag.prompts import build_historial, neutralizar
+from app.rag.orientacion import Motivo, responder_sin_informacion
+from app.rag.prompts import SIN_CONTEXTO, build_historial, neutralizar
 from app.retrieval.base import LLM, Embedder, Supervisor
 from app.security.acceso import PREFIJO_DATOS, VerificadorAcceso, VerificadorPermisivo
 from app.security.audit import registrar_consulta
@@ -38,7 +40,7 @@ from app.security.deteccion import TIPOS_PII, enmascarar_pii
 from app.security.guardrails import MENSAJE_BLOQUEO, Guardrail, Veredicto
 from app.security.versiones import ContextoAgente
 from app.tools.base import SIN_ACCESO, Herramienta, ResultadoHerramienta, schema_openai
-from app.tools.conversacion import PLANTILLAS
+from app.tools.conversacion import ORIENTADAS, PLANTILLAS
 
 Update = dict[str, Any]
 
@@ -84,9 +86,13 @@ class Agente:
         version_entrada: str = "configurado",
         version_salida: str = "configurado",
         prompts: RegistroPrompts | None = None,
+        catalogo: Callable[[list[str]], CatalogoRol] | None = None,
     ) -> None:
         self._supervisor = supervisor
         self._llm = llm
+        # Qué puede consultar cada usuario (sus roles, documentos y datos): orienta cuando no
+        # hay información. Sin registro (Studio, tests), solo los roles.
+        self._catalogo = catalogo or (lambda grupos: construir_catalogo(grupos, [], {}, []))
         self._herramientas = {h.nombre: h for h in herramientas}
         self._schemas = [schema_openai(h) for h in herramientas]
         self._guardrail_entrada = guardrail_entrada
@@ -288,7 +294,10 @@ class Agente:
             # Con la fecha, "este año" o "los próximos festivos" no se resuelven con un año viejo.
             {
                 "role": "system",
-                "content": f"{self._prompt('supervisor', runtime)}\nFecha de hoy: {date.today()}.",
+                "content": f"{self._prompt('supervisor', runtime)}\nFecha de hoy: {date.today()}."
+                # Lo que el usuario puede consultar: distingue lo de la empresa de lo ajeno.
+                f"\n\n<catalogo>\n{neutralizar(self._catalogo(estado.usuario.groups).como_texto(True))}"
+                "\n</catalogo>",
             },
             {"role": "user", "content": _pregunta_supervisor(estado)},
         ]
@@ -471,8 +480,15 @@ class Agente:
                     aclaracion=estado.aclaracion,
                 )
             }
+        if estado.conversacion in ORIENTADAS and not estado.recuperados and not acciones:
+            # «¿Qué puedes hacer?» o ajeno a la empresa: el LLM orienta con el catálogo del rol
+            # (sin conocimiento general); si falla, la plantilla.
+            orientada = self._orientar(
+                estado, estado.conversacion, runtime, respaldo=PLANTILLAS[estado.conversacion]
+            )
+            return {"respuesta": orientada.model_copy(update={"conversacional": True})}
         if estado.conversacion in PLANTILLAS and not estado.recuperados and not acciones:
-            # Saludo, agradecimiento, ayuda…: plantilla fija, sin LLM y sin inventar contenido.
+            # Saludo, agradecimiento, despedida: plantilla fija, sin LLM ni contenido inventado.
             texto = PLANTILLAS[estado.conversacion]
             return {
                 "respuesta": RespuestaConsulta(
@@ -484,6 +500,9 @@ class Agente:
             lista = "; ".join(a.resumen for a in acciones)
             texto = f"He preparado lo siguiente para que lo revises y apruebes: {lista}."
             return {"respuesta": RespuestaConsulta(respuesta=texto, citas=[], sin_contexto=True)}
+        if not estado.recuperados:
+            # Nada visible para el usuario: se le orienta (sin llamar a la generación).
+            return {"respuesta": self._orientar(estado, "sin_resultados", runtime)}
         try:
             respuesta = generar_respuesta(
                 self._llm, estado.pregunta, estado.recuperados, estado.historial,
@@ -493,7 +512,24 @@ class Agente:
             if not es_filtro_de_contenido(exc):
                 raise
             return _bloqueo_por_filtro(estado)
+        if respuesta.sin_contexto:
+            # Los fragmentos no contenían la respuesta (o sin citas válidas): orientación.
+            respuesta = self._orientar(estado, "no_en_contexto", runtime)
         return {"respuesta": respuesta}
+
+    def _orientar(
+        self,
+        estado: EstadoAgente,
+        motivo: Motivo,
+        runtime: Runtime[ContextoAgente] | None,
+        respaldo: str = SIN_CONTEXTO,
+    ) -> RespuestaConsulta:
+        """Respuesta sin información redactada por el LLM con el catálogo del rol del usuario
+        (nunca con fragmentos). Ver app/rag/orientacion.py."""
+        return responder_sin_informacion(
+            self._llm, estado.pregunta, self._catalogo(estado.usuario.groups), motivo,
+            system_prompt=self._prompt("orientacion", runtime), respaldo=respaldo,
+        )  # fmt: skip
 
     def _output_guardrail(self, estado: EstadoAgente, runtime: Runtime[ContextoAgente]) -> Update:
         respuesta = _requerir_respuesta(estado)

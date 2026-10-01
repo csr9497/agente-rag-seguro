@@ -12,7 +12,7 @@ from app.models.schemas import Chunk, Usuario
 from app.persistencia.repositorios import crear_motor, inicializar
 from app.security.acceso import VerificadorRegistro
 from app.tools.datos import SIN_ACCESO_DATOS, DataQuery, DataQueryArgs
-from tests.fakes import FakeEmbedder, FakeLLM, FakeSupervisor
+from tests.fakes import FakeEmbedder, FakeLLM, FakeSupervisor, sin_fragmentos
 
 PUBLIC = Usuario(id="u", groups=["public"])
 RRHH = Usuario(id="r", groups=["rrhh"])
@@ -102,5 +102,5 @@ def test_agente_public_no_obtiene_datos_de_rrhh(retriever, tmp_path) -> None:
         retriever=retriever,
     )
     r = s.agente.consultar_detallado("¿Cuánta gente hay en IT?", PUBLIC)
-    assert r.respuesta.sin_contexto and llm.llamadas == []
+    assert r.respuesta.sin_contexto and sin_fragmentos(llm)
     assert SIN_ACCESO_DATOS in json.dumps(sup.llamadas[1], ensure_ascii=False)

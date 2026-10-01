@@ -6,9 +6,10 @@ import logging
 import pytest
 
 from app.models.schemas import RespuestaLLM, Usuario
+from app.rag.catalogo import CatalogoRol
 from app.rag.prompts import SIN_CONTEXTO
 from app.security.guardrails import MENSAJE_BLOQUEO
-from tests.fakes import FakeLLM, FakeSupervisor, GuardrailQueBloquea
+from tests.fakes import FakeLLM, FakeSupervisor, GuardrailQueBloquea, sin_fragmentos
 
 PUBLIC = Usuario(id="u1", groups=["public"])
 
@@ -84,7 +85,7 @@ def test_herramienta_inexistente_devuelve_error_al_supervisor(crear_agente, llm)
     sup = FakeSupervisor([[("borrar_todo", "{}")]])
     r = crear_agente(supervisor=sup).consultar("vacaciones", PUBLIC)
     assert "no existe" in str(sup.llamadas[1])
-    assert r.sin_contexto and llm.llamadas == []
+    assert r.sin_contexto and sin_fragmentos(llm)
 
 
 def test_el_llm_no_puede_elegir_grupos(crear_agente, llm) -> None:
@@ -93,7 +94,7 @@ def test_el_llm_no_puede_elegir_grupos(crear_agente, llm) -> None:
     sup = FakeSupervisor([[("rag_retrieve", ataque)]])
     r = crear_agente(supervisor=sup).consultar("bandas salariales", PUBLIC)
     assert "argumentos no válidos" in str(sup.llamadas[1])
-    assert r.sin_contexto and llm.llamadas == []
+    assert r.sin_contexto and sin_fragmentos(llm)
 
 
 def test_usuario_sin_grupos_no_llama_a_ningun_modelo(agente, supervisor, llm) -> None:
@@ -111,12 +112,13 @@ def test_llm_indica_no_encontrado(crear_agente) -> None:
 def test_citas_invalidas_se_tratan_como_sin_contexto(crear_agente) -> None:
     llm = FakeLLM(RespuestaLLM(respuesta="Inventado [99]", citas_usadas=[99], encontrado=True))
     r = crear_agente(llm=llm).consultar("vacaciones", PUBLIC)
-    assert r.sin_contexto and r.respuesta == SIN_CONTEXTO
+    assert r.sin_contexto and r.citas == [] and "[99]" not in r.respuesta
+    assert r.respuesta.startswith("No tengo esa información")  # orientación, no lo inventado
 
 
 def test_min_score_filtra_resultados(crear_agente, llm) -> None:
     r = crear_agente(min_score=1.01).consultar("vacaciones", PUBLIC)
-    assert r.sin_contexto and llm.llamadas == []
+    assert r.sin_contexto and sin_fragmentos(llm)
 
 
 def test_guardrail_de_entrada_bloquea_antes_del_supervisor(crear_agente, supervisor) -> None:
@@ -215,7 +217,7 @@ def test_leer_documento_ajeno_a_traves_del_agente(agente_completo, llm) -> None:
         [[("leer_documento", doc), ("buscar_en_documento", doc[:-1] + ', "consulta": "B3"}')]]
     )
     r = agente_completo(supervisor=sup).consultar("banda B3", PUBLIC)
-    assert r.sin_contexto and llm.llamadas == []
+    assert r.sin_contexto and sin_fragmentos(llm)
     assert str(sup.llamadas[1]).count("no existe o no tienes acceso") == 2
 
 
@@ -279,3 +281,39 @@ def test_la_generacion_conoce_la_fecha(agente, llm) -> None:
     agente.consultar("vacaciones", Usuario(id="u", groups=["public"]))
     [(system, _)] = llm.llamadas
     assert f"Fecha de hoy: {date.today()}" in system
+
+
+# ---------------------------------------------------- sin información: orientación del LLM
+CATALOGO_PUBLIC = CatalogoRol(
+    roles=["Empleado general: Políticas generales"], documentos=["Política de vacaciones"]
+)
+
+
+def test_sin_resultados_orienta_con_el_catalogo_del_rol(crear_agente, llm) -> None:
+    pedidos: list[list[str]] = []
+
+    def catalogo(grupos: list[str]) -> CatalogoRol:
+        pedidos.append(grupos)
+        return CATALOGO_PUBLIC
+
+    r = crear_agente(min_score=1.01, catalogo=catalogo).consultar("¿y las nóminas?", PUBLIC)
+    assert ["public"] in pedidos  # con los grupos autenticados, no con los del LLM
+    assert r.sin_contexto and r.citas == [] and "Política de vacaciones" in r.respuesta
+    assert "<motivo>\nsin_resultados\n</motivo>" in llm.llamadas[-1][1]
+    assert sin_fragmentos(llm)
+
+
+def test_fragmentos_sin_la_respuesta_tambien_orientan(crear_agente) -> None:
+    llm = FakeLLM(RespuestaLLM(respuesta="No lo sé", citas_usadas=[], encontrado=False))
+    agente = crear_agente(llm=llm, catalogo=lambda g: CATALOGO_PUBLIC)
+    r = agente.consultar("vacaciones en Marte", PUBLIC)
+    assert len(llm.llamadas) == 2  # generación con fragmentos y, después, la orientación
+    orientacion = llm.llamadas[1][1]
+    assert "<motivo>\nno_en_contexto\n</motivo>" in orientacion and "<fragmento" not in orientacion
+    assert r.sin_contexto and r.citas == [] and "Política de vacaciones" in r.respuesta
+
+
+def test_el_supervisor_ve_el_catalogo_del_rol(crear_agente, supervisor) -> None:
+    crear_agente(catalogo=lambda g: CATALOGO_PUBLIC).consultar("vacaciones", PUBLIC)
+    sistema = supervisor.llamadas[0][0]["content"]
+    assert "<catalogo>" in sistema and "Política de vacaciones" in sistema

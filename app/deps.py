@@ -12,7 +12,7 @@ from sqlalchemy import Engine
 from app.acciones.servicio import ServicioAcciones
 from app.cache.semantica import CacheMemoria, CacheRedis, CacheSemantica, alcance_de_permisos
 from app.config import Settings
-from app.datos.catalogo import permisos_por_consulta
+from app.datos.catalogo import CONSULTAS, permisos_por_consulta
 from app.graph.agente import Agente
 from app.modelos.openai_compat import EmbedderOpenAI, LLMOpenAI, SupervisorOpenAI, build_client
 from app.observabilidad import configurar_trazas
@@ -27,6 +27,7 @@ from app.persistencia.repositorios import (
     inicializar,
 )
 from app.prompts.registro import RegistroPrompts
+from app.rag.catalogo import CatalogoRol, construir_catalogo
 from app.retrieval.base import LLM, Embedder, Retriever, Supervisor
 from app.retrieval.no_configurado import ModelosNoConfigurados
 from app.security.acceso import VerificadorRegistro
@@ -170,9 +171,18 @@ def build_servicios(
         def alcance(roles: list[str]) -> str:
             return alcance_de_permisos(registro, roles, version)
 
+    def catalogo(grupos: list[str]) -> CatalogoRol:
+        """Lo que el usuario puede consultar, desde la fuente de verdad de los permisos."""
+        return construir_catalogo(
+            grupos,
+            [(d.doc_id, d.titulo, d.roles) for d in registro.listar(estado="activo")],
+            {r.id: (r.nombre, r.descripcion) for r in repo_roles.listar(incluir_inactivos=False)},
+            [(c.descripcion, list(c.roles)) for c in CONSULTAS.values()],
+        )
+
     agente = _agente(
         settings, embedder, llm, supervisor, retriever, registro,
-        cache=cache, alcance_cache=alcance, motor=motor, shields=shields,
+        cache=cache, alcance_cache=alcance, motor=motor, shields=shields, catalogo=catalogo,
     )  # fmt: skip
     roles = ServicioRoles(repo_roles, settings.seleccion_libre_de_rol)
     roles.asignaciones_iniciales(settings.asignaciones_iniciales)
@@ -208,9 +218,16 @@ def build_prompts(settings: Settings) -> RegistroPrompts:
 def build_agente(settings: Settings) -> Agente:
     """Agente sin registro (LangGraph Studio y /consultar): verificación solo por ACL."""
     embedder, llm, supervisor = build_modelos(settings)
+    retriever = build_retriever(settings)
+
+    def catalogo(grupos: list[str]) -> CatalogoRol:
+        """Sin registro: los documentos del índice visibles para esos grupos."""
+        documentos = [(d.doc_id, d.doc_id, d.acl_groups) for d in retriever.list_documents(grupos)]
+        return construir_catalogo(grupos, documentos, {}, [])
+
     return _agente(
-        settings, embedder, llm, supervisor, build_retriever(settings),
-        shields=build_shields(settings),
+        settings, embedder, llm, supervisor, retriever,
+        shields=build_shields(settings), catalogo=catalogo,
     )  # fmt: skip
 
 
@@ -225,6 +242,7 @@ def _agente(
     alcance_cache: Callable[[list[str]], str] | None = None,
     motor: Engine | None = None,
     shields: ClienteShields | None = None,
+    catalogo: Callable[[list[str]], CatalogoRol] | None = None,
 ) -> Agente:
     versiones_entrada = catalogo_entrada(settings, shields)
     versiones_salida = catalogo_salida(settings)
@@ -265,4 +283,5 @@ def _agente(
         embedder_cache=embedder if cache is not None else None,
         alcance_cache=alcance_cache,
         prompts=prompts,
+        catalogo=catalogo,
     )
