@@ -69,13 +69,17 @@ cualquier `rg-ragseg-<entorno>` que siga encendido, su estado y lo que quede en 
 ### Configuración (una vez)
 
 1. **Identidad y estado**: `infra/bootstrap/bootstrap.sh` (responde `s` para crear las
-   variables del environment `dev`) y una credencial federada por environment:
+   variables del environment `dev`). Crea las credenciales federadas de los environments
+   `dev`, `staging` y `main` con los dos formatos de sujeto que usa GitHub: `repo:<owner>/<repo>:…`
+   y, en repositorios nuevos, el de ids inmutables `repo:<owner>@<id>/<repo>@<id>:…`. Si
+   `azure/login` falla con **AADSTS700213**, el error muestra el sujeto que GitHub envió;
+   regístralo así:
    ```bash
-   for env in staging main; do
-     az identity federated-credential create --name "github-$env" \
+   for env in dev staging main; do
+     az identity federated-credential create --name "github-$env-ids" \
        --identity-name id-gh-ragseg-deployer-dev --resource-group rg-ragseg-tfstate \
        --issuer https://token.actions.githubusercontent.com \
-       --subject "repo:<owner>/<repo>:environment:$env" --audiences api://AzureADTokenExchange
+       --subject "repo:<owner>@<id>/<repo>@<id>:environment:$env" --audiences api://AzureADTokenExchange
    done
    ```
 2. **Variables de repositorio** `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` y

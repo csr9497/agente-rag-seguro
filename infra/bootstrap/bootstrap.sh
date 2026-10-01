@@ -50,11 +50,31 @@ az identity create -n "$IDENTITY_NAME" -g "$TFSTATE_RG" -l "$LOCATION" -o none
 CLIENT_ID=$(az identity show -n "$IDENTITY_NAME" -g "$TFSTATE_RG" --query clientId -o tsv)
 PRINCIPAL_ID=$(az identity show -n "$IDENTITY_NAME" -g "$TFSTATE_RG" --query principalId -o tsv)
 
-az identity federated-credential create --name "github-${ENVIRONMENT}" \
-  --identity-name "$IDENTITY_NAME" --resource-group "$TFSTATE_RG" \
-  --issuer "https://token.actions.githubusercontent.com" \
-  --subject "repo:${GITHUB_REPO}:environment:${ENVIRONMENT}" \
-  --audiences "api://AzureADTokenExchange" -o none
+# GitHub firma el token con «repo:owner/repo:…» o, en repositorios nuevos, con los ids
+# inmutables «repo:owner@<id>/repo@<id>:…»: se registran ambos (si falta el que GitHub usa,
+# azure/login falla con AADSTS700213).
+federar() { # federar <nombre> <sujeto>
+  az identity federated-credential create --name "$1" \
+    --identity-name "$IDENTITY_NAME" --resource-group "$TFSTATE_RG" \
+    --issuer "https://token.actions.githubusercontent.com" --subject "$2" \
+    --audiences "api://AzureADTokenExchange" -o none
+}
+REPO_JSON=$(gh api "repos/${GITHUB_REPO}" 2> /dev/null || curl -fsS "https://api.github.com/repos/${GITHUB_REPO}" || true)
+REPO_IDS=$(REPO_JSON="$REPO_JSON" python3 - << 'PY'
+import json, os
+d = json.loads(os.environ.get("REPO_JSON") or "{}")
+if "id" in d:
+    print("%s@%s/%s@%s" % (d["owner"]["login"], d["owner"]["id"], d["name"], d["id"]))
+PY
+)
+for ENTORNO_GH in ${ENTORNOS_GH:-dev staging main}; do
+  federar "github-${ENTORNO_GH}" "repo:${GITHUB_REPO}:environment:${ENTORNO_GH}"
+  if [[ -n $REPO_IDS ]]; then
+    federar "github-${ENTORNO_GH}-ids" "repo:${REPO_IDS}:environment:${ENTORNO_GH}"
+  else
+    echo "⚠️  No se pudieron leer los ids de ${GITHUB_REPO} (gh o api.github.com): crea a mano la credencial con el sujeto que muestre el error AADSTS700213."
+  fi
+done
 
 echo "==> Roles del deployer"
 SCOPE="/subscriptions/${SUBSCRIPTION_ID}"
