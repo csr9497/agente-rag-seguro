@@ -26,6 +26,7 @@ from app.cache.semantica import CacheSemantica, EntradaCache
 from app.config import Settings
 from app.graph.prompts import SUPERVISOR_PROMPT
 from app.graph.state import EstadoAgente, ResultadoLlamada
+from app.modelos.errores import ModeloError, es_filtro_de_contenido
 from app.models.schemas import ChunkRecuperado, Hallazgo, RespuestaConsulta, Turno, Usuario
 from app.observabilidad import traza_consulta, usuario_seudonimo
 from app.rag.generacion import generar_respuesta, respuesta_sin_contexto
@@ -33,6 +34,7 @@ from app.rag.prompts import build_historial, neutralizar
 from app.retrieval.base import LLM, Embedder, Supervisor
 from app.security.acceso import PREFIJO_DATOS, VerificadorAcceso, VerificadorPermisivo
 from app.security.audit import registrar_consulta
+from app.security.deteccion import TIPOS_PII, enmascarar_pii
 from app.security.guardrails import MENSAJE_BLOQUEO, Guardrail, Veredicto
 from app.security.versiones import ContextoAgente
 from app.tools.base import SIN_ACCESO, Herramienta, ResultadoHerramienta, schema_openai
@@ -140,7 +142,11 @@ class Agente:
             config["metadata"]["guardrail_entrada"] = self._version_entrada
             config["metadata"]["guardrail_salida"] = self._version_salida
             config["run_id"] = traza_id
-            final = EstadoAgente.model_validate(self.grafo.invoke(inicial, config=config))
+            try:
+                final = EstadoAgente.model_validate(self.grafo.invoke(inicial, config=config))
+            except ModeloError as exc:
+                _auditar_error_modelo(inicial, exc)
+                raise
         consultados = _documentos_consultados(final)
         return ResultadoAgente(
             respuesta=_requerir_respuesta(final),
@@ -279,8 +285,8 @@ class Agente:
             decision = self._supervisor.decidir(
                 mensajes, self._schemas, obligar_herramienta=estado.iteraciones == 0
             )
-        except openai.BadRequestError as exc:
-            if not _es_filtro_de_contenido(exc):
+        except (openai.BadRequestError, ModeloError) as exc:
+            if not es_filtro_de_contenido(exc):
                 raise
             return {**_bloqueo_por_filtro(estado), "pendientes": []}
         return {
@@ -467,8 +473,8 @@ class Agente:
             respuesta = generar_respuesta(
                 self._llm, estado.pregunta, estado.recuperados, estado.historial
             )
-        except openai.BadRequestError as exc:
-            if not _es_filtro_de_contenido(exc):
+        except (openai.BadRequestError, ModeloError) as exc:
+            if not es_filtro_de_contenido(exc):
                 raise
             return _bloqueo_por_filtro(estado)
         return {"respuesta": respuesta}
@@ -517,9 +523,23 @@ def _revisar_con_traza(tipo: str, version: str, guardrail: Guardrail, texto: str
     return revisar(texto)
 
 
-def _es_filtro_de_contenido(exc: openai.BadRequestError) -> bool:
-    """Azure OpenAI rechaza la petición por su filtro de contenido (p. ej. jailbreak)."""
-    return getattr(exc, "code", None) == "content_filter" or "content_filter" in str(exc)
+def _auditar_error_modelo(estado: EstadoAgente, exc: ModeloError) -> None:
+    """Regla 4 (toda consulta se audita), también si el proveedor de modelos falla a mitad del
+    grafo. La pregunta se registra con la PII enmascarada (no pasó por input_guardrail)."""
+    registrar_consulta(
+        estado.usuario,
+        enmascarar_pii(estado.pregunta, TIPOS_PII)[0],
+        RespuestaConsulta(respuesta=exc.mensaje_usuario, citas=[], sin_contexto=True),
+        [
+            Hallazgo(
+                tipo="servicio_no_disponible",
+                detalle=f"modelo:{exc.tipo} ({exc.proveedor}/{exc.modelo})",
+                accion="registrar",
+            )
+        ],
+        traza_id=estado.traza_id,
+        conversacion_id=estado.conversacion_id,
+    )
 
 
 def _bloqueo_por_filtro(estado: EstadoAgente) -> Update:

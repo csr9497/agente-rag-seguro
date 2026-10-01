@@ -13,6 +13,7 @@ from app.cache.semantica import CacheMemoria, CacheRedis, CacheSemantica, alcanc
 from app.config import Settings
 from app.datos.catalogo import permisos_por_consulta
 from app.graph.agente import Agente
+from app.modelos.openai_compat import EmbedderOpenAI, LLMOpenAI, SupervisorOpenAI, build_client
 from app.observabilidad import configurar_trazas
 from app.persistencia.almacen import AlmacenBlob, AlmacenDocumentos, AlmacenLocal
 from app.persistencia.repositorios import (
@@ -23,12 +24,6 @@ from app.persistencia.repositorios import (
     SqlRepositorioRoles,
     crear_motor,
     inicializar,
-)
-from app.retrieval.azure_openai import (
-    AzureOpenAIEmbedder,
-    AzureOpenAILLM,
-    AzureOpenAISupervisor,
-    build_client,
 )
 from app.retrieval.base import LLM, Embedder, Retriever, Supervisor
 from app.retrieval.no_configurado import ModelosNoConfigurados
@@ -112,16 +107,20 @@ def build_almacen(settings: Settings) -> AlmacenDocumentos:
 
 
 def build_modelos(settings: Settings) -> tuple[Embedder, LLM, Supervisor]:
-    """Embeddings, LLM de generación y supervisor. Sin endpoint, la app arranca igualmente y
-    las consultas responden 503 indicando qué falta."""
-    if not settings.azure_openai_endpoint:
-        faltan = ModelosNoConfigurados(["AZURE_OPENAI_ENDPOINT"])
-        return faltan, faltan, faltan
+    """Embeddings, LLM de generación y supervisor del proveedor configurado (Azure OpenAI u
+    OpenAI/compatible). Sin configuración, la app arranca igualmente y las consultas
+    responden 503 indicando qué falta."""
+    if faltan := settings.modelos_faltantes():
+        sin_modelos = ModelosNoConfigurados(faltan, settings.modelos_proveedor)
+        return sin_modelos, sin_modelos, sin_modelos
     client = build_client(settings)
+    proveedor = settings.modelos_proveedor
     return (
-        AzureOpenAIEmbedder(client, settings.azure_openai_embedding_deployment),
-        AzureOpenAILLM(client, settings.azure_openai_chat_deployment),
-        AzureOpenAISupervisor(client, settings.azure_openai_chat_deployment),
+        EmbedderOpenAI(
+            client, settings.modelo_embeddings, proveedor, settings.embedding_dimensions
+        ),
+        LLMOpenAI(client, settings.modelo_chat, proveedor),
+        SupervisorOpenAI(client, settings.modelo_chat, proveedor),
     )
 
 
@@ -162,7 +161,7 @@ def build_servicios(
     registro = SqlRepositorioDocumentos(motor)
     cache, alcance = None, None
     if settings.cache_semantica:
-        version = f"{settings.azure_openai_chat_deployment}:{settings.app_version}"
+        version = f"{settings.modelos_proveedor}:{settings.modelo_chat}:{settings.app_version}"
         cache = build_cache(settings)
 
         def alcance(roles: list[str]) -> str:

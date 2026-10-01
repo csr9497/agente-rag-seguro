@@ -14,6 +14,21 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
+    # Proveedor de modelos (ver app/modelos/ y `make verificar-modelos`):
+    # - azure: Azure OpenAI (AZURE_OPENAI_*). Requiere suscripción, recurso y deployments.
+    # - openai: OpenAI o un endpoint compatible (OPENAI_BASE_URL + OPENAI_API_KEY).
+    modelos_proveedor: Literal["azure", "openai"] = "azure"
+    # Con poca cuota (TPM) el proveedor responde 429 con Retry-After: el SDK espera ese tiempo
+    # y reintenta con backoff exponencial hasta este número de veces.
+    modelos_max_reintentos: int = 6
+    modelos_timeout_s: float = 60.0
+
+    openai_base_url: str = ""  # vacío = https://api.openai.com/v1
+    openai_api_key: SecretStr | None = None
+    openai_chat_model: str = "gpt-4o"
+    openai_embedding_model: str = "text-embedding-3-small"  # 1536 dimensiones
+    openai_ligero_model: str = ""
+
     azure_openai_endpoint: str = ""
     azure_openai_api_key: SecretStr | None = None
     azure_openai_api_version: str = "2024-10-21"
@@ -21,10 +36,6 @@ class Settings(BaseSettings):
     azure_openai_embedding_deployment: str = "text-embedding-ada-002"
     # Modelo ligero opcional (p. ej. gpt-4.1-mini): guardián LLM de los guardrails.
     azure_openai_ligero_deployment: str = ""
-    # Con poca cuota (TPM) Azure responde 429 con Retry-After: el SDK espera ese tiempo y
-    # reintenta con backoff exponencial hasta este número de veces.
-    azure_openai_max_reintentos: int = 6
-    azure_openai_timeout_s: float = 60.0
     embedding_dimensions: int = 1536
 
     vector_store: Literal["qdrant", "azure_search"] = "qdrant"
@@ -108,6 +119,32 @@ class Settings(BaseSettings):
     gestion_documentos: bool = False
     # Solo local: cualquier rol activo es elegible. En Azure, los roles del usuario (Entra ID).
     seleccion_libre_de_rol: bool = False
+
+    # ------------------------------------------------------------ modelos (según proveedor)
+    @property
+    def modelo_chat(self) -> str:
+        if self.modelos_proveedor == "openai":
+            return self.openai_chat_model
+        return self.azure_openai_chat_deployment
+
+    @property
+    def modelo_embeddings(self) -> str:
+        if self.modelos_proveedor == "openai":
+            return self.openai_embedding_model
+        return self.azure_openai_embedding_deployment
+
+    @property
+    def modelo_ligero(self) -> str:
+        if self.modelos_proveedor == "openai":
+            return self.openai_ligero_model
+        return self.azure_openai_ligero_deployment
+
+    def modelos_faltantes(self) -> list[str]:
+        """Variables que faltan para poder llamar a los modelos (vacío = configurado)."""
+        if self.modelos_proveedor == "openai":
+            # Sin URL propia es OpenAI y necesita clave; un endpoint local puede no pedirla.
+            return [] if self.openai_api_key or self.openai_base_url else ["OPENAI_API_KEY"]
+        return [] if self.azure_openai_endpoint else ["AZURE_OPENAI_ENDPOINT"]
 
 
 class ConfiguracionInseguraError(RuntimeError):

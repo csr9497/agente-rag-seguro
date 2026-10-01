@@ -3,7 +3,6 @@
 import logging
 from typing import Literal
 
-import openai
 from azure.core.exceptions import AzureError
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
@@ -57,9 +56,6 @@ def preguntar(
         return servicios.conversaciones.preguntar(usuario, conversacion_id, body.pregunta)
     except ProveedorNoConfiguradoError as exc:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
-    except openai.APIError as exc:
-        logger.exception("Error del proveedor LLM")
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Error del proveedor de IA") from exc
     except AzureError as exc:  # corte de red o error transitorio de AI Search / Blob / Safety
         logger.exception("Servicio de Azure no disponible")
         raise HTTPException(

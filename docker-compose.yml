@@ -1,4 +1,5 @@
-# Entorno local: backend + web + Qdrant. Embeddings y LLM en Azure OpenAI (.env).
+# Entorno local: backend + web + Qdrant. Embeddings y LLM: Azure OpenAI u OpenAI/compatible
+# (MODELOS_PROVEEDOR en .env; ver docs/modelos.md).
 #   docker compose up --build
 #   docker compose run --rm ingest        # indexa ingestor/sample_docs en Qdrant
 services:
@@ -47,6 +48,9 @@ services:
       ALMACEN_LOCAL_DIR: /data/documentos
       # Sin az login en el contenedor: solo guardrails locales (Prompt Shields, fuera de Docker).
       CONTENT_SAFETY_ENDPOINT: ""
+    extra_hosts:
+      # Endpoints compatibles en el host (Ollama, vLLM): OPENAI_BASE_URL=http://host.docker.internal:…
+      - "host.docker.internal:host-gateway"
     volumes:
       # Carpeta del proyecto (no volumen): LangGraph Studio (`make studio`, en el host) usa la
       # misma base de datos y registro de permisos que la app.

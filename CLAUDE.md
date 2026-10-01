@@ -10,7 +10,10 @@ Agente LangGraph + RAG con permisos + guardrails, en Azure, con Terraform y CI/C
 ## Stack (decisiones cerradas — no cambiar sin avisar)
 - Lenguaje: **Python 3.12**
 - Orquestación del agente: **LangGraph**
-- LLM + embeddings: **Azure OpenAI** (SDK `openai` con `AzureOpenAI`)
+- LLM + embeddings: **proveedor configurable** (`MODELOS_PROVEEDOR`): **Azure OpenAI** por
+  defecto y en el despliegue, u **OpenAI / endpoint compatible** con clave directa. Mismo SDK
+  `openai` (`AzureOpenAI` / `OpenAI`) en `app/modelos/`; errores tipificados (`ModeloError`)
+  y diagnóstico con `make verificar-modelos` (ver docs/modelos.md)
 - Retrieval / vector store: **Azure AI Search** (híbrido + security trimming)
 - API: **FastAPI**
 - Estado + auditoría: **PostgreSQL** (sin checkpointer de LangGraph: ver docs/diseno-fase-3.md §4)

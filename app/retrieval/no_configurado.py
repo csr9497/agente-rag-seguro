@@ -11,8 +11,10 @@ class ProveedorNoConfiguradoError(RuntimeError):
 class ModelosNoConfigurados:
     """Implementa Embedder, LLM y Supervisor lanzando ProveedorNoConfiguradoError."""
 
-    def __init__(self, faltan: list[str]) -> None:
-        self._mensaje = "Azure OpenAI no configurado: faltan " + ", ".join(faltan)
+    def __init__(self, faltan: list[str], proveedor: str = "azure") -> None:
+        self._mensaje = (
+            f"Modelos no configurados (MODELOS_PROVEEDOR={proveedor}): faltan {', '.join(faltan)}"
+        )
 
     def _fallar(self) -> NoReturn:
         raise ProveedorNoConfiguradoError(self._mensaje)

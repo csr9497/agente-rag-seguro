@@ -14,6 +14,7 @@ from app.config import Settings, get_settings, validar_seguridad
 from app.deps import build_servicios
 from app.graph import topologia
 from app.graph.agente import Agente
+from app.modelos.errores import ModeloError, clasificar
 from app.models.schemas import ConsultaRequest, RespuestaConsulta, Usuario
 from app.retrieval.no_configurado import ProveedorNoConfiguradoError
 from app.security.identity import get_usuario
@@ -66,6 +67,23 @@ def _datos_invalidos(_: Request, exc: DatosInvalidosError) -> JSONResponse:
     return JSONResponse({"detail": str(exc)}, status_code=422)
 
 
+@app.exception_handler(ModeloError)
+def _error_modelo(_: Request, exc: ModeloError) -> JSONResponse:
+    """Saldo agotado, credenciales, modelo inexistente, capacidad no soportada…: el usuario
+    recibe un mensaje claro; quien opera el servicio, el detalle y qué revisar en el log."""
+    logger.error("Proveedor de modelos: %s | %s", exc, exc.pista)
+    return JSONResponse(
+        {"detail": exc.mensaje_usuario, "codigo": exc.tipo}, status_code=exc.estado_http
+    )
+
+
+@app.exception_handler(openai.APIError)
+def _error_openai(request: Request, exc: openai.APIError) -> JSONResponse:
+    """Errores del SDK que no pasaron por un adaptador (red de seguridad)."""
+    settings = get_settings()
+    return _error_modelo(request, clasificar(exc, settings.modelos_proveedor, settings.modelo_chat))
+
+
 def get_agente(request: Request) -> Agente:
     return request.app.state.agente
 
@@ -90,9 +108,9 @@ def ready(request: Request, settings: Annotated[Settings, Depends(get_settings)]
     servicios = request.app.state.servicios
 
     def modelos() -> str:
-        if not settings.azure_openai_endpoint:
-            raise ProveedorNoConfiguradoError("falta AZURE_OPENAI_ENDPOINT")
-        return settings.azure_openai_chat_deployment
+        if faltan := settings.modelos_faltantes():
+            raise ProveedorNoConfiguradoError(f"faltan {', '.join(faltan)}")
+        return f"{settings.modelos_proveedor}: {settings.modelo_chat}"
 
     checks = {
         "base_de_datos": _comprobar(lambda: f"{len(servicios.repo_roles.listar())} roles"),
@@ -120,9 +138,6 @@ def consultar(
         return agente.consultar(body.pregunta, usuario, top_k=body.top_k)
     except ProveedorNoConfiguradoError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    except openai.APIError as exc:
-        logger.exception("Error del proveedor LLM")
-        raise HTTPException(status_code=502, detail="Error del proveedor de IA") from exc
     except AzureError as exc:
         logger.exception("Servicio de Azure no disponible")
         raise HTTPException(

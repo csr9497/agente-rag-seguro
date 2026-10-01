@@ -118,11 +118,11 @@ def informe_markdown(informe: InformeEvaluacion) -> str:
 
 def construir_juez() -> Juez:
     from app.config import get_settings
-    from app.retrieval.azure_openai import build_client
-    from evals.juez import JuezAzureOpenAI
+    from app.modelos.openai_compat import build_client
+    from evals.juez import JuezOpenAI
 
     settings = get_settings()
-    return JuezAzureOpenAI(build_client(settings), settings.azure_openai_chat_deployment)
+    return JuezOpenAI(build_client(settings), settings.modelo_chat)
 
 
 def main() -> None:

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Entorno de desarrollo completo: modelos en Azure (solo gpt-4o y ada-002) + app, web, Qdrant
-# y Redis en Docker + LangGraph Studio en el host. Todo escucha solo en 127.0.0.1.
+# Entorno de desarrollo completo: modelos (Azure OpenAI u OpenAI/compatible, según
+# MODELOS_PROVEEDOR en .env) + app, web, Qdrant y Redis en Docker + LangGraph Studio en el
+# host. Todo escucha solo en 127.0.0.1.
 #
 #   ./scripts/entorno_local.sh instalar   # comprueba requisitos, dependencias, .env y Terraform
 #   ./scripts/entorno_local.sh levantar   # crea/actualiza lo necesario y muestra los accesos
@@ -8,14 +9,24 @@
 #   ./scripts/entorno_local.sh apagar     # para Studio y Docker, elimina los modelos de Azure
 #                                         # y quita endpoint y clave de .env
 #
-# Requisitos: az login, Docker Desktop abierto y el estado remoto de Terraform (bootstrap).
+# Requisitos comunes: uv y Docker Desktop abierto.
+#   MODELOS_PROVEEDOR=azure (por defecto): Azure CLI con `az login`, suscripción activa,
+#     Terraform y el estado remoto (bootstrap). levantar/apagar crean y borran los modelos.
+#   MODELOS_PROVEEDOR=openai: OPENAI_API_KEY (y OPENAI_BASE_URL si no es OpenAI) en .env.
+#     No se toca Azure.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+
+# Variable de entorno > .env > azure.
+PROVEEDOR="${MODELOS_PROVEEDOR:-$(grep -E '^MODELOS_PROVEEDOR=' .env 2> /dev/null | tail -1 | cut -d= -f2- | tr -d '"' || true)}"
+PROVEEDOR="${PROVEEDOR:-azure}"
 
 TFVARS="../envs/dev/solo_modelos.tfvars"
 STUDIO_PID=data/.studio.pid
 STUDIO_LOG=data/studio.log
-export ARM_SUBSCRIPTION_ID="${ARM_SUBSCRIPTION_ID:-$(az account show --query id -o tsv 2>/dev/null || true)}"
+if [[ $PROVEEDOR == azure ]]; then
+  export ARM_SUBSCRIPTION_ID="${ARM_SUBSCRIPTION_ID:-$(az account show --query id -o tsv 2>/dev/null || true)}"
+fi
 
 paso() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 
@@ -26,15 +37,30 @@ terraform_init() { # idempotente; el backend remoto está en infra/envs/dev/back
 
 yo() { az ad signed-in-user show --query id -o tsv 2>/dev/null; }
 
+requisitos_azure() { # devuelve 1 si falta algo
+  local falta=0 estado
+  for cmd in az terraform; do
+    if command -v "$cmd" > /dev/null; then echo "✅ $cmd"; else echo "⛔ $cmd no está instalado"; falta=1; fi
+  done
+  command -v az > /dev/null || { echo "   → https://learn.microsoft.com/cli/azure/install-azure-cli"; return 1; }
+  if ! az account show > /dev/null 2>&1; then
+    echo "⛔ sin sesión en Azure: ejecuta az login (y az account set -s <suscripción>)"; return 1
+  fi
+  estado=$(az account show --query state -o tsv)
+  echo "✅ az login: $(az account show --query user.name -o tsv)"
+  if [[ $estado == Enabled ]]; then echo "✅ suscripción: $(az account show --query name -o tsv) (activa)"
+  else echo "⛔ suscripción $(az account show --query name -o tsv) en estado $estado: crédito agotado o deshabilitada"; falta=1; fi
+  return $falta
+}
+
 instalar() {
-  paso "Requisitos"
+  paso "Requisitos (MODELOS_PROVEEDOR=$PROVEEDOR)"
   local falta=0
-  for cmd in uv docker az terraform; do
+  for cmd in uv docker; do
     if command -v "$cmd" > /dev/null; then echo "✅ $cmd"; else echo "⛔ $cmd no está instalado"; falta=1; fi
   done
   docker info > /dev/null 2>&1 && echo "✅ Docker en marcha" || { echo "⛔ abre Docker Desktop"; falta=1; }
-  if az account show > /dev/null 2>&1; then echo "✅ az login ($(az account show --query name -o tsv))"
-  else echo "⛔ ejecuta: az login"; falta=1; fi
+  if [[ $PROVEEDOR == azure ]]; then requisitos_azure || falta=1; fi
   [[ $falta == 0 ]] || { echo; echo "Resuelve lo marcado con ⛔ y repite: make instalar"; exit 1; }
 
   paso "Dependencias de Python (uv, Python 3.12)"
@@ -50,10 +76,16 @@ instalar() {
   grep -q '^LANGSMITH_API_KEY=.\+' .env && echo "✅ LANGSMITH_API_KEY definida" \
     || echo "ℹ️  opcional: añade LANGSMITH_API_KEY en .env para trazas y evaluaciones en LangSmith"
 
-  paso "Terraform (estado remoto)"
-  terraform_init && echo "listo"
+  if [[ $PROVEEDOR == azure ]]; then
+    paso "Terraform (estado remoto)"
+    terraform_init && echo "listo"
+  else
+    paso "Modelos (OpenAI o endpoint compatible)"
+    grep -qE '^OPENAI_(API_KEY|BASE_URL)=.+' .env && echo "✅ OPENAI_API_KEY / OPENAI_BASE_URL en .env" \
+      || echo "⛔ define OPENAI_API_KEY (y OPENAI_BASE_URL si no es OpenAI) en .env"
+  fi
   mkdir -p data
-  echo; echo "Instalación completa. Siguiente paso: make levantar"
+  echo; echo "Instalación completa. Siguiente paso: make verificar-modelos y make levantar"
 }
 
 esperar() { # esperar URL segundos
@@ -66,15 +98,24 @@ studio_activo() { [[ -f "$STUDIO_PID" ]] && kill -0 "$(cat "$STUDIO_PID")" 2> /d
 levantar() {
   docker info > /dev/null 2>&1 || { echo "Docker no está en marcha: abre Docker Desktop y repite."; exit 1; }
 
-  paso "1/5 Modelos en Azure (gpt-4o + text-embedding-ada-002)"
-  [[ -d infra/platform/.terraform ]] || terraform_init
   mkdir -p data
-  terraform -chdir=infra/platform apply -input=false -auto-approve -var-file="$TFVARS" \
-    -var "developer_principal_ids=[\"$(yo)\"]" \
-    | grep -E "Apply complete|No changes|Error" || true
+  if [[ $PROVEEDOR == azure ]]; then
+    paso "1/5 Modelos en Azure (gpt-4o + text-embedding-ada-002)"
+    requisitos_azure > /dev/null || { requisitos_azure; exit 1; }
+    [[ -d infra/platform/.terraform ]] || terraform_init
+    terraform -chdir=infra/platform apply -input=false -auto-approve -var-file="$TFVARS" \
+      -var "developer_principal_ids=[\"$(yo)\"]" \
+      | grep -E "Apply complete|No changes|Error" || true
 
-  paso "2/5 .env con el endpoint y la clave de los modelos"
-  ./scripts/env_from_azure.sh > /dev/null && echo "listo"
+    paso "2/5 .env con el endpoint y la clave de los modelos"
+    ./scripts/env_from_azure.sh > /dev/null && echo "listo"
+  else
+    paso "1-2/5 Modelos: OpenAI o endpoint compatible (no se crea nada en Azure)"
+  fi
+
+  paso "Verificación de los modelos (credenciales, saldo, modelos y capacidades)"
+  uv run python -m app.modelos.diagnostico \
+    || { echo; echo "Los modelos no están listos: corrige lo anterior y repite make levantar."; exit 1; }
 
   paso "3/5 App, web, Qdrant y Redis en Docker"
   docker compose up --build -d 2>&1 | grep -E "Started|Running|Error" || true
@@ -104,6 +145,10 @@ apagar() {
   paso "Docker (app, web, Qdrant, Redis)"
   docker compose down 2>&1 | grep -E "Removed|Stopped" | tail -4 || true
 
+  if [[ $PROVEEDOR != azure ]]; then
+    echo; echo "listo (MODELOS_PROVEEDOR=$PROVEEDOR: no hay recursos de Azure que borrar)."
+    return
+  fi
   paso "Modelos en Azure"
   [[ -d infra/platform/.terraform ]] || terraform_init
   terraform -chdir=infra/platform destroy -input=false -auto-approve -var-file="$TFVARS" \

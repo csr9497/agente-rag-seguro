@@ -1,7 +1,7 @@
 CONDA_ENV ?= agente-rag
 BASE_URL  ?= http://localhost:8000
 
-.PHONY: help setup sync lint fmt test test-postgres integration matriz evals evals-simulado evals-langsmith up down ingest studio env-from-azure tf-validate validar-infra ciclo modelos-up modelos-down instalar levantar apagar accesos
+.PHONY: help setup sync lint fmt test test-postgres integration matriz evals evals-simulado evals-langsmith up down ingest studio env-from-azure tf-validate validar-infra verificar-modelos ciclo modelos-up modelos-down instalar levantar apagar accesos
 
 help: ## Lista los comandos
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-16s %s\n", $$1, $$2}'
@@ -58,16 +58,19 @@ ingest: ## Indexa ingestor/sample_docs en el Qdrant local
 studio: ## LangGraph Studio: servidor de desarrollo del grafo en http://127.0.0.1:2024
 	uv run langgraph dev --allow-blocking
 
+verificar-modelos: ## Requisitos y capacidades del proveedor de modelos (MODELOS_PROVEEDOR)
+	uv run python -m app.modelos.diagnostico $(if $(SIN_LLAMADAS),--sin-llamadas,)
+
 env-from-azure: ## Rellena .env con endpoint y clave de Azure OpenAI (desde Key Vault)
 	./scripts/env_from_azure.sh
 
 instalar: ## Primer uso tras clonar: requisitos, dependencias, .env y Terraform
 	./scripts/entorno_local.sh instalar
 
-levantar: ## Todo el entorno: modelos en Azure + Docker + documentos + Studio, y muestra los accesos
+levantar: ## Todo el entorno: modelos (Azure u OpenAI) + Docker + documentos + Studio, y muestra los accesos
 	./scripts/entorno_local.sh levantar
 
-apagar: ## Para Studio y Docker, elimina los modelos de Azure y limpia .env (sin costes)
+apagar: ## Para Studio y Docker; con Azure, elimina los modelos y limpia .env (sin costes)
 	./scripts/entorno_local.sh apagar
 
 accesos: ## Estado de cada servicio y sus URLs (app, API, Studio, LangSmith)

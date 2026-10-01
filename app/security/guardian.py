@@ -10,10 +10,10 @@ rechaza el mensaje, se bloquea.
 
 from typing import Literal
 
-import openai
-from openai import AzureOpenAI
+from openai import OpenAI
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.modelos.errores import es_filtro_de_contenido  # noqa: F401 — API del guardián
 from app.rag.prompts import neutralizar
 
 Categoria = Literal[
@@ -40,7 +40,7 @@ class VeredictoGuardian(BaseModel):
 
 
 class GuardianLLM:
-    def __init__(self, client: AzureOpenAI, deployment: str) -> None:
+    def __init__(self, client: OpenAI, deployment: str) -> None:
         self._client = client
         self.deployment = deployment
 
@@ -61,9 +61,3 @@ class GuardianLLM:
                 motivo="El clasificador no devolvió un veredicto válido.",
             )  # fmt: skip
         return veredicto
-
-
-def es_filtro_de_contenido(exc: Exception) -> bool:
-    return isinstance(exc, openai.BadRequestError) and (
-        getattr(exc, "code", None) == "content_filter" or "content_filter" in str(exc)
-    )

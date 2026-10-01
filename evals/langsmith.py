@@ -96,7 +96,7 @@ def respuesta_fundamentada(outputs: dict[str, Any]) -> bool:
 
 
 def evaluadores_rag(juez: Any, modelo: str) -> list:
-    """Evaluadores prebuilt (openevals) con gpt-4o como juez; se omiten si no aplican."""
+    """Evaluadores prebuilt (openevals) con el modelo de chat como juez; se omiten si no aplican."""
     evaluadores = []
     for clave, (prompt, variables) in EVALUADORES_RAG.items():
         juzgar = create_llm_as_judge(prompt=prompt, feedback_key=clave, judge=juez, model=modelo)
@@ -136,7 +136,7 @@ def ejecutar_experimento(
     base_url: str, matriz: Matriz, pausa: float = 0.0
 ) -> tuple[str, list[ResultadoEvaluacion]]:
     from app.config import get_settings
-    from app.retrieval.azure_openai import build_client
+    from app.modelos.openai_compat import build_client
 
     settings = get_settings()
     cliente = cliente_langsmith()
@@ -168,10 +168,10 @@ def ejecutar_experimento(
         data=DATASET,
         evaluators=[
             por_capas,
-            *evaluadores_rag(build_client(settings), settings.azure_openai_chat_deployment),
+            *evaluadores_rag(build_client(settings), settings.modelo_chat),
         ],
         experiment_prefix="etapa-a",
-        metadata={"destino": base_url, "modelo": settings.azure_openai_chat_deployment},
+        metadata={"destino": base_url, "modelo": settings.modelo_chat},
         max_concurrency=1,
     )
     for fila in resultados:

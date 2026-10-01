@@ -62,13 +62,13 @@ def test_compose_no_contiene_contrasenas() -> None:
 
 def test_cliente_azure_openai_reintenta_429_con_backoff() -> None:
     from app.config import Settings
-    from app.retrieval.azure_openai import _cliente_base
+    from app.modelos.openai_compat import _cliente_base
 
     s = Settings(
         azure_openai_endpoint="https://x.openai.azure.com/",
         azure_openai_api_key="k",
-        azure_openai_max_reintentos=4,
-        azure_openai_timeout_s=30,
+        modelos_max_reintentos=4,
+        modelos_timeout_s=30,
     )
     c = _cliente_base(s)
     assert c.max_retries == 4 and c.timeout == 30
@@ -77,7 +77,7 @@ def test_cliente_azure_openai_reintenta_429_con_backoff() -> None:
 def test_supervisor_azure_obliga_herramienta_solo_si_se_pide() -> None:
     from types import SimpleNamespace
 
-    from app.retrieval.azure_openai import AzureOpenAISupervisor
+    from app.modelos.openai_compat import SupervisorOpenAI
 
     enviados = []
 
@@ -87,7 +87,7 @@ def test_supervisor_azure_obliga_herramienta_solo_si_se_pide() -> None:
         return SimpleNamespace(choices=[SimpleNamespace(message=mensaje)])
 
     cliente = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
-    sup = AzureOpenAISupervisor(cliente, "gpt-4o")
+    sup = SupervisorOpenAI(cliente, "gpt-4o")
     sup.decidir([], [{"type": "function"}], obligar_herramienta=True)
     sup.decidir([], [{"type": "function"}])
     assert enviados == ["required", "auto"]

@@ -9,24 +9,30 @@ auditoría, trazas en LangSmith y evaluaciones por capas. Reglas del proyecto en
 | | |
 |---|---|
 | Estado | Validado en Azure (etapa A) con modelos reales; entorno local completo con `make levantar` |
-| Stack | Python 3.12 · LangGraph · FastAPI · Azure OpenAI · AI Search / Qdrant · SQLite / PostgreSQL · Redis · Terraform · GitHub Actions |
-| Guías | [Herramientas y comandos](docs/herramientas.md) · [LangGraph Studio: valores y ejemplos](docs/studio.md) |
+| Stack | Python 3.12 · LangGraph · FastAPI · Azure OpenAI u OpenAI/compatible · AI Search / Qdrant · SQLite / PostgreSQL · Redis · Terraform · GitHub Actions |
+| Guías | [Proveedor de modelos: setup y errores](docs/modelos.md) · [Herramientas y comandos](docs/herramientas.md) · [LangGraph Studio: valores y ejemplos](docs/studio.md) |
 
 ## Arranque rápido (tras clonar)
 
-Requisitos: [uv](https://docs.astral.sh/uv/), Docker Desktop abierto, [Azure CLI](https://learn.microsoft.com/cli/azure/)
-con `az login` y [Terraform](https://developer.hashicorp.com/terraform) ≥ 1.9. El estado
-remoto de Terraform ya existe (bootstrap); no hace falta ninguna clave: se usa tu `az login`.
+Requisitos comunes: [uv](https://docs.astral.sh/uv/) y Docker Desktop abierto. Los modelos
+pueden venir de dos proveedores (`MODELOS_PROVEEDOR` en `.env`; guía completa en
+[docs/modelos.md](docs/modelos.md)):
+
+| | Azure OpenAI (`azure`, por defecto) | OpenAI o compatible (`openai`) |
+|---|---|---|
+| Necesitas | Suscripción activa, [Azure CLI](https://learn.microsoft.com/cli/azure/) con `az login`, [Terraform](https://developer.hashicorp.com/terraform) ≥ 1.9 y el estado remoto (bootstrap) | `OPENAI_API_KEY` (y `OPENAI_BASE_URL` si no es OpenAI) en `.env` |
+| `make levantar` | Crea gpt-4o y ada-002 en Azure y rellena `.env` | No toca Azure |
 
 ```bash
 git clone https://github.com/csr9497/agente-rag-seguro.git && cd agente-rag-seguro
-make instalar   # comprueba requisitos, instala dependencias, crea .env e inicializa Terraform
-make levantar   # modelos en Azure + app en Docker + documentos de ejemplo + Studio → accesos
+make instalar           # requisitos del proveedor elegido, dependencias y .env
+make verificar-modelos  # credenciales, saldo, modelos y capacidades (tool calling, JSON, embeddings)
+make levantar           # modelos + app en Docker + documentos de ejemplo + Studio → accesos
 ```
 
 Al terminar, `make levantar` muestra las URLs (aplicación en http://localhost:8080, API,
 LangGraph Studio, LangSmith, Qdrant). `make accesos` las repite con el estado de cada una y
-`make apagar` lo detiene todo y elimina los modelos de Azure (sin costes). Opcional: añade
+`make apagar` lo detiene todo y, con Azure, elimina los modelos (sin costes). Opcional: añade
 `LANGSMITH_API_KEY` en `.env` para trazas y evaluaciones en LangSmith.
 
 ![Interfaz](docs/ui/2-public.png)
@@ -136,10 +142,12 @@ make evals-simulado # gate de CI en local: app con modelos simulados + evaluacio
 make down
 ```
 
-Sin Azure OpenAI configurado la app arranca y responde **503** en lo que necesita el LLM; los
+Sin modelos configurados la app arranca y responde **503** en lo que necesita el LLM; los
 permisos, guardrails de entrada, roles, subida (validación) y auditoría funcionan. Para
-respuestas reales: `make env-from-azure` tras desplegar la etapa A (rellena `.env` desde
-Key Vault) y `make ingest`.
+respuestas reales sin Azure: `MODELOS_PROVEEDOR=openai` con `OPENAI_API_KEY`
+([docs/modelos.md](docs/modelos.md)); con Azure, `make env-from-azure` tras desplegar la
+etapa A. Después, `make ingest`. Los errores del proveedor (saldo, credenciales, modelo
+inexistente, capacidad no soportada) responden con un `codigo` tipificado.
 
 ### Uso
 
