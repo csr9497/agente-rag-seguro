@@ -81,7 +81,11 @@ locals {
     TRAZAS_MODO       = local.langsmith ? "enmascarado" : "apagado"
     CACHE_BACKEND     = contains(local.p.secretos_en_key_vault, "redis-url") ? "redis" : "memoria"
     LANGSMITH_PROJECT = "agente-rag-${local.p.name}"
-    APP_VERSION       = var.app_version
+    # Prompts de LangSmith con la etiqueta prod (los publica make desplegar); sin LangSmith o
+    # si no existe esa versión, los del repositorio.
+    PROMPTS_ORIGEN   = local.langsmith ? "langsmith" : "local"
+    PROMPTS_ETIQUETA = "prod"
+    APP_VERSION      = var.app_version
     # Sin Entra ID todavía: ni selección libre de rol ni gestión de documentos en Azure.
     SELECCION_LIBRE_DE_ROL = "false"
     GESTION_DOCUMENTOS     = "false"

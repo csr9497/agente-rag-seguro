@@ -169,6 +169,11 @@ desplegar() {
     || falla "Falló la imagen de la web (log: $LOG_DIR/imagen-web.log)."
   echo "backend:$tag · web:$tag"
 
+  if [[ -n ${LANGSMITH_API_KEY:-} ]]; then
+    echo "Prompts en LangSmith (la app de la nube usa la etiqueta prod):"
+    publicar_prompts dev prod
+  fi
+
   paso "4/6 Aplicaciones (web con login, backend interno, jobs de ingesta)"
   init apps
   aplicar apps -var-file=../envs/dev/apps.tfvars \
@@ -188,6 +193,9 @@ desplegar() {
 
   paso "6/6 Comprobación"
   comprobar
+
+  paso "Tu equipo contra la nube: app y LangGraph Studio (make local-nube)"
+  ./scripts/local_nube.sh || echo "⚠️  no arrancó; repítelo con make local-nube"
 }
 
 comprobar() {
@@ -221,7 +229,6 @@ comprobar() {
     echo "   personas desde la app (Roles y permisos → Personas y sus roles)."
   fi
   enlace_langsmith agente-rag-ragseg-dev
-  publicar_prompts
   echo "   Estado: make estado-nube · Eliminar todo: make destruir-nube"
 }
 
@@ -241,6 +248,7 @@ destruir() {
   local plataforma identidad
   plataforma=$(estado_de platform)
   identidad=$(estado_de identidad)
+  ./scripts/local_nube.sh parar > /dev/null 2>&1 || true
   paso "1/3 Aplicaciones"
   # Al destruir no se usan: valores de relleno para las validaciones del stack.
   export TF_VAR_github_oauth_client_id=x TF_VAR_github_oauth_client_secret=x TF_VAR_administradores='["x"]' TF_VAR_ips_permitidas='["0.0.0.0/32"]'

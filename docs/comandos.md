@@ -10,7 +10,7 @@ sube a git) o **en la línea de comandos** (`make evals BASE_URL=…`). `make he
 |---|---|
 | Probar en mi equipo | `make instalar` → `make verificar-modelos` → `make levantar` |
 | Publicar en Azure | `make desplegar` → (probar) → `make destruir-nube` |
-| Mi equipo contra lo publicado en Azure | `make local-nube` |
+| Mi equipo contra lo publicado en Azure | lo arranca `make desplegar` (rearrancar: `make local-nube`) |
 | Comprobar que nada se rompe | `make test` · `make lint` · `make evals-simulado` |
 | Medir la calidad con modelos reales | `make evals BASE_URL=…` |
 
@@ -109,8 +109,11 @@ Requisitos comunes: suscripción activa, `az login` (Owner o Contributor + User 
 Administrator), Terraform ≥ 1.9 y Docker con buildx. Detalle: [despliegue.md](despliegue.md).
 
 ### `make desplegar`
-Infraestructura → imágenes `linux/amd64` → apps → documentos de ejemplo → comprobación. Al
-terminar muestra la URL de la web y el enlace de LangSmith. Repetirlo actualiza lo cambiado.
+Infraestructura → imágenes `linux/amd64` → prompts en LangSmith → apps → documentos de ejemplo
+→ comprobación → app y Studio de tu equipo contra la nube (`make local-nube`, en segundo
+plano). Al terminar muestra todas las URLs (web en Azure, app local, Studio y LangSmith).
+Repetirlo actualiza lo cambiado. Con `LANGSMITH_API_KEY`, la app de la nube usa los prompts
+de LangSmith con la etiqueta `prod` (los publica este mismo comando).
 
 | Valor | Dónde | Efecto |
 |---|---|---|
@@ -130,10 +133,13 @@ Logs de cada paso: `data/nube/`.
 todo lo desplegado (pide escribir «destruir»; `CONFIRMAR=si` lo omite).
 
 ### `make local-nube`
-La app en tu equipo (http://localhost:8090) y LangGraph Studio (puerto 2025) con los modelos,
-AI Search, Blob y Content Safety de la nube y base de datos local (`data/nube-local.db`). La
-configuración de la nube va a `data/nube.env` (desde Key Vault): **tu `.env` no cambia**, así
-que `make studio` / `make levantar` siguen siendo locales. Ctrl+C para la app y Studio.
+**Lo ejecuta `make desplegar` al terminar**; a mano solo para rearrancarlo. Deja en segundo
+plano la app de tu equipo (http://localhost:8090) y LangGraph Studio (puerto 2025) con los
+modelos, AI Search, Blob y Content Safety de la nube y base de datos local
+(`data/nube-local.db`), y vuelve a la terminal. La configuración de la nube va a
+`data/nube.env` (desde Key Vault): **tu `.env` no cambia**, así que `make studio` /
+`make levantar` siguen siendo locales. `make local-nube-parar` los detiene (también
+`make destruir-nube`); logs en `data/local-nube.log` y `data/studio-nube.log`.
 
 | Valor | Dónde | Defecto |
 |---|---|---|

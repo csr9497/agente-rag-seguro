@@ -38,8 +38,8 @@ Elige un rol en la web (Empleado general, Recursos Humanos, Finanzas, Administra
 pregunta. `make apagar` lo detiene todo (con Azure, también borra los modelos).
 Sin modelos, `make up` arranca la interfaz y los permisos (las respuestas dan 503).
 
-**App local contra la nube**: tras `make desplegar`, `make local-nube` arranca la app en tu
-equipo (http://localhost:8090) y LangGraph Studio usando los modelos, AI Search, Blob y Content
+**App local contra la nube**: `make desplegar` deja además arrancados en tu equipo, en segundo
+plano, la app (http://localhost:8090) y LangGraph Studio usando los modelos, AI Search, Blob y Content
 Safety de Azure, con base de datos local (tu `.env` no cambia).
 
 **LangSmith**: con `LANGSMITH_API_KEY` en `.env`, trazas de cada consulta y los prompts de

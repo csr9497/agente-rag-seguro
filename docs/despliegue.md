@@ -19,9 +19,9 @@ Para abrirla a otras personas con login de GitHub, añade a `.env` `GH_OAUTH_CLI
 
 ## App en tu equipo contra los recursos de la nube
 
-```bash
-make local-nube     # http://localhost:8090
-```
+`make desplegar` la deja arrancada al terminar, en segundo plano (`make local-nube` la
+rearranca, `make local-nube-parar` la detiene): app en http://localhost:8090 y Studio en
+`https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2025`.
 
 Escribe en `data/nube.env` (no en `.env`) los endpoints y claves de la nube (Key Vault),
 registra en una base local (`data/nube-local.db`) los documentos que hay en Blob —sin volver a

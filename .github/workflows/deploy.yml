@@ -134,6 +134,16 @@ jobs:
       - uses: hashicorp/setup-terraform@v4
         with:
           terraform_wrapper: false
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+      - name: Prompts en LangSmith (la app usa la etiqueta prod)
+        env:
+          LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
+        run: |
+          uv sync --frozen
+          source scripts/comun.sh
+          publicar_prompts dev prod
       - name: terraform apply (apps)
         working-directory: infra/apps
         env:

@@ -3,8 +3,11 @@
 # modelos de Azure OpenAI, AI Search, Blob (originales) y Content Safety. Base de datos local
 # (SQLite en data/nube-local.db): PostgreSQL de la nube solo admite servicios de Azure.
 #
-#   ./scripts/local_nube.sh      →  http://localhost:8090  (PUERTO=… para cambiarlo)
+#   ./scripts/local_nube.sh         arranca (o reinicia) en segundo plano y vuelve:
+#                                   app http://localhost:8090 · Studio en el puerto 2025
+#   ./scripts/local_nube.sh parar   los detiene
 #
+# Lo ejecuta make desplegar al terminar: no hace falta lanzarlo a mano.
 # Requisitos: az login (con los permisos de desarrollador que asigna make desplegar) y uv.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -13,6 +16,8 @@ PUERTO="${PUERTO:-8090}"
 PUERTO_STUDIO="${PUERTO_STUDIO:-2025}"
 NUBE_ENV=data/nube.env
 PROYECTO="${LANGSMITH_PROJECT_LOCAL_NUBE:-agente-rag-local-nube}"
+PID_APP=data/.local-nube.pid
+PID_STUDIO=data/.studio-nube.pid
 source scripts/comun.sh
 paso() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 falla() { printf '\n⛔ %s\n' "$1"; exit 1; }
@@ -33,6 +38,19 @@ reparar_env_local() {
     .env && rm -f .env.bak
   echo "   .env vuelve a apuntar a lo local (Qdrant); la nube solo en $NUBE_ENV"
 }
+
+parar() { # detiene lo arrancado antes (si lo hay)
+  local f
+  for f in "$PID_APP" "$PID_STUDIO"; do
+    [[ -f $f ]] && kill "$(cat "$f")" 2> /dev/null || true
+    rm -f "$f"
+  done
+}
+esperar() { # esperar <url> <segundos>
+  for _ in $(seq "$2"); do curl -sf "$1" > /dev/null 2>&1 && return 0; sleep 1; done; return 1
+}
+
+if [[ ${1:-} == parar ]]; then parar; echo "App y Studio contra la nube detenidos."; exit 0; fi
 
 paso "Requisitos"
 az account show > /dev/null 2>&1 || falla "Sin sesión en Azure: ejecuta az login."
@@ -71,20 +89,24 @@ echo "listo"
 paso "2/4 Registro local con los documentos de la nube (desde Blob, sin reindexar)"
 uv run python -m ingestor.ingest --source blob 2>&1 | grep -E "Ingesta completada|rechazado|Error" || true
 
-paso "3/4 LangGraph Studio contra la nube y prompts en LangSmith"
+paso "3/4 Prompts en LangSmith"
 publicar_prompts
+
+paso "4/4 App y LangGraph Studio en segundo plano (logs en data/)"
+parar
+nohup uv run uvicorn scripts.local_nube:app --host 127.0.0.1 --port "$PUERTO" \
+  > data/local-nube.log 2>&1 &
+echo $! > "$PID_APP"
 nohup uv run langgraph dev --config langgraph.nube.json --allow-blocking --no-browser \
   --port "$PUERTO_STUDIO" > data/studio-nube.log 2>&1 &
-STUDIO=$!
-trap 'kill $STUDIO 2> /dev/null || true' EXIT INT TERM
-for _ in $(seq 45); do curl -sf "http://127.0.0.1:$PUERTO_STUDIO/ok" > /dev/null && break; sleep 2; done
-curl -sf "http://127.0.0.1:$PUERTO_STUDIO/ok" > /dev/null && echo "listo" \
-  || echo "⚠️  Studio no arrancó: revisa data/studio-nube.log (la app sigue)"
-
-paso "4/4 App en http://localhost:$PUERTO (Ctrl+C para parar todo)"
-echo "   Aplicación: http://localhost:$PUERTO  (elige un rol y pregunta; modelos, búsqueda y"
-echo "               documentos son los de Azure)"
+echo $! > "$PID_STUDIO"
+esperar "http://127.0.0.1:$PUERTO/api/health" 90 && echo "✅ app" \
+  || echo "⚠️  la app no arrancó: revisa data/local-nube.log"
+esperar "http://127.0.0.1:$PUERTO_STUDIO/ok" 90 && echo "✅ Studio" \
+  || echo "⚠️  Studio no arrancó: revisa data/studio-nube.log"
+echo
+echo "   Aplicación: http://localhost:$PUERTO  (modelos, búsqueda y documentos de Azure)"
 echo "   API:        http://localhost:$PUERTO/api/docs"
 echo "   Studio:     https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:$PUERTO_STUDIO"
 enlace_langsmith "$PROYECTO"
-uv run uvicorn scripts.local_nube:app --host 127.0.0.1 --port "$PUERTO"
+echo "   Parar: make local-nube-parar"
