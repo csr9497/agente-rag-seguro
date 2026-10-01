@@ -19,6 +19,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 TFVARS="../envs/dev/nube.tfvars"
 BACKEND="../envs/dev/backend.hcl"
 LOG_DIR="data/nube"
+source scripts/comun.sh
 LOGIN_PROVEEDOR="${LOGIN_PROVEEDOR:-}" # vacío: github si hay OAuth App en .env; si no, ip
 
 paso() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
@@ -111,17 +112,6 @@ region_postgres() {
     fi
   done
   return 1
-}
-
-enlace_langsmith() { # enlace directo al proyecto de trazas de la nube (si hay clave)
-  [[ -n ${LANGSMITH_API_KEY:-$(grep -E '^LANGSMITH_API_KEY=.+' .env 2> /dev/null | cut -d= -f2-)} ]] || return 0
-  LANGSMITH_API_KEY=${LANGSMITH_API_KEY:-$(grep -E '^LANGSMITH_API_KEY=' .env | tail -1 | cut -d= -f2-)} \
-    uv run python - << 'PY' 2> /dev/null || echo "   LangSmith: https://smith.langchain.com (proyecto agente-rag-ragseg-dev)"
-from langsmith import Client
-c = Client()
-p = c.read_project(project_name="agente-rag-ragseg-dev")
-print(f"   LangSmith: https://smith.langchain.com/o/{p.tenant_id}/projects/p/{p.id}")
-PY
 }
 
 esperar_job() { # esperar_job <job> <grupo>: hasta Succeeded/Failed (10 min)
@@ -230,7 +220,7 @@ comprobar() {
     echo "   Inicia sesión: los administradores tienen todos los roles y asignan roles a otras"
     echo "   personas desde la app (Roles y permisos → Personas y sus roles)."
   fi
-  enlace_langsmith
+  enlace_langsmith agente-rag-ragseg-dev
   echo "   Estado: make estado-nube · Eliminar todo: make destruir-nube"
 }
 

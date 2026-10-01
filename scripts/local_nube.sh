@@ -10,6 +10,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 PUERTO="${PUERTO:-8090}"
+PROYECTO="${LANGSMITH_PROJECT_LOCAL_NUBE:-agente-rag-local-nube}"
+source scripts/comun.sh
 paso() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 falla() { printf '\n⛔ %s\n' "$1"; exit 1; }
 
@@ -30,12 +32,17 @@ paso "1/3 .env con los endpoints y claves de la nube (desde Key Vault)"
 export MODELOS_PROVEEDOR=azure VECTOR_STORE=azure_search ALMACEN_DOCUMENTOS=blob \
   DATABASE_URL="sqlite:///$PWD/data/nube-local.db" CACHE_BACKEND=memoria ENTORNO=local \
   AUTH_MODO=stub SELECCION_LIBRE_DE_ROL=true GESTION_DOCUMENTOS=true \
-  LANGSMITH_PROJECT="${LANGSMITH_PROJECT_LOCAL_NUBE:-agente-rag-local-nube}"
+  LANGSMITH_PROJECT="$PROYECTO"
+# Trazas completas (entorno local); sin LANGSMITH_API_KEY en .env la app las deja apagadas.
+grep -qE '^LANGSMITH_API_KEY=.+' .env 2> /dev/null && export TRAZAS_MODO="${TRAZAS_MODO_LOCAL_NUBE:-completo}"
 mkdir -p data
 
 paso "2/3 Registro local con los documentos de la nube (desde Blob, sin reindexar)"
 uv run python -m ingestor.ingest --source blob 2>&1 | grep -E "Ingesta completada|rechazado|Error" || true
 
 paso "3/3 App en http://localhost:$PUERTO (Ctrl+C para parar)"
-echo "   Elige un rol y pregunta: modelos, búsqueda y documentos son los de Azure."
+echo "   Aplicación: http://localhost:$PUERTO  (elige un rol y pregunta; modelos, búsqueda y"
+echo "               documentos son los de Azure)"
+echo "   API:        http://localhost:$PUERTO/api/docs"
+enlace_langsmith "$PROYECTO"
 exec uv run uvicorn scripts.local_nube:app --host 127.0.0.1 --port "$PUERTO"

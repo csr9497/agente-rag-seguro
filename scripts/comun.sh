@@ -12,3 +12,27 @@ proteger_nube() {
     exit 1
   fi
 }
+
+# Enlace directo a un proyecto de LangSmith (lo crea si aún no existe, para que el enlace
+# funcione antes de la primera traza). Sin LANGSMITH_API_KEY (entorno o .env) no imprime nada.
+enlace_langsmith() { # enlace_langsmith <proyecto>
+  local clave=${LANGSMITH_API_KEY:-$(grep -E '^LANGSMITH_API_KEY=.+' .env 2> /dev/null | tail -1 | cut -d= -f2- || true)}
+  if [[ -z $clave ]]; then
+    echo "   LangSmith: sin LANGSMITH_API_KEY en .env (trazas desactivadas)"
+    return 0
+  fi
+  LANGSMITH_API_KEY=$clave PROYECTO=$1 uv run python - << 'PY' 2> /dev/null \
+    || echo "   LangSmith: https://smith.langchain.com (proyecto $1)"
+import os
+
+from langsmith import Client
+from langsmith.utils import LangSmithNotFoundError
+
+c, nombre = Client(), os.environ["PROYECTO"]
+try:
+    p = c.read_project(project_name=nombre)
+except LangSmithNotFoundError:
+    p = c.create_project(nombre)
+print(f"   LangSmith: https://smith.langchain.com/o/{p.tenant_id}/projects/p/{p.id}  ({nombre})")
+PY
+}
