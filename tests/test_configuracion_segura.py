@@ -93,10 +93,12 @@ def test_supervisor_azure_obliga_herramienta_solo_si_se_pide() -> None:
     assert enviados == ["required", "auto"]
 
 
-def test_umbral_de_cache_estricto_para_ada() -> None:
+def test_umbral_de_cache_entre_misma_pregunta_y_vecinas() -> None:
+    """Medido con text-embedding-3-small: misma pregunta con otra grafía 0.915; compuesta vs.
+    una de sus partes 0.722. El umbral no debe servir la respuesta de una pregunta vecina."""
     from app.config import Settings
 
-    assert Settings().cache_umbral >= 0.97
+    assert 0.80 <= Settings().cache_umbral < 0.915
 
 
 ENTRA = {"auth_modo": "entra", "entra_tenant_id": "t", "entra_audiencia": "api://x"}

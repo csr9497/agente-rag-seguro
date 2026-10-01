@@ -184,7 +184,8 @@ Entra ID; solo con tu sesión) y **apps** (Container Apps, login, jobs). Flags d
 Despliegue completo con un comando: [despliegue.md](despliegue.md).
 
 Modelos: `gpt-4o` 2024-11-20 (Legacy, retirada 2027-04-14; reemplazo gpt-5.1) y
-`text-embedding-ada-002` v2 (GA hasta 2028-02-09); se cambian por tfvars.
+`text-embedding-3-small` v1 (el mismo que con OpenAI, para que el índice valga con ambos
+proveedores); se cambian por tfvars.
 
 ## Estructura
 

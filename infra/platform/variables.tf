@@ -15,7 +15,7 @@ variable "environment" {
 
 variable "location" {
   type        = string
-  description = "Región con cuota para gpt-4o y text-embedding-ada-002"
+  description = "Región con cuota para gpt-4o y text-embedding-3-small"
   default     = "eastus2"
 }
 
@@ -62,9 +62,11 @@ variable "embedding_model" {
     capacity        = number
   })
   default = {
-    deployment_name = "text-embedding-ada-002"
-    model_name      = "text-embedding-ada-002"
-    model_version   = "2" # GA, retirada 2028-02-09
+    # El mismo modelo que con MODELOS_PROVEEDOR=openai: los vectores de un índice valen con
+    # cualquiera de los dos proveedores (1536 dimensiones).
+    deployment_name = "text-embedding-3-small"
+    model_name      = "text-embedding-3-small"
+    model_version   = "1"
     sku_name        = "Standard"
     capacity        = 30
   }
@@ -126,7 +128,7 @@ variable "tags" {
 # ------------------------------------------------------------------ alcance y vector store
 variable "alcance" {
   type        = string
-  description = "solo_modelos: RG y Azure OpenAI (gpt-4o + ada-002) para desarrollar en local contra los modelos en la nube (Qdrant, SQLite y Redis en Docker). modelos: además Storage, Key Vault, Log Analytics, AI Search y Content Safety (app en local). completo: además red, ACR, Container Apps, PostgreSQL e identidades."
+  description = "solo_modelos: RG y Azure OpenAI (gpt-4o + text-embedding-3-small) para desarrollar en local contra los modelos en la nube (Qdrant, SQLite y Redis en Docker). modelos: además Storage, Key Vault, Log Analytics, AI Search y Content Safety (app en local). completo: además red, ACR, Container Apps, PostgreSQL e identidades."
   default     = "modelos"
   validation {
     condition     = contains(["solo_modelos", "modelos", "completo"], var.alcance)
