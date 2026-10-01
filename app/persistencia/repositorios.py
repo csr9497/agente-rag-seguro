@@ -142,6 +142,29 @@ ROLES_INICIALES = [
 ]
 
 
+def _auditoria_solo_insercion(motor: Engine) -> None:
+    """audit_log no admite UPDATE ni DELETE, ni siquiera del dueño de la tabla (idempotente)."""
+    with motor.begin() as c:
+        if motor.dialect.name == "postgresql":
+            c.execute(text(
+                "CREATE OR REPLACE FUNCTION audit_log_inmutable() RETURNS trigger "
+                "LANGUAGE plpgsql AS $$ BEGIN "
+                "RAISE EXCEPTION 'audit_log es de solo inserción'; END $$"
+            ))  # fmt: skip
+            c.execute(text("DROP TRIGGER IF EXISTS audit_log_inmutable ON audit_log"))
+            c.execute(text(
+                "CREATE TRIGGER audit_log_inmutable BEFORE UPDATE OR DELETE OR TRUNCATE "
+                "ON audit_log FOR EACH STATEMENT EXECUTE FUNCTION audit_log_inmutable()"
+            ))  # fmt: skip
+        else:
+            for operacion in ("UPDATE", "DELETE"):
+                c.execute(text(
+                    f"CREATE TRIGGER IF NOT EXISTS audit_log_sin_{operacion.lower()} "
+                    f"BEFORE {operacion} ON audit_log "
+                    "BEGIN SELECT RAISE(ABORT, 'audit_log es de solo inserción'); END"
+                ))  # fmt: skip
+
+
 def _migrar(motor: Engine) -> None:
     """Migraciones aditivas e idempotentes para bases creadas con un esquema anterior
     (create_all no altera tablas existentes)."""
@@ -163,6 +186,10 @@ def inicializar(motor: Engine) -> None:
     """Crea las tablas y los roles iniciales que falten (sin tocar los existentes)."""
     t.metadata.create_all(motor)
     _migrar(motor)
+    _auditoria_solo_insercion(motor)
+    from app.persistencia.rls import preparar_rls
+
+    preparar_rls(motor)
     from app.datos.catalogo import sembrar_datos_ejemplo
 
     sembrar_datos_ejemplo(motor)

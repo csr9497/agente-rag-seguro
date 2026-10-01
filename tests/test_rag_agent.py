@@ -10,7 +10,7 @@ from langgraph.types import Command
 
 from app.agents.rag import SolicitarAccesoArgs
 from app.agents.scopes import contexto_de_usuario
-from app.agents.subgraph import AuditoriaMemoria, ContextoTool, construir_subgrafo
+from app.agents.subgraph import AuditoriaMemoria, ContextoTool, construir_subgrafo, resumen
 from app.config import Settings
 from app.deps import build_registro_agentes, build_servicios
 from app.tools.base import SIN_ACCESO
@@ -144,7 +144,7 @@ def test_rag_agent_responde_con_lo_visible_y_nada_ajeno(rag) -> None:
     dato = next(m for m in llm.llamadas[1] if m["role"] == "tool")["content"]
     assert dato.startswith('<dato_herramienta tool="search_documents">')
     assert "rrhh/" not in dato and "B3" not in dato
-    assert salida["summary"].startswith("Son 23 días")
+    assert resumen(salida).startswith("Son 23 días")
 
 
 def test_un_documento_con_inyeccion_no_produce_escrituras_sin_aprobacion(rag, servicios) -> None:

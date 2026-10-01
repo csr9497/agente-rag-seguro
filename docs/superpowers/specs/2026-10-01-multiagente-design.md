@@ -1,6 +1,6 @@
 # Asistente multiagente seguro (RAG + RR.HH. + Soporte)
 
-**Fecha:** 2026-10-01 · **Estado:** fases 1 y 2 terminadas (2026-10-01) · **Spec de origen:** la entregada por el
+**Fecha:** 2026-10-01 · **Estado:** fases 1, 2 y 3 terminadas (2026-10-01) · **Spec de origen:** la entregada por el
 usuario («SPEC — Asistente multiagente seguro»), que se resume aquí con las decisiones tomadas.
 
 ## Punto de partida (lo que había)
@@ -65,3 +65,17 @@ Piezas nuevas y aisladas; el grafo actual no cambia.
 | `app/agents/rag.py` | `search_documents` (filtro en la consulta + re-chequeo en la tool), `get_document_metadata` (ajeno = inexistente), `request_document_access` (`confirm_user`; misma respuesta exista o no el documento). Registrado en `build_registro_agentes` |
 
 **Decisión:** `access_guardrail` se mantiene en el grafo actual hasta la fase 5 (opción A); `rag_agent` no lo necesita.
+
+## Fase 3 — hr_agent, RLS, auditoría, aprobaciones y checkpointer (hecha)
+
+| Pieza | Qué hace |
+|---|---|
+| PostgreSQL local | `make up` lo arranca y la app lo usa (SQLite queda para tests unitarios). `.env`: `DATABASE_URL` (host) y `CHECKPOINT_CLAVE`, generadas si faltan. `make test-postgres` usa la base aparte `agente_test` |
+| RLS (`app/persistencia/rls.py`) | Rol `agente_rls` sin login, superusuario ni BYPASSRLS; `sesion_rls` hace `SET LOCAL ROLE` y fija `app.user_id`/`app.roles` desde el token. Necesario porque la conexión es de un superusuario (Docker) o del dueño de las tablas (Azure), que se saltan RLS. Solo SELECT/INSERT: ningún agente cierra, reasigna ni borra |
+| `hr_cases` / `hr_case_notes` | Políticas del anexo A (solicitante, `hr_staff` solo `normal`, `hr_specialist` todo); notas solo en casos propios abiertos. Sensibilidad por categoría en código |
+| `audit_log` | Una fila por llamada a tool; trigger que impide UPDATE/DELETE/TRUNCATE (también al dueño), en PostgreSQL y SQLite |
+| `approvals` | Fila por pausa; se resuelve una vez; `vencer()` cancela a las 24 h y notifica; una vencida no se ejecuta aunque se reanude el hilo |
+| Checkpointer (`app/agents/checkpointer.py`) | `PostgresSaver` con AES-EAX y lista explícita de tipos deserializables. PostgresSaver guarda `str`/`int` del estado en claro: los textos del usuario van en `TextoPrivado` y la entrada se envuelve antes de llegar al grafo (test: nada legible en reposo; test estructural de campos) |
+| `hr_agent` (`app/agents/hr.py`) | `search_hr_policies` (solo público/interno), `get_my_hr_cases` (sin resumen de confidenciales), `create_hr_case` y `add_hr_case_note` (`confirm_user`); devuelve solo el ID. Sin PostgreSQL no se registra (fallo cerrado) |
+
+**Pendiente para la fase 5:** conectar el checkpointer y `approvals` al grafo principal (y la clave en Key Vault en Azure), una tarea periódica que llame a `vencer()` y la API para aprobar desde la web.

@@ -8,7 +8,12 @@ from pydantic import BaseModel, ConfigDict
 
 from app.agents.registry import AgentSpec, ToolPolicy
 from app.agents.scopes import contexto_de_usuario
-from app.agents.subgraph import AuditoriaMemoria, construir_subgrafo, sin_tocar_usuario
+from app.agents.subgraph import (
+    AuditoriaMemoria,
+    construir_subgrafo,
+    resumen,
+    sin_tocar_usuario,
+)
 from tests.fakes import GuionLLM
 
 EMPLEADO = contexto_de_usuario("u1", ["public"])
@@ -95,7 +100,7 @@ def test_lectura_en_auto_se_ejecuta_y_vuelve_al_agente_como_dato() -> None:
     assert h.ejecutadas == [("search_it_kb", {"consulta": "vpn"}, "u1")]
     tool_msg = next(m for m in llm.llamadas[1] if m["role"] == "tool")
     assert tool_msg["content"].startswith('<dato_herramienta tool="search_it_kb">')
-    assert salida["summary"] == "Prueba X."
+    assert resumen(salida) == "Prueba X."
     assert [(r.tool, r.decision) for r in audit.filas] == [("search_it_kb", "allow")]
 
 
@@ -210,7 +215,7 @@ def test_corte_por_presupuesto_de_iteraciones() -> None:
     grafo, h, _, llm, _ = _montar([[("search_it_kb", {"consulta": f"q{i}"})] for i in range(10)],
                                   max_iterations=3)  # fmt: skip
     salida = grafo.invoke(ENTRADA, CFG)
-    assert len(llm.llamadas) == 3 and "presupuesto" in salida["summary"]
+    assert len(llm.llamadas) == 3 and "presupuesto" in resumen(salida)
 
 
 def test_corte_por_tiempo() -> None:
@@ -223,7 +228,7 @@ def test_corte_por_tiempo() -> None:
 
     grafo, _, _, llm, _ = _montar([[("search_it_kb", {"consulta": "vpn"})]] * 5, buscar=lenta)
     salida = grafo.invoke(ENTRADA, CFG)
-    assert len(llm.llamadas) == 1 and "presupuesto" in salida["summary"]
+    assert len(llm.llamadas) == 1 and "presupuesto" in resumen(salida)
 
 
 # ------------------------------------------------------------------------- sanitize_output
@@ -263,12 +268,12 @@ def test_id_only_devuelve_solo_los_identificadores() -> None:
     )
     grafo.invoke(ENTRADA, CFG)
     salida = grafo.invoke(Command(resume={"approved": True, "approver_id": "u1"}), CFG)
-    assert salida["summary"] == "TCK-1"
+    assert resumen(salida) == "TCK-1"
 
 
 def test_el_resumen_no_lleva_datos_personales() -> None:
     grafo, *_ = _montar([], final="Escríbeme a ana@empresa.com")
-    assert "ana@empresa.com" not in grafo.invoke(ENTRADA, CFG)["summary"]
+    assert "ana@empresa.com" not in resumen(grafo.invoke(ENTRADA, CFG))
 
 
 # ----------------------------------------------------------------------- usuario intocable
@@ -302,3 +307,14 @@ def test_un_tecnico_de_soporte_no_aprueba_su_propio_p1() -> None:
     assert "__interrupt__" in salida and h.ejecutadas == []
     grafo.invoke(Command(resume={"approved": True, "approver_id": "s2"}), CFG)
     assert [(r.decision, r.approver_id) for r in audit.filas] == [("approved", "s2")]
+
+
+def test_ningun_texto_plano_del_estado_lleva_datos_del_usuario() -> None:
+    """PostgresSaver guarda str/int/bool en claro: los textos del usuario van en TextoPrivado."""
+    from app.agents.subgraph import CAMPOS_TEXTO_INOCUOS, EstadoSubagente
+
+    texto_plano = {
+        nombre for nombre, campo in EstadoSubagente.model_fields.items()
+        if campo.annotation in (str, str | None)
+    }  # fmt: skip
+    assert texto_plano <= CAMPOS_TEXTO_INOCUOS, texto_plano - CAMPOS_TEXTO_INOCUOS

@@ -16,6 +16,7 @@ PROMPTS: dict[str, tuple[str, str]] = {
     "guardian": ("agente-rag-guardian", "guardian.md"),
     "orientacion": ("agente-rag-orientacion", "orientacion.md"),
     "rag_agent": ("agente-rag-rag-agent", "rag_agent.md"),
+    "hr_agent": ("agente-rag-hr-agent", "hr_agent.md"),
 }
 
 

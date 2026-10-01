@@ -14,7 +14,10 @@ ENV_FILE="${ENV_FILE:-.env}"
 [[ -f "$ENV_FILE" ]] || cp .env.example "$ENV_FILE"
 set_var() { # set_var NOMBRE valor  (no imprime valores)
   if grep -q "^$1=" "$ENV_FILE"; then sed -i.bak "s|^$1=.*|$1=$2|" "$ENV_FILE" && rm -f "$ENV_FILE.bak"
-  else echo "$1=$2" >> "$ENV_FILE"; fi
+  else
+    [[ ! -s "$ENV_FILE" || -z $(tail -c1 "$ENV_FILE") ]] || echo >> "$ENV_FILE" # sin pegarse
+    echo "$1=$2" >> "$ENV_FILE"
+  fi
 }
 
 set_var AZURE_OPENAI_ENDPOINT "$($TF openai_endpoint)"

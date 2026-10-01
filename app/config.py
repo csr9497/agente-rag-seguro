@@ -96,6 +96,8 @@ class Settings(BaseSettings):
     # Departamento(s) de cada persona al arrancar (DEPARTAMENTOS_INICIALES, JSON): dan acceso a
     # los documentos internos de ese departamento. Solo añade; los inexistentes se ignoran.
     departamentos_iniciales: dict[str, list[str]] = {}
+    # Clave AES (hex, 32 bytes) del checkpointer cifrado (app/agents/checkpointer.py).
+    checkpoint_clave: SecretStr | None = None
     entra_tenant_id: str = ""
     entra_audiencia: str = Field(default="", description="Client ID o App ID URI de la API")
     entra_claim_roles: str = "roles"

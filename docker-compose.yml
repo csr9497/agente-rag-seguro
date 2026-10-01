@@ -10,10 +10,9 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
 
-  # Opcional (paridad con Azure): docker compose --profile postgres up -d postgres
+  # Base de datos de la app (como en Azure). Row Level Security en hr_cases y tickets.
   postgres:
     image: postgres:16-alpine
-    profiles: ["postgres"]
     environment:
       POSTGRES_DB: agente
       POSTGRES_USER: agente_app
@@ -22,6 +21,11 @@ services:
       - "127.0.0.1:55432:5432"  # 5432 suele estar ocupado por otros Postgres locales
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agente_app -d agente"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
 
   redis:
     image: redis:7.4-alpine
@@ -43,7 +47,7 @@ services:
       SELECCION_LIBRE_DE_ROL: "true"
       CACHE_BACKEND: redis
       REDIS_URL: redis://redis:6379/0
-      DATABASE_URL: sqlite:////data/app.db
+      DATABASE_URL: postgresql+psycopg://agente_app:${POSTGRES_PASSWORD:?define POSTGRES_PASSWORD en .env}@postgres:5432/agente
       # Originales de los documentos en el volumen (la imagen no es escribible por appuser).
       ALMACEN_LOCAL_DIR: /data/documentos
       # Sin az login en el contenedor: solo guardrails locales (Prompt Shields, fuera de Docker).
@@ -59,8 +63,12 @@ services:
       # Solo este equipo: con IDENTIDAD_DEBUG la cabecera X-Usuario-Grupos elige los grupos.
       - "127.0.0.1:8000:8000"
     depends_on:
-      - qdrant
-      - redis
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      redis:
+        condition: service_started
 
   web:
     build: ./web
@@ -84,13 +92,16 @@ services:
       VECTOR_STORE: qdrant
       QDRANT_URL: http://qdrant:6333
       # Mismo registro y almacén que la app: lo indexado queda visible con sus permisos.
-      DATABASE_URL: sqlite:////data/app.db
+      DATABASE_URL: postgresql+psycopg://agente_app:${POSTGRES_PASSWORD:?define POSTGRES_PASSWORD en .env}@postgres:5432/agente
       ALMACEN_LOCAL_DIR: /data/documentos
       CONTENT_SAFETY_ENDPOINT: ""
     volumes:
       - ./data:/data
     depends_on:
-      - qdrant
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
 
 volumes:
   qdrant_data:

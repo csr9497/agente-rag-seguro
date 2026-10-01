@@ -24,11 +24,12 @@ import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from functools import wraps
-from typing import Any, Literal, Protocol
+from typing import Annotated, Any, Literal, Protocol
 
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, ValidationError
 
 from app.agents.policy_gate import DecisionGate, evaluar
 from app.agents.registry import AgentSpec, Mode, ToolPolicy, resolve_mode
@@ -73,6 +74,21 @@ class AuditoriaMemoria:
         self.filas.append(fila)
 
 
+class AuditoriaSql:
+    """Tabla audit_log (solo inserción: trigger en la base, ver persistencia/repositorios.py)."""
+
+    def __init__(self, motor: Any) -> None:
+        self._motor = motor
+
+    def registrar(self, fila: RegistroAuditoria) -> None:
+        from sqlalchemy import insert
+
+        from app.persistencia import tablas as t
+
+        with self._motor.begin() as c:
+            c.execute(insert(t.audit_log).values(**fila.model_dump()))
+
+
 class AuditoriaLog:
     """Hasta que exista la tabla audit_log (fase 3): una línea JSON por decisión."""
 
@@ -96,8 +112,35 @@ class RespuestaAprobacion(BaseModel):
     reason: str | None = None
 
 
+class TextoPrivado(BaseModel):
+    """Texto con datos del usuario. PostgresSaver guarda los valores `str`/`int`/`bool` del
+    estado en claro (columna JSONB) y solo cifra el resto: envolverlo lo lleva al almacén
+    cifrado. Ningún `str` del estado puede llevar datos del usuario (test estructural)."""
+
+    model_config = ConfigDict(frozen=True)
+    valor: str
+
+    def __str__(self) -> str:
+        return self.valor
+
+
+def _privado(valor: Any) -> Any:
+    return TextoPrivado(valor=valor) if isinstance(valor, str) else valor
+
+
+Privado = Annotated[TextoPrivado, BeforeValidator(_privado)]
+
+# Únicos campos de texto plano del estado: no llevan datos del usuario.
+CAMPOS_TEXTO_INOCUOS = frozenset({"trace_id", "expira", "aprobacion_id"})
+
+
+def resumen(salida: dict[str, Any]) -> str:
+    """El resumen del subagente (para el supervisor) como texto."""
+    return str(salida.get("summary") or "")
+
+
 class EstadoSubagente(BaseModel):
-    task: str
+    task: Privado
     user: UserContext
     trace_id: str = ""
     mensajes: list[dict[str, Any]] = Field(default_factory=list)
@@ -105,12 +148,13 @@ class EstadoSubagente(BaseModel):
     actual: ToolCall | None = None
     gate: DecisionGate | None = None
     expira: str | None = None  # ISO; lo fija policy_gate para que sea estable al reanudar
+    aprobacion_id: str | None = None  # fila de approvals de la pausa en curso
     resultado: Any = None
     iteraciones: int = 0
     inicio: float | None = None
     limite_s: float = 120.0
     ids: list[str] = Field(default_factory=list)
-    summary: str | None = None
+    summary: Privado | None = None
 
 
 def sin_tocar_usuario(nodo: Callable[..., Any]) -> Callable[..., Any]:
@@ -136,10 +180,37 @@ def construir_subgrafo(
     roles_de: Callable[[str], set[str]],
     checkpointer: Any = None,
     ahora: Callable[[], float] = time.time,
+    aprobaciones: Any = None,
 ) -> Any:
     """`roles_de(user_id)`: roles de quien aprueba, desde la fuente de verdad (no del LLM).
-    `checkpointer`: necesario para `interrupt` (en producción, Postgres cifrado)."""
-    return _Subgrafo(spec, llm, auditoria, roles_de, ahora).compilar(checkpointer)
+    `checkpointer`: necesario para `interrupt` (en producción, Postgres cifrado).
+    `aprobaciones`: tabla approvals (app/agents/aprobaciones.py); sin ella, solo el interrupt."""
+    subgrafo = _Subgrafo(spec, llm, auditoria, roles_de, ahora, aprobaciones)
+    return SubgrafoPrivado(subgrafo.compilar(checkpointer))
+
+
+class SubgrafoPrivado:
+    """El grafo compilado, con la entrada ya protegida: LangGraph guarda la entrada en sus
+    canales antes de validarla con el modelo, así que la tarea (texto del usuario) se envuelve
+    en TextoPrivado aquí, antes de que el checkpointer la vea. Lo demás se delega."""
+
+    def __init__(self, grafo: Any) -> None:
+        self._grafo = grafo
+
+    def invoke(self, entrada: Any, *args: Any, **kwargs: Any) -> Any:
+        return self._grafo.invoke(_entrada_privada(entrada), *args, **kwargs)
+
+    def stream(self, entrada: Any, *args: Any, **kwargs: Any) -> Any:
+        return self._grafo.stream(_entrada_privada(entrada), *args, **kwargs)
+
+    def __getattr__(self, nombre: str) -> Any:
+        return getattr(self._grafo, nombre)
+
+
+def _entrada_privada(entrada: Any) -> Any:
+    if isinstance(entrada, dict) and isinstance(entrada.get("task"), str):
+        return {**entrada, "task": TextoPrivado(valor=entrada["task"])}
+    return entrada  # Command(resume=…) y demás, sin cambios
 
 
 class _Subgrafo:
@@ -150,9 +221,10 @@ class _Subgrafo:
         auditoria: Auditoria,
         roles_de: Callable[[str], set[str]],
         ahora: Callable[[], float],
+        aprobaciones: Any = None,
     ) -> None:
         self._spec, self._llm, self._auditoria = spec, llm, auditoria
-        self._roles_de, self._ahora = roles_de, ahora
+        self._roles_de, self._ahora, self._aprobaciones = roles_de, ahora, aprobaciones
         self._schemas = [_schema(nombre, p) for nombre, p in spec.tools.items()]
 
     def compilar(self, checkpointer: Any) -> Any:
@@ -184,10 +256,13 @@ class _Subgrafo:
             or self._ahora() - inicio > estado.limite_s
         )
         if agotado:
-            return {"inicio": inicio, "summary": self._resumen(estado, None, agotado=True)}
+            return {
+                "inicio": inicio,
+                "summary": _privado(self._resumen(estado, None, agotado=True)),
+            }
         mensajes = estado.mensajes or [
             {"role": "system", "content": self._spec.system_prompt},
-            {"role": "user", "content": f"<tarea>\n{neutralizar(estado.task)}\n</tarea>"},
+            {"role": "user", "content": f"<tarea>\n{neutralizar(str(estado.task))}\n</tarea>"},
         ]
         decision = self._llm.decidir(mensajes, self._schemas)
         cambios: dict[str, Any] = {
@@ -198,10 +273,10 @@ class _Subgrafo:
         }
         if not decision.tool_calls:
             final = decision.mensaje_asistente.get("content") or ""
-            cambios["summary"] = self._resumen(estado, final)
+            cambios["summary"] = _privado(self._resumen(estado, final))
         return cambios
 
-    def _policy_gate(self, estado: EstadoSubagente) -> dict[str, Any]:
+    def _policy_gate(self, estado: EstadoSubagente, config: RunnableConfig) -> dict[str, Any]:
         llamada, resto = estado.pendientes[0], estado.pendientes[1:]
         # La iteración de esta llamada ya se contó al decidirla el agente.
         gate = evaluar(self._spec, llamada, estado.user, max(estado.iteraciones - 1, 0))
@@ -217,6 +292,15 @@ class _Subgrafo:
         else:
             expira = datetime.fromtimestamp(self._ahora(), UTC) + VIGENCIA_APROBACION
             cambios["expira"] = expira.isoformat()
+            if self._aprobaciones is not None:
+                aprobacion = self._aprobaciones.crear(
+                    thread_id=config["configurable"]["thread_id"], trace_id=estado.trace_id,
+                    agent=self._spec.name, tool=gate.tool, user_id=estado.user.id,
+                    tipo=gate.mode, approver_role=gate.approver_role,
+                    args_preview=_vista(gate.args or {}), risk=_riesgo(gate.mode),
+                    expires_at=cambios["expira"],
+                )  # fmt: skip
+                cambios["aprobacion_id"] = aprobacion.id
         return cambios
 
     def _tras_gate(self, estado: EstadoSubagente) -> str:
@@ -237,9 +321,7 @@ class _Subgrafo:
         while True:
             carga = {
                 "type": tipo, "agent": self._spec.name, "tool": gate.tool,
-                "args_preview": _vista(args),
-                "risk": "alto" if tipo == "approve_staff" else "medio",
-                "expires_at": expira,
+                "args_preview": _vista(args), "risk": _riesgo(tipo), "expires_at": expira,
             }  # fmt: skip
             if aviso:
                 carga["aviso"] = aviso
@@ -250,6 +332,10 @@ class _Subgrafo:
                 continue
             if datetime.fromtimestamp(self._ahora(), UTC) > datetime.fromisoformat(expira):
                 return self._rechazar(estado, args, respuesta, "La aprobación está vencida (24 h).")
+            if (registrada := self._aprobacion(estado)) and registrada.estado != "pendiente":
+                # Vencida por la tarea periódica o ya resuelta: no se reabre.
+                motivo = f"La aprobación ya no está pendiente ({registrada.estado})."
+                return self._rechazar(estado, args, respuesta, motivo, registrar=False)
             if not self._puede_aprobar(tipo, respuesta.approver_id, estado.user, politica):
                 aviso = "Quien responde no puede aprobar esta acción."
                 continue
@@ -269,7 +355,17 @@ class _Subgrafo:
                 args = editados.model_dump(mode="json")
                 if _NIVEL[modo] > _NIVEL[tipo]:  # los cambios exigen más: se vuelve a pedir
                     tipo, aviso = modo, "Los cambios exigen otra aprobación."
+                    if self._aprobaciones is not None and estado.aprobacion_id:
+                        self._aprobaciones.escalar(
+                            estado.aprobacion_id, tipo, politica.approver_role, _vista(args)
+                        )  # idempotente: al reanudar se repite con los mismos valores
                     continue
+            if self._aprobaciones is not None and estado.aprobacion_id:
+                if not self._aprobaciones.decidir(
+                    estado.aprobacion_id, True, respuesta.approver_id, None
+                ):
+                    motivo = "La aprobación ya no está pendiente."
+                    return self._rechazar(estado, args, respuesta, motivo, registrar=False)
             self._auditar(estado, gate.tool, args, "approved", aprobador=respuesta.approver_id)
             return {"gate": gate.model_copy(update={"decision": "allow", "args": args})}
 
@@ -305,10 +401,23 @@ class _Subgrafo:
             return aprobador == user.id
         return aprobador != user.id and (politica.approver_role or "") in self._roles_de(aprobador)
 
+    def _aprobacion(self, estado: EstadoSubagente) -> Any:
+        if self._aprobaciones is None or not estado.aprobacion_id:
+            return None
+        return self._aprobaciones.obtener(estado.aprobacion_id)
+
     def _rechazar(
-        self, estado: EstadoSubagente, args: dict, respuesta: RespuestaAprobacion, motivo: str
+        self,
+        estado: EstadoSubagente,
+        args: dict,
+        respuesta: RespuestaAprobacion,
+        motivo: str,
+        registrar: bool = True,
     ) -> dict[str, Any]:
+        """`registrar=False`: la fila de approvals ya no está pendiente (no se toca)."""
         gate, actual = _requerido(estado.gate), _requerido(estado.actual)
+        if registrar and self._aprobaciones is not None and estado.aprobacion_id:
+            self._aprobaciones.decidir(estado.aprobacion_id, False, respuesta.approver_id, motivo)
         self._auditar(estado, gate.tool, args, "rejected", motivo, aprobador=respuesta.approver_id)
         return {
             "gate": gate.model_copy(update={"decision": "deny", "reason": motivo}),
@@ -377,6 +486,10 @@ def _como_dato(tool: str, resultado: Any) -> str:
     if len(texto) > MAX_DATO:
         texto = texto[:MAX_DATO] + " …[truncado]"
     return f'<dato_herramienta tool="{tool}">\n{texto}\n</dato_herramienta>'
+
+
+def _riesgo(modo: str) -> str:
+    return "alto" if modo == "approve_staff" else "medio"
 
 
 def _vista(args: dict) -> str:

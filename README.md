@@ -88,4 +88,4 @@ Guía de todos los comandos y los valores que necesita cada uno: [docs/comandos.
 | [CLAUDE.md](CLAUDE.md) | Reglas del proyecto |
 
 Stack: Python 3.12 · LangGraph · FastAPI · Azure OpenAI / OpenAI · AI Search / Qdrant ·
-SQLite / PostgreSQL · Redis · Terraform · GitHub Actions.
+PostgreSQL (RLS) · Redis · Terraform · GitHub Actions.

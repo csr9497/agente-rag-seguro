@@ -54,7 +54,7 @@ salida estructurada, embeddings y su dimensión). Hace 4–5 llamadas mínimas.
 Errores y qué revisar: [modelos.md](modelos.md#errores-del-proveedor).
 
 ### `make up` · `make down` · `make status`
-`up` prepara los modelos, arranca app, web, Qdrant y Redis en Docker, carga los documentos de
+`up` prepara los modelos, arranca app, web, PostgreSQL, Qdrant y Redis en Docker (genera en `.env` la contraseña de PostgreSQL, `DATABASE_URL` y `CHECKPOINT_CLAVE` si faltan), carga los documentos de
 ejemplo, publica los prompts en LangSmith, arranca LangGraph Studio y muestra las URLs.
 `status` repite las URLs con su estado. `down` para todo lo local.
 
@@ -161,7 +161,7 @@ terminal. La configuración va a `data/nube.env`: **tu `.env` no cambia**. Logs 
 |---|---|---|
 | `make test` | Tests unitarios (sin red ni Azure) | — |
 | `make lint` · `make fmt` | Ruff: comprobar · aplicar formato | — |
-| `make test-postgres` | Paridad con PostgreSQL 16 (perfil `postgres` de docker-compose) | `POSTGRES_PASSWORD` en `.env` (lo genera `make install`) |
+| `make test-postgres` | Tests con PostgreSQL real: paridad, RLS de `hr_cases`, `audit_log`, `approvals` y checkpointer cifrado (base aparte `agente_test`; nunca toca la de la app) | `POSTGRES_PASSWORD` en `.env` (lo genera `make install`) |
 | `make evals-mock` | Gate de CI: app con modelos simulados + evaluaciones (cero fugas entre roles, contrato) | — |
 | `make evals` | Evaluaciones por capas contra una app en marcha | `BASE_URL` (ver abajo) · `JUDGE=1` añade el juez LLM (usa los modelos de `.env`) |
 | `make evals-langsmith` | Igual que `evals`, como dataset y experimento en LangSmith | `BASE_URL`, `LANGSMITH_API_KEY` en `.env`, `JUDGE=1` opcional |

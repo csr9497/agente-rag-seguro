@@ -88,10 +88,13 @@ fmt: ## Aplica formato
 test: ## Tests unitarios
 	uv run pytest
 
-test-postgres: ## Paridad con PostgreSQL (levanta el perfil postgres de docker-compose)
-	docker compose --profile postgres up -d postgres
-	TEST_DATABASE_URL=postgresql+psycopg://agente_app:$$(grep '^POSTGRES_PASSWORD=' .env | cut -d= -f2-)@localhost:55432/agente \
-		uv run pytest tests/test_postgres.py -v
+test-postgres: ## Tests con PostgreSQL real (RLS, checkpointer, paridad) en la base agente_test
+	docker compose up -d --wait postgres
+	docker compose exec -T postgres psql -U agente_app -d agente -tAc \
+		"SELECT 1 FROM pg_database WHERE datname='agente_test'" | grep -q 1 \
+		|| docker compose exec -T postgres psql -U agente_app -d agente -c "CREATE DATABASE agente_test"
+	TEST_DATABASE_URL=postgresql+psycopg://agente_app:$$(grep '^POSTGRES_PASSWORD=' .env | cut -d= -f2-)@localhost:55432/agente_test \
+		uv run pytest -m postgres -v
 
 evals-mock: ## Gate de CI en local: app con modelos simulados + evaluaciones por capas
 	uv run uvicorn tests.integration.servidor_simulado:app --port 8767 & echo $$! > .servidor.pid; \

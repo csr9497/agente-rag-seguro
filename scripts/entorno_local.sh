@@ -69,11 +69,7 @@ instalar() {
 
   paso ".env"
   if [[ -f .env ]]; then echo "ya existe"; else cp .env.example .env && echo "creado desde .env.example"; fi
-  if ! grep -q '^POSTGRES_PASSWORD=.\+' .env; then # la pide docker-compose (perfil postgres)
-    sed -i.bak '/^POSTGRES_PASSWORD=/d' .env && rm -f .env.bak
-    echo "POSTGRES_PASSWORD=$(openssl rand -hex 16)" >> .env
-    echo "✅ POSTGRES_PASSWORD local generada"
-  fi
+  secretos_locales
   grep -q '^LANGSMITH_API_KEY=.\+' .env && echo "✅ LANGSMITH_API_KEY definida" \
     || echo "ℹ️  opcional: añade LANGSMITH_API_KEY en .env para trazas y evaluaciones en LangSmith"
 
@@ -89,6 +85,37 @@ instalar() {
   echo; echo "Instalación completa. Siguiente paso: make check-models y make up"
 }
 
+# Añade al final de un fichero .env sin pegarse a la última línea si no termina en salto de
+# línea (si no, «OPENAI_API_KEY=…CHECKPOINT_CLAVE=…» rompería las dos variables).
+asegurar_salto() { [[ ! -s "$1" || -z $(tail -c1 "$1") ]] || echo >> "$1"; }
+
+# Valores locales que no van al repo; idempotente (también para .env creados antes de que
+# existieran). La app en Docker usa PostgreSQL por la red de compose; los procesos del host
+# (Studio, scripts) por localhost:55432 con DATABASE_URL.
+secretos_locales() {
+  if ! grep -q '^POSTGRES_PASSWORD=.\+' .env; then
+    sed -i.bak '/^POSTGRES_PASSWORD=/d' .env && rm -f .env.bak
+    asegurar_salto .env
+    echo "POSTGRES_PASSWORD=$(openssl rand -hex 16)" >> .env
+    echo "✅ POSTGRES_PASSWORD local generada"
+  fi
+  if ! grep -q '^CHECKPOINT_CLAVE=[0-9a-f]\{64\}$' .env; then # cifra el estado de los agentes
+    sed -i.bak '/^CHECKPOINT_CLAVE=/d' .env && rm -f .env.bak
+    asegurar_salto .env
+    echo "CHECKPOINT_CLAVE=$(openssl rand -hex 32)" >> .env
+    echo "✅ CHECKPOINT_CLAVE local generada"
+  fi
+  local clave url
+  clave=$(grep '^POSTGRES_PASSWORD=' .env | cut -d= -f2-)
+  url="postgresql+psycopg://agente_app:${clave}@localhost:55432/agente"
+  if ! grep -qxF "DATABASE_URL=$url" .env; then
+    sed -i.bak '/^DATABASE_URL=/d' .env && rm -f .env.bak
+    asegurar_salto .env
+    echo "DATABASE_URL=$url" >> .env
+    echo "✅ DATABASE_URL: PostgreSQL local"
+  fi
+}
+
 esperar() { # esperar URL segundos
   for _ in $(seq 1 "$2"); do curl -sf "$1" > /dev/null 2>&1 && return 0; sleep 1; done
   return 1
@@ -102,6 +129,7 @@ modelos_de_la_nube() {
   ENV_FILE="$tmp" ./scripts/env_from_azure.sh > /dev/null
   sed -i.bak -E '/^(AZURE_OPENAI_(ENDPOINT|API_KEY|CHAT_DEPLOYMENT|EMBEDDING_DEPLOYMENT|LIGERO_DEPLOYMENT)|VECTOR_STORE|AZURE_SEARCH_(ENDPOINT|API_KEY)|CONTENT_SAFETY_ENDPOINT|AZURE_STORAGE_(ACCOUNT_URL|CONTAINER)|ALMACEN_DOCUMENTOS)=/d' .env
   rm -f .env.bak
+  asegurar_salto .env
   grep -E '^AZURE_OPENAI_(ENDPOINT|API_KEY|CHAT_DEPLOYMENT|EMBEDDING_DEPLOYMENT|LIGERO_DEPLOYMENT)=' "$tmp" >> .env
   rm -f "$tmp"
 }
@@ -110,6 +138,7 @@ studio_activo() { [[ -f "$STUDIO_PID" ]] && kill -0 "$(cat "$STUDIO_PID")" 2> /d
 
 levantar() {
   docker info > /dev/null 2>&1 || { echo "Docker no está en marcha: abre Docker Desktop y repite."; exit 1; }
+  secretos_locales > /dev/null
 
   mkdir -p data
   if [[ $PROVEEDOR == azure ]]; then

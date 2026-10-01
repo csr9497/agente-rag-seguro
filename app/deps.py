@@ -10,6 +10,7 @@ from qdrant_client import QdrantClient
 from sqlalchemy import Engine
 
 from app.acciones.servicio import ServicioAcciones
+from app.agents.hr import HerramientasHR, SqlRepositorioCasosRRHH, crear_hr_agent
 from app.agents.rag import HerramientasRag, crear_rag_agent
 from app.agents.registry import RegistroAgentes
 from app.cache.semantica import CacheMemoria, CacheRedis, CacheSemantica, alcance_de_permisos
@@ -150,6 +151,7 @@ class Servicios:
     solicitudes: SqlRepositorioSolicitudesAcceso
     embedder: Embedder
     settings: Settings
+    motor: Engine
 
     def verificar_integridad(self) -> InformeIntegridad:
         return verificar_integridad(self.retriever, self.registro, self.repo_roles)
@@ -224,6 +226,7 @@ def build_servicios(
         solicitudes=SqlRepositorioSolicitudesAcceso(motor),
         embedder=embedder,
         settings=settings,
+        motor=motor,
     )
 
 
@@ -231,17 +234,17 @@ def build_registro_agentes(servicios: Servicios) -> RegistroAgentes:
     """Agentes de la orquestación multiagente (ver app/agents/). Agregar uno es registrarlo
     aquí: el grafo principal no cambia."""
     registro = RegistroAgentes()
-    registro.register(
-        crear_rag_agent(
-            HerramientasRag(
-                servicios.embedder, servicios.retriever, servicios.registro,
-                VerificadorRegistro(servicios.registro, permisos_por_consulta()),
-                servicios.solicitudes,
-                top_k=servicios.settings.retrieval_top_k,
-                min_score=servicios.settings.min_score,
-            )
-        )
+    rag = HerramientasRag(
+        servicios.embedder, servicios.retriever, servicios.registro,
+        VerificadorRegistro(servicios.registro, permisos_por_consulta()),
+        servicios.solicitudes,
+        top_k=servicios.settings.retrieval_top_k, min_score=servicios.settings.min_score,
     )  # fmt: skip
+    registro.register(crear_rag_agent(rag))
+    # Casos de RR.HH. solo con RLS (PostgreSQL): sin ella, el agente no existe (fallo cerrado).
+    if servicios.motor.dialect.name == "postgresql":
+        casos = SqlRepositorioCasosRRHH(servicios.motor)
+        registro.register(crear_hr_agent(HerramientasHR(casos, rag, servicios.registro)))
     return registro
 
 
