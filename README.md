@@ -45,11 +45,10 @@ login, despliégala en Azure.
 
 ## Desplegar en Azure
 
-Con GitHub Actions: guarda las credenciales de Azure como secrets del repositorio (las crea
-`scripts/credenciales_azure.sh` desde la Cloud Shell), crea una OAuth App de GitHub para el
-login y activa `DEPLOY_AZURE=true`. Cada push a `main` despliega infraestructura, imágenes,
-apps y documentos de ejemplo. Desde tu equipo:
-`make desplegar` (requiere `az login`, Terraform y Docker).
+Desde tu equipo, con `az login`, Terraform y Docker: `make desplegar`. Sin más configuración
+queda en **modo prueba** (solo accesible desde tu IP, sin login); con una OAuth App de GitHub
+en `.env`, pública con login. También con GitHub Actions (credenciales como secrets del
+repositorio y `DEPLOY_AZURE=true`).
 
 La web queda pública **con login obligatorio** (GitHub; Entra ID opcional): sin roles no se ve
 nada, y los administradores asignan roles a cada persona desde la app. Pasos, costes y

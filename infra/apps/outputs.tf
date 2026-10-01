@@ -5,3 +5,4 @@ output "sembrar_job_name" { value = azurerm_container_app_job.ingest["sembrar"].
 output "resource_group_name" { value = local.p.resource_group_name }
 output "backend_app_name" { value = azurerm_container_app.backend.name }
 output "web_app_name" { value = azurerm_container_app.web.name }
+output "login_proveedor" { value = var.login_proveedor }

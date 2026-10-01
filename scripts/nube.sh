@@ -19,7 +19,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 TFVARS="../envs/dev/nube.tfvars"
 BACKEND="../envs/dev/backend.hcl"
 LOG_DIR="data/nube"
-LOGIN_PROVEEDOR="${LOGIN_PROVEEDOR:-github}"
+LOGIN_PROVEEDOR="${LOGIN_PROVEEDOR:-}" # vacío: github si hay OAuth App en .env; si no, ip
 
 paso() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 falla() { printf '\n⛔ %s\n' "$1"; exit 1; }
@@ -63,13 +63,25 @@ requisitos() {
 }
 
 requisitos_login() {
+  local var # también desde .env (no se sube a git): GH_OAUTH_CLIENT_ID=… / GH_OAUTH_CLIENT_SECRET=…
+  for var in GH_OAUTH_CLIENT_ID GH_OAUTH_CLIENT_SECRET ADMINISTRADORES_GITHUB; do
+    if [[ -z ${!var:-} && -f .env ]] && grep -qE "^$var=.+" .env; then
+      export "$var=$(grep -E "^$var=" .env | tail -1 | cut -d= -f2- | sed -E "s/^['\"]//; s/['\"]$//")"
+    fi
+  done
+  if [[ -z $LOGIN_PROVEEDOR ]]; then
+    if [[ -n ${GH_OAUTH_CLIENT_ID:-} ]]; then LOGIN_PROVEEDOR=github; else LOGIN_PROVEEDOR=ip; fi
+  fi
+  if [[ $LOGIN_PROVEEDOR == ip ]]; then
+    # Prueba sin login: la web solo acepta tu IP pública (el resto de Internet recibe 403).
+    local ip
+    ip=$(curl -s -m 10 https://api.ipify.org || true)
+    [[ $ip =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || falla "No se pudo averiguar tu IP pública (api.ipify.org)."
+    export TF_VAR_ips_permitidas="${IPS_PERMITIDAS:-[\"$ip/32\"]}"
+    echo "✅ modo prueba sin login: la web solo será accesible desde $TF_VAR_ips_permitidas"
+    echo "   (para abrirla a otras personas con login de GitHub: GH_OAUTH_CLIENT_ID/SECRET en .env)"
+  fi
   if [[ $LOGIN_PROVEEDOR == github ]]; then
-    local var # también desde .env (no se sube a git): GH_OAUTH_CLIENT_ID=… / GH_OAUTH_CLIENT_SECRET=…
-    for var in GH_OAUTH_CLIENT_ID GH_OAUTH_CLIENT_SECRET ADMINISTRADORES_GITHUB; do
-      if [[ -z ${!var:-} && -f .env ]] && grep -qE "^$var=.+" .env; then
-        export "$var=$(grep -E "^$var=" .env | tail -1 | cut -d= -f2- | sed -E "s/^['\"]//; s/['\"]$//")"
-      fi
-    done
     [[ -n ${GH_OAUTH_CLIENT_ID:-} && -n ${GH_OAUTH_CLIENT_SECRET:-} ]] \
       || falla "Login con GitHub: añade GH_OAUTH_CLIENT_ID y GH_OAUTH_CLIENT_SECRET a .env (OAuth App de GitHub, ver docs/despliegue.md)."
     export TF_VAR_github_oauth_client_id=$GH_OAUTH_CLIENT_ID TF_VAR_github_oauth_client_secret=$GH_OAUTH_CLIENT_SECRET
@@ -122,6 +134,8 @@ desplegar() {
 
   if [[ $LOGIN_PROVEEDOR == github ]]; then
     paso "2/6 Login con GitHub (OAuth App): no hace falta registrar nada en Entra ID"
+  elif [[ $LOGIN_PROVEEDOR == ip ]]; then
+    paso "2/6 Modo prueba sin login (solo tu IP): no hace falta configurar login"
   else
   paso "2/6 Identidad en Entra ID (app registration, roles y login)"
   init identidad
@@ -177,22 +191,28 @@ comprobar() {
       --query "[?properties.active].properties.healthState | [0]" -o tsv 2> /dev/null || true)
     [[ $salud == Healthy ]] && echo "✅ $app: Healthy" || echo "⚠️  $app: ${salud:-desconocido} (az containerapp logs show -n $app -g $grupo)"
   done
+  local esperado="^(302|401)$" texto="la web pide inicio de sesión"
+  if [[ $(tf apps output -raw login_proveedor 2> /dev/null) == ip ]]; then
+    esperado="^200$" texto="la web responde desde tu IP"
+  fi
   codigo=""
-  for _ in $(seq 1 30); do # la web exige login: sin sesión responde redirección (302) o 401
+  for _ in $(seq 1 30); do
     codigo=$(curl -s -o /dev/null -w "%{http_code}" "$url/" || true)
-    [[ $codigo =~ ^(302|401)$ ]] && break
+    [[ $codigo =~ $esperado ]] && break
     sleep 10
   done
-  if [[ $codigo =~ ^(302|401)$ ]]; then echo "✅ la web pide inicio de sesión ($codigo)"
+  if [[ $codigo =~ $esperado ]]; then echo "✅ $texto ($codigo)"
   else echo "⚠️  la web responde $codigo (puede tardar unos minutos en arrancar)"; fi
-  cat << EOF
-
-   Aplicación: $url
-   Callback de la OAuth App de GitHub: $url/.auth/login/github/callback
-   Inicia sesión: los administradores tienen todos los roles y asignan roles a otras
-   personas desde la app (Roles y permisos → Personas y sus roles).
-   Estado: make estado-nube · Eliminar todo: make destruir-nube
-EOF
+  echo
+  echo "   Aplicación: $url"
+  if [[ $(tf apps output -raw login_proveedor 2> /dev/null) == ip ]]; then
+    echo "   Modo prueba: sin login, solo desde tu IP; eliges el rol en la web como en local."
+  else
+    echo "   Callback de la OAuth App de GitHub: $url/.auth/login/github/callback"
+    echo "   Inicia sesión: los administradores tienen todos los roles y asignan roles a otras"
+    echo "   personas desde la app (Roles y permisos → Personas y sus roles)."
+  fi
+  echo "   Estado: make estado-nube · Eliminar todo: make destruir-nube"
 }
 
 estado() {
@@ -213,7 +233,8 @@ destruir() {
   identidad=$(estado_de identidad)
   paso "1/3 Aplicaciones"
   # Al destruir no se usan: valores de relleno para las validaciones del stack.
-  export TF_VAR_github_oauth_client_id=x TF_VAR_github_oauth_client_secret=x TF_VAR_administradores='["x"]'
+  export TF_VAR_github_oauth_client_id=x TF_VAR_github_oauth_client_secret=x TF_VAR_administradores='["x"]' TF_VAR_ips_permitidas='["0.0.0.0/32"]'
+  LOGIN_PROVEEDOR=${LOGIN_PROVEEDOR:-github}
   init apps
   tf apps destroy -input=false -auto-approve -var-file=../envs/dev/apps.tfvars \
     -var "backend_image=x" -var "web_image=x" \

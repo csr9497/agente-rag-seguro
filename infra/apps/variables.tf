@@ -41,11 +41,11 @@ variable "app_version" {
 
 variable "login_proveedor" {
   type        = string
-  description = "Login de la web: github (OAuth App, roles asignados en la app) o entra (app registration con app roles)"
+  description = "Login de la web: github (OAuth App, roles asignados en la app), entra (app registration con app roles) o ip (prueba sin login, solo desde ips_permitidas)"
   default     = "github"
   validation {
-    condition     = contains(["github", "entra"], var.login_proveedor)
-    error_message = "login_proveedor debe ser github o entra."
+    condition     = contains(["github", "entra", "ip"], var.login_proveedor)
+    error_message = "login_proveedor debe ser github, entra o ip."
   }
 }
 
@@ -77,4 +77,10 @@ variable "identidad_state" {
   })
   description = "Ubicación del estado del stack identidad (solo login_proveedor=entra)"
   default     = null
+}
+
+variable "ips_permitidas" {
+  type        = list(string)
+  description = "login_proveedor=ip: rangos CIDR que pueden abrir la web (p. ej. [\"203.0.113.7/32\"])"
+  default     = []
 }

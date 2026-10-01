@@ -119,3 +119,31 @@ run "entra" {
     error_message = "Con Entra ID no se crea el secreto de GitHub"
   }
 }
+
+run "prueba_sin_login_solo_desde_mi_ip" {
+  command = plan
+  variables {
+    login_proveedor = "ip"
+    ips_permitidas  = ["203.0.113.7/32"]
+  }
+  assert {
+    condition     = length(azapi_resource.web_auth) == 0 && length(azurerm_key_vault_secret.github_oauth) == 0
+    error_message = "Sin login no se configura Easy Auth ni la OAuth App"
+  }
+  assert {
+    condition     = azurerm_container_app.web.ingress[0].ip_security_restriction[0].ip_address_range == "203.0.113.7/32"
+    error_message = "La web solo admite las IPs permitidas"
+  }
+  assert {
+    condition     = local.common_env.ENTORNO == "dev" && local.common_env.AUTH_MODO == "stub"
+    error_message = "Modo prueba: entorno dev sin login (prod lo rechazaría)"
+  }
+}
+
+run "prueba_sin_ips_falla" {
+  command = plan
+  variables {
+    login_proveedor = "ip"
+  }
+  expect_failures = [terraform_data.validaciones]
+}

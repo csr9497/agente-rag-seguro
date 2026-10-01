@@ -4,7 +4,20 @@ La aplicación se publica en Azure Container Apps con **login obligatorio** (Eas
 defecto se inicia sesión con **GitHub**: no hace falta registrar aplicaciones en Entra ID (en
 tenants universitarios los estudiantes no pueden). Los roles se asignan desde la propia app.
 
-## Una vez
+## Desde tu equipo (lo más rápido)
+
+Con `az login`, Terraform y Docker:
+
+```bash
+make desplegar      # make estado-nube · make destruir-nube
+```
+
+Sin más configuración se despliega en **modo prueba**: la web solo es accesible desde tu IP
+pública (el resto de Internet recibe 403), sin login y con todos los roles, como en local.
+Para abrirla a otras personas con login de GitHub, añade a `.env` `GH_OAUTH_CLIENT_ID` y
+`GH_OAUTH_CLIENT_SECRET` (OAuth App, paso 2 de abajo) y repite `make desplegar`.
+
+## Con GitHub Actions: una vez
 
 Todo se guarda en GitHub: repositorio → *Settings → Secrets and variables → Actions*.
 

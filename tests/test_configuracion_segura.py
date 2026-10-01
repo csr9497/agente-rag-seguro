@@ -129,9 +129,12 @@ def test_prod_con_entra_y_local_sin_restricciones() -> None:
 
 
 def test_terraform_exige_login() -> None:
-    """La web pública siempre con Easy Auth (Entra ID) y el backend en modo easyauth."""
+    """La web pública con Easy Auth y el backend en modo easyauth; sin login (modo «ip»), solo
+    desde IPs concretas y fuera de prod."""
     apps = (RAIZ / "infra" / "apps" / "main.tf").read_text(encoding="utf-8")
-    assert re.search(r'AUTH_MODO\s*=\s*"easyauth"', apps)
+    assert re.search(r'AUTH_MODO\s*=\s*local\.con_login \? "easyauth" : "stub"', apps)
+    assert re.search(r'ENTORNO\s*=\s*local\.con_login \? "prod" : "dev"', apps)
+    assert "length(var.ips_permitidas) > 0" in apps and "ip_security_restriction" in apps
     assert '"RedirectToLoginPage"' in apps and "Microsoft.App/containerApps/authConfigs" in apps
     identidad = (RAIZ / "infra" / "identidad" / "main.tf").read_text(encoding="utf-8")
     assert "app_role_assignment_required = true" in identidad  # solo usuarios con rol
