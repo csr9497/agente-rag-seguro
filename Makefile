@@ -1,7 +1,7 @@
 CONDA_ENV ?= agente-rag
 BASE_URL  ?= http://localhost:8000
 
-.PHONY: help setup sync lint fmt test test-postgres integration matriz evals evals-simulado evals-langsmith up down ingest studio env-from-azure tf-validate validar-infra verificar-modelos local-nube desplegar estado-nube destruir-nube ciclo modelos-up modelos-down instalar levantar apagar accesos
+.PHONY: help setup sync lint fmt test test-postgres integration matriz evals evals-simulado evals-langsmith up down ingest studio prompts-langsmith env-from-azure tf-validate validar-infra verificar-modelos local-nube desplegar estado-nube destruir-nube ciclo modelos-up modelos-down instalar levantar apagar accesos
 
 help: ## Lista los comandos (detalle y valores: docs/comandos.md)
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
@@ -55,8 +55,12 @@ down:
 ingest: ## Indexa ingestor/sample_docs en el Qdrant local
 	docker compose run --rm ingest
 
-studio: ## LangGraph Studio: servidor de desarrollo del grafo en http://127.0.0.1:2024
+studio: ## LangGraph Studio (http://127.0.0.1:2024) con la configuración de .env; publica los prompts
+	@bash -c 'source scripts/comun.sh && publicar_prompts'
 	uv run langgraph dev --allow-blocking
+
+prompts-langsmith: ## Publica los prompts de app/prompts/ en LangSmith (ETIQUETA=dev por defecto)
+	uv run python -m app.prompts.publicar --etiqueta $(or $(ETIQUETA),dev)
 
 verificar-modelos: ## Requisitos y capacidades del proveedor de modelos (MODELOS_PROVEEDOR)
 	uv run python -m app.modelos.diagnostico $(if $(SIN_LLAMADAS),--sin-llamadas,)

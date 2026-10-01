@@ -36,3 +36,9 @@ except LangSmithNotFoundError:
 print(f"   LangSmith: https://smith.langchain.com/o/{p.tenant_id}/projects/p/{p.id}  ({nombre})")
 PY
 }
+
+# Prompts del repositorio (app/prompts/*.md) en LangSmith (Prompt Hub), con la etiqueta dada
+# (defecto «dev»). Sin LANGSMITH_API_KEY no hace nada; si LangSmith falla solo avisa.
+publicar_prompts() { # publicar_prompts [etiqueta]
+  uv run python -m app.prompts.publicar --etiqueta "${1:-dev}" 2>&1 | sed 's/^/   /' || true
+}

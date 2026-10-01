@@ -221,6 +221,7 @@ comprobar() {
     echo "   personas desde la app (Roles y permisos → Personas y sus roles)."
   fi
   enlace_langsmith agente-rag-ragseg-dev
+  publicar_prompts
   echo "   Estado: make estado-nube · Eliminar todo: make destruir-nube"
 }
 

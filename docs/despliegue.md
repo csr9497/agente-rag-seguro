@@ -23,9 +23,10 @@ Para abrirla a otras personas con login de GitHub, añade a `.env` `GH_OAUTH_CLI
 make local-nube     # http://localhost:8090
 ```
 
-Rellena `.env` con los endpoints y claves de la nube (Key Vault), registra en una base local
-(`data/nube-local.db`) los documentos que hay en Blob —sin volver a calcular embeddings— y
-arranca web y API en un proceso de tu equipo. Usa los modelos, AI Search, Blob y Content
+Escribe en `data/nube.env` (no en `.env`) los endpoints y claves de la nube (Key Vault),
+registra en una base local (`data/nube-local.db`) los documentos que hay en Blob —sin volver a
+calcular embeddings— y arranca web y API en un proceso de tu equipo, más LangGraph Studio
+contra la nube (`baseUrl=http://127.0.0.1:2025`). Usa los modelos, AI Search, Blob y Content
 Safety de Azure con tu `az login`; la base de datos es local porque PostgreSQL de la nube solo
 admite servicios de Azure (conversaciones y roles asignados no se comparten con la nube).
 Trazas en el proyecto de LangSmith `agente-rag-local-nube`.

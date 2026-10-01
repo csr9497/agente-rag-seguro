@@ -24,11 +24,11 @@ from pydantic import BaseModel, Field, ValidationError
 from app.acciones.modelos import PropuestaAccion
 from app.cache.semantica import CacheSemantica, EntradaCache
 from app.config import Settings
-from app.graph.prompts import SUPERVISOR_PROMPT
 from app.graph.state import EstadoAgente, ResultadoLlamada
 from app.modelos.errores import ModeloError, es_filtro_de_contenido
 from app.models.schemas import ChunkRecuperado, Hallazgo, RespuestaConsulta, Turno, Usuario
 from app.observabilidad import traza_consulta, usuario_seudonimo
+from app.prompts.registro import RegistroPrompts
 from app.rag.generacion import generar_respuesta, respuesta_sin_contexto
 from app.rag.prompts import build_historial, neutralizar
 from app.retrieval.base import LLM, Embedder, Supervisor
@@ -83,6 +83,7 @@ class Agente:
         versiones_salida: dict[str, Guardrail] | None = None,
         version_entrada: str = "configurado",
         version_salida: str = "configurado",
+        prompts: RegistroPrompts | None = None,
     ) -> None:
         self._supervisor = supervisor
         self._llm = llm
@@ -107,6 +108,7 @@ class Agente:
         self._embedder_cache = embedder_cache
         self._alcance_cache = alcance_cache
         self._settings = settings or Settings()
+        self._prompts = prompts or RegistroPrompts(self._settings, None)
         self.grafo = self._construir()
 
     @property
@@ -141,6 +143,7 @@ class Agente:
             config["metadata"]["usuario"] = usuario_seudonimo(usuario.id)
             config["metadata"]["guardrail_entrada"] = self._version_entrada
             config["metadata"]["guardrail_salida"] = self._version_salida
+            config["metadata"]["prompts"] = self._prompts.version_por_defecto()
             config["run_id"] = traza_id
             try:
                 final = EstadoAgente.model_validate(self.grafo.invoke(inicial, config=config))
@@ -271,12 +274,22 @@ class Agente:
             update["respuesta"] = _bloqueada(veredicto.mensaje)
         return update
 
-    def _supervisor_node(self, estado: EstadoAgente) -> Update:
+    def _prompt(self, nombre: str, runtime: Runtime[ContextoAgente] | None) -> str:
+        """Prompt de sistema en la versión pedida en el contexto (Studio) o la configurada."""
+        contexto = runtime.context if runtime is not None else None
+        return self._prompts.texto(nombre, getattr(contexto, "version_prompts", None))[0]
+
+    def _supervisor_node(
+        self, estado: EstadoAgente, runtime: Runtime[ContextoAgente] | None = None
+    ) -> Update:
         if estado.iteraciones >= self._max_iteraciones:
             return {"pendientes": []}
         mensajes = estado.mensajes or [
             # Con la fecha, "este año" o "los próximos festivos" no se resuelven con un año viejo.
-            {"role": "system", "content": f"{SUPERVISOR_PROMPT}\nFecha de hoy: {date.today()}."},
+            {
+                "role": "system",
+                "content": f"{self._prompt('supervisor', runtime)}\nFecha de hoy: {date.today()}.",
+            },
             {"role": "user", "content": _pregunta_supervisor(estado)},
         ]
         # Primer turno: obligatorio usar una herramienta (con gpt-4o y tool_choice=auto, a veces
@@ -442,7 +455,9 @@ class Agente:
         )
         return {}
 
-    def _generate(self, estado: EstadoAgente) -> Update:
+    def _generate(
+        self, estado: EstadoAgente, runtime: Runtime[ContextoAgente] | None = None
+    ) -> Update:
         if estado.respuesta is not None:  # ya bloqueada por el filtro de contenido del modelo
             return {}
         acciones = estado.acciones_propuestas
@@ -471,8 +486,9 @@ class Agente:
             return {"respuesta": RespuestaConsulta(respuesta=texto, citas=[], sin_contexto=True)}
         try:
             respuesta = generar_respuesta(
-                self._llm, estado.pregunta, estado.recuperados, estado.historial
-            )
+                self._llm, estado.pregunta, estado.recuperados, estado.historial,
+                system_prompt=self._prompt("generacion", runtime),
+            )  # fmt: skip
         except (openai.BadRequestError, ModeloError) as exc:
             if not es_filtro_de_contenido(exc):
                 raise

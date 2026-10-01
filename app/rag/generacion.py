@@ -14,12 +14,13 @@ def generar_respuesta(
     pregunta: str,
     recuperados: list[ChunkRecuperado],
     historial: list[Turno] | None = None,
+    system_prompt: str = SYSTEM_PROMPT,
 ) -> RespuestaConsulta:
     """Respuesta fundamentada con citas. Sin contexto visible, no se llama al LLM."""
     if not recuperados:
         return respuesta_sin_contexto()
     # Con la fecha, «este año» o «el próximo festivo» se resuelven contra los datos.
-    system = f"{SYSTEM_PROMPT}\nFecha de hoy: {date.today()}."
+    system = f"{system_prompt}\nFecha de hoy: {date.today()}."
     salida = llm.responder(system, build_user_prompt(pregunta, recuperados, historial))
     citas = _mapear_citas(salida.citas_usadas, recuperados)
     if not salida.encontrado or not citas:

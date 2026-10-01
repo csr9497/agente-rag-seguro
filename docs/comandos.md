@@ -60,7 +60,18 @@ imprime el túnel SSH para abrirlas desde tu equipo.
 ### `make up` · `make down` · `make ingest` · `make studio`
 Piezas sueltas: `up`/`down` arrancan o paran los contenedores (sin modelos, las respuestas
 dan 503); `ingest` indexa `ingestor/sample_docs` con registro (como `levantar`); `studio`
-arranca solo LangGraph Studio (http://127.0.0.1:2024). Usan los mismos valores de `.env`.
+publica los prompts en LangSmith y arranca solo LangGraph Studio (http://127.0.0.1:2024).
+Usan los mismos valores de `.env`. Guía de Studio: [studio.md](studio.md).
+
+### `make prompts-langsmith`
+Publica `app/prompts/*.md` en LangSmith (*Prompts*). Si el texto no cambió no crea un commit,
+solo mueve la etiqueta. Lo hacen también `levantar`, `studio`, `local-nube` y `desplegar`.
+
+| Valor | Dónde | Efecto |
+|---|---|---|
+| `LANGSMITH_API_KEY` | `.env` | obligatoria (sin ella no publica nada) |
+| `ETIQUETA` | línea de comandos | `dev` (defecto) · `prod` para promover: `make prompts-langsmith ETIQUETA=prod` |
+| `PROMPTS_ORIGEN` | `.env` | `local` (defecto): la app usa los ficheros · `langsmith`: la etiqueta `PROMPTS_ETIQUETA` (defecto `prod`) |
 
 ### `make setup` · `make sync`
 Alternativa con conda (`environment.yml`): `CONDA_ENV=agente-rag` (defecto) en la línea de
@@ -119,12 +130,15 @@ Logs de cada paso: `data/nube/`.
 todo lo desplegado (pide escribir «destruir»; `CONFIRMAR=si` lo omite).
 
 ### `make local-nube`
-La app en tu equipo (http://localhost:8090) con los modelos, AI Search, Blob y Content Safety
-de la nube y base de datos local (`data/nube-local.db`). Rellena `.env` desde Key Vault.
+La app en tu equipo (http://localhost:8090) y LangGraph Studio (puerto 2025) con los modelos,
+AI Search, Blob y Content Safety de la nube y base de datos local (`data/nube-local.db`). La
+configuración de la nube va a `data/nube.env` (desde Key Vault): **tu `.env` no cambia**, así
+que `make studio` / `make levantar` siguen siendo locales. Ctrl+C para la app y Studio.
 
 | Valor | Dónde | Defecto |
 |---|---|---|
 | `PUERTO` | línea de comandos | `8090` |
+| `PUERTO_STUDIO` | línea de comandos | `2025` |
 | `LANGSMITH_API_KEY` | `.env` | sin ella, trazas apagadas |
 | `LANGSMITH_PROJECT_LOCAL_NUBE` | línea de comandos | `agente-rag-local-nube` |
 | `TRAZAS_MODO_LOCAL_NUBE` | línea de comandos | `completo` |

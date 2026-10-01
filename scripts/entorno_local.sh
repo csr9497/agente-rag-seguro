@@ -126,7 +126,8 @@ levantar() {
   paso "4/5 Documentos de ejemplo (idempotente)"
   ./scripts/sembrar_local.sh
 
-  paso "5/5 LangGraph Studio"
+  paso "5/5 LangGraph Studio (y prompts en LangSmith)"
+  publicar_prompts
   if studio_activo || curl -sf http://127.0.0.1:2024/ok > /dev/null 2>&1; then
     echo "ya estaba en marcha"
   else

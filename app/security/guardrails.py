@@ -91,13 +91,19 @@ class GuardrailSalida:
         min_huella: int = 40,
     ) -> None:
         # Huellas: líneas largas y distintivas de los prompts de sistema.
-        self._huellas = {
-            _normalizar(linea)
-            for prompt in prompts_protegidos
-            for linea in prompt.splitlines()
-            if len(linea.strip()) >= min_huella
-        }
+        self._min_huella = min_huella
+        self._huellas: set[str] = set()
+        for prompt in prompts_protegidos:
+            self.proteger(prompt)
         self._pii = pii
+
+    def proteger(self, prompt: str) -> None:
+        """Añade un prompt a vigilar (p. ej. una versión cargada de LangSmith)."""
+        self._huellas |= {
+            _normalizar(linea)
+            for linea in prompt.splitlines()
+            if len(linea.strip()) >= self._min_huella
+        }
 
     def revisar(self, texto: str) -> Veredicto:
         normalizado = _normalizar(texto)

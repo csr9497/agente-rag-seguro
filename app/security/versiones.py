@@ -51,6 +51,14 @@ class ContextoAgente(BaseModel):
     guardrail_salida: VersionSalida | None = Field(
         default=None, description=f"Versión del guardrail de salida. {DESCRIPCION_SALIDA}"
     )
+    version_prompts: str | None = Field(
+        default=None,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+        description=(
+            "Versión de los prompts de sistema: «local» (repositorio), una etiqueta de "
+            "LangSmith («dev», «prod»…) o un hash de commit. Vacío: PROMPTS_ORIGEN."
+        ),
+    )
 
 
 def catalogo_entrada(settings: Settings, shields: Any | None) -> dict[str, Guardrail]:

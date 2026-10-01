@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from azure.identity import DefaultAzureCredential
+from langsmith import Client as LangSmithClient
 from qdrant_client import QdrantClient
 from sqlalchemy import Engine
 
@@ -25,6 +26,7 @@ from app.persistencia.repositorios import (
     crear_motor,
     inicializar,
 )
+from app.prompts.registro import RegistroPrompts
 from app.retrieval.base import LLM, Embedder, Retriever, Supervisor
 from app.retrieval.no_configurado import ModelosNoConfigurados
 from app.security.acceso import VerificadorRegistro
@@ -33,6 +35,7 @@ from app.security.content_safety import (
     ClientePromptShields,
     ClienteShields,
 )
+from app.security.guardrails import GuardrailSalida
 from app.security.versiones import catalogo_entrada, catalogo_salida, version_por_defecto
 from app.servicios.conversaciones import ServicioConversaciones
 from app.servicios.integridad import InformeIntegridad, verificar_integridad
@@ -195,6 +198,13 @@ def build_servicios(
     )
 
 
+def build_prompts(settings: Settings) -> RegistroPrompts:
+    """Prompts del repositorio o de LangSmith (PROMPTS_ORIGEN; en Studio, por ejecución)."""
+    clave = settings.langsmith_api_key.get_secret_value() if settings.langsmith_api_key else ""
+    cliente = LangSmithClient(api_key=clave) if clave else None
+    return RegistroPrompts(settings, cliente)
+
+
 def build_agente(settings: Settings) -> Agente:
     """Agente sin registro (LangGraph Studio y /consultar): verificación solo por ACL."""
     embedder, llm, supervisor = build_modelos(settings)
@@ -219,6 +229,10 @@ def _agente(
     versiones_entrada = catalogo_entrada(settings, shields)
     versiones_salida = catalogo_salida(settings)
     version_entrada = version_por_defecto(settings, shields)
+    prompts = build_prompts(settings)
+    for guardrail in versiones_salida.values():
+        if isinstance(guardrail, GuardrailSalida):  # también vigila versiones de LangSmith
+            prompts.al_cargar(guardrail.proteger)
     return Agente(
         trazas=configurar_trazas(settings),
         settings=settings,
@@ -250,4 +264,5 @@ def _agente(
         cache=cache,
         embedder_cache=embedder if cache is not None else None,
         alcance_cache=alcance_cache,
+        prompts=prompts,
     )
