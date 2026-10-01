@@ -120,7 +120,7 @@ Repetirlo actualiza lo cambiado.
 | `POSTGRES_LOCATION` | línea de comandos | Región de PostgreSQL si la autodetección no encuentra ninguna (p. ej. `southcentralus`) |
 
 Región, tamaños y modelos: [infra/envs/dev/nube.tfvars](../infra/envs/dev/nube.tfvars).
-Logs de cada paso: `data/nube/`.
+Logs de cada paso: `data/nube/<entorno>/`. `ENV=staging|main` despliega otro entorno (recursos y estado propios; lo usa el pipeline de CI).
 
 ### `make cloud-status` · `make cloud-destroy`
 `cloud-status`: URL de la web, salud de las apps y enlace de LangSmith. `cloud-destroy`: borra
@@ -149,6 +149,7 @@ terminal. La configuración va a `data/nube.env`: **tu `.env` no cambia**. Logs 
 | Comando | Qué hace | Valores |
 |---|---|---|
 | `make env-from-azure` | Rellena `.env` con endpoints y claves de lo desplegado (Key Vault) | `az login` |
+| `./scripts/nube.sh limpiar` | Red de seguridad: borra cualquier `rg-ragseg-<entorno>` encendido, su estado y lo que quede en borrado suave (lo usa la limpieza nocturna) | `az login` |
 | `make check-infra` | Comprueba cada servicio desplegado (informe en `reports/infra/`) | `az login` |
 | `make cycle` | Ciclo completo contra Azure con informe en `reports/ciclos/<fecha>/`. Se niega si hay un despliegue con `make deploy` (comparten el estado de Terraform) | `STEP=on\|test\|save\|off\|report\|all` (defecto `all`) |
 

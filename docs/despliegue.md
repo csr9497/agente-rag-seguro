@@ -31,46 +31,67 @@ Safety de Azure con tu `az login`; la base de datos es local porque PostgreSQL d
 admite servicios de Azure (conversaciones y roles asignados no se comparten con la nube).
 Trazas en el proyecto de LangSmith `agente-rag-local-nube`.
 
-## Con GitHub Actions: una vez
+## Pipeline de GitHub Actions: entornos efímeros
 
-Todo se guarda en GitHub: repositorio → *Settings → Secrets and variables → Actions*.
+Cada cambio se prueba en Azure en entornos que **se crean, se prueban y se apagan** solos
+([pipeline.yml](../.github/workflows/pipeline.yml)):
 
-1. **Credenciales de Azure** (con qué despliega GitHub). En el portal de Azure abre la Cloud
-   Shell (icono `>_`, Bash) y ejecuta
-   [scripts/credenciales_azure.sh](../scripts/credenciales_azure.sh):
+| Evento | Qué corre | Resultado |
+|---|---|---|
+| PR hacia `main` (cada push) | CI → **dev** → **staging** (este, solo si dev pasa) | Checks obligatorios para el merge |
+| Merge a `main` | CI → **main** | Todos los tests sobre lo integrado |
+| *Actions → Pipeline → Run workflow* | CI → el entorno elegido | Prueba manual |
+
+**CI** ([ci.yml](../.github/workflows/ci.yml)) va antes y sin Azure: lint, tests, PostgreSQL,
+gate de evaluaciones con modelos simulados, Terraform y build de imágenes. Si falla, no se
+despliega nada.
+
+**Cada entorno** ([nube.yml](../.github/workflows/nube.yml)) es un solo job:
+
+1. `scripts/nube.sh desplegar` con `ENTORNO=<entorno>`: recursos propios (`rg-ragseg-<entorno>`)
+   y estado propio (`<entorno>/*.tfstate`). La web va en **modo `ip`**: solo la IP del runner
+   puede abrirla, sin login.
+2. **Tests contra la web desplegada**: matriz de escenarios (permisos por rol) y evaluaciones
+   por capas, con dataset y experimento en LangSmith. Trazas en el proyecto
+   `agente-rag-ragseg-<entorno>`; prompts con la etiqueta del entorno (solo `main` mueve `prod`).
+3. **Apagado siempre** (`make cloud-destroy`), también si los tests fallan o se cancela el run.
+
+El resumen del run muestra la URL y los informes; los informes y logs quedan como artefactos.
+
+Los entornos van **de uno en uno** en toda la suscripción (grupo de concurrencia
+`azure-suscripcion`): AI Search Free y Content Safety F0 admiten uno por suscripción. Un ciclo
+completo tarda unos 40–60 min.
+
+**Limpieza nocturna** ([limpieza.yml](../.github/workflows/limpieza.yml), 06:00 UTC): borra
+cualquier `rg-ragseg-<entorno>` que siga encendido, su estado y lo que quede en borrado suave
+(`./scripts/nube.sh limpiar`). Ojo: también apaga un `make deploy` hecho desde tu equipo.
+
+### Configuración (una vez)
+
+1. **Identidad y estado**: `infra/bootstrap/bootstrap.sh` (responde `s` para crear las
+   variables del environment `dev`) y una credencial federada por environment:
    ```bash
-   curl -sL https://raw.githubusercontent.com/csr9497/agente-rag-seguro/main/scripts/credenciales_azure.sh | bash
+   for env in staging main; do
+     az identity federated-credential create --name "github-$env" \
+       --identity-name id-gh-ragseg-deployer-dev --resource-group rg-ragseg-tfstate \
+       --issuer https://token.actions.githubusercontent.com \
+       --subject "repo:<owner>/<repo>:environment:$env" --audiences api://AzureADTokenExchange
+   done
    ```
-   Crea un service principal (rol Owner en la suscripción + acceso al estado de Terraform) y
-   muestra los cuatro **secrets** que hay que crear: `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`,
-   `AZURE_SUBSCRIPTION_ID` y `AZURE_CLIENT_SECRET`. Si tu tenant no permite crear service
-   principals, el script indica la alternativa sin contraseña (OIDC con `bootstrap.sh`).
-2. **Login de la web** (con qué inician sesión las personas): GitHub → *Settings → Developer
-   settings → OAuth Apps → New OAuth App*. Nombre «Asistente RAG»; *Homepage URL* y
-   *Authorization callback URL*: la URL del repositorio por ahora (se cambian tras el primer
-   despliegue). Genera un *client secret*. Guarda la **variable** `GH_OAUTH_CLIENT_ID` y el
-   **secret** `GH_OAUTH_CLIENT_SECRET`. Opcional: variable `ADMINISTRADORES_GITHUB` (JSON, p. ej.
-   `["ana","luis"]`); por defecto, el dueño del repositorio.
-3. **Activar**: **variable** `DEPLOY_AZURE=true`.
+2. **Variables de repositorio** `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` y
+   `AZURE_SUBSCRIPTION_ID` (las mismas del environment `dev`, para que staging y main las vean).
+3. **Secret** `LANGSMITH_API_KEY` (opcional: trazas y experimentos).
+4. **Activar**: variable `DEPLOY_AZURE=true`. Sin ella solo corre el CI.
+5. **Protección de `main`**: exigir los checks de CI, dev y staging antes del merge.
 
-## Desplegar
+### Login con GitHub (despliegue permanente)
 
-Cada push a `main` (o *Actions → Deploy → Run workflow*) ejecuta
-[deploy.yml](../.github/workflows/deploy.yml) con esas credenciales:
-
-1. **platform** (`nube.tfvars`): Azure OpenAI (gpt-4o, ada-002), AI Search Free, Storage, Key
-   Vault, Content Safety, VNet, PostgreSQL, Container Registry y entorno de Container Apps.
-2. **Imágenes** del backend y la web en el registro.
-3. **apps**: web pública con Easy Auth (GitHub), backend con ingress interno y Managed
-   Identity, jobs de ingesta; el secreto de la OAuth App va a Key Vault.
-4. **Documentos de ejemplo** (registro + Blob + índice; idempotente).
-5. **Comprobación**: la web responde y exige inicio de sesión.
-
-El resumen del run muestra la URL y el **callback** que hay que poner en la OAuth App
-(`https://<web>/.auth/login/github/callback`); pon también la URL de la web como *Homepage URL*.
-
-Desde tu equipo es lo mismo con `make deploy`; los valores de cada modo (IP, GitHub,
-Entra ID) están en [comandos.md](comandos.md#make-deploy).
+Los entornos del pipeline no usan login. Para una web pública con login, desde tu equipo:
+crea una OAuth App (GitHub → *Settings → Developer settings → OAuth Apps*), pon
+`GH_OAUTH_CLIENT_ID` y `GH_OAUTH_CLIENT_SECRET` en `.env` (opcional `ADMINISTRADORES_GITHUB`,
+JSON) y `make deploy`. El comando imprime el **callback**
+(`https://<web>/.auth/login/github/callback`) que hay que poner en la OAuth App. Los valores
+de cada modo (IP, GitHub, Entra ID) están en [comandos.md](comandos.md#make-deploy).
 
 ## Acceso y roles
 
@@ -99,8 +120,9 @@ gratuito; Azure OpenAI por token. Al terminar las pruebas: `make cloud-destroy`.
 
 | Síntoma | Causa y solución |
 |---|---|
-| El job `platform` se omite | Falta `DEPLOY_AZURE=true` |
-| `az login` / Terraform: credenciales no válidas | Revisa los cuatro secrets `AZURE_*`; el secreto caduca al año (vuelve a ejecutar el script) |
+| Los jobs dev/staging/main se omiten | Falta la variable `DEPLOY_AZURE=true` |
+| `staging` aparece cancelado | Otro entorno ocupaba la suscripción y llegó un tercero a la cola: vuelve a ejecutar el run |
+| `az login` en el pipeline: `AADSTS70021` (no matching federated identity) | Falta la credencial federada del environment (paso 1 de la configuración) |
 | `AuthorizationFailed` al leer el estado | El service principal necesita *Storage Blob Data Contributor* en la cuenta del estado (lo asigna el script) |
 | `InsufficientQuota` | Sin cuota del modelo en la región: cambia `location` o `capacity` en `nube.tfvars` |
 | GitHub dice «redirect_uri is not associated» | Pon el callback del resumen del run en la OAuth App |

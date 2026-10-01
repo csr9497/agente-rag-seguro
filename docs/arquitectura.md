@@ -143,12 +143,13 @@ y metadata de rol, conversación y versión ([app/observabilidad.py](../app/obse
 
 ## CI/CD
 
-[ci.yml](../.github/workflows/ci.yml) en cada PR y push a `main`: lint + tests, paridad con
-PostgreSQL (servicio del runner), **gate de evaluaciones** (app con modelos simulados:
-falla si hay fugas entre roles o contrato roto), Terraform (fmt, validate, tests) y build de
-imágenes. [deploy.yml](../.github/workflows/deploy.yml) (OIDC, sin secretos) actualiza el despliegue en
-cada push a `main` si `DEPLOY_AZURE=true`; el primero se hace con `make deploy`
-([despliegue.md](despliegue.md)).
+[pipeline.yml](../.github/workflows/pipeline.yml): en cada PR, [ci.yml](../.github/workflows/ci.yml)
+(lint + tests, paridad con PostgreSQL, **gate de evaluaciones** con modelos simulados —falla si
+hay fugas entre roles o contrato roto—, Terraform y build de imágenes) y después los entornos
+efímeros **dev → staging** en Azure; tras el merge, **main**. Cada entorno
+([nube.yml](../.github/workflows/nube.yml), OIDC sin secretos) se despliega, se prueba contra
+la web real (matriz de permisos y evaluaciones en LangSmith) y se apaga
+([despliegue.md](despliegue.md#pipeline-de-github-actions-entornos-efímeros)).
 
 ## Ciclo de pruebas en Azure
 

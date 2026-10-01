@@ -56,8 +56,8 @@ login, despliégala en Azure.
 
 Desde tu equipo, con `az login`, Terraform y Docker: `make deploy`. Sin más configuración
 queda en **modo prueba** (solo accesible desde tu IP, sin login); con una OAuth App de GitHub
-en `.env`, pública con login. También con GitHub Actions (credenciales como secrets del
-repositorio y `DEPLOY_AZURE=true`).
+en `.env`, pública con login. En GitHub Actions, cada PR se prueba en entornos efímeros
+(dev → staging, y main tras el merge) que se despliegan, se prueban y se apagan solos.
 
 La web queda pública **con login obligatorio** (GitHub; Entra ID opcional): sin roles no se ve
 nada, y los administradores asignan roles a cada persona desde la app. Pasos, costes y

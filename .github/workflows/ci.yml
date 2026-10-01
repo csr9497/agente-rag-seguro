@@ -1,16 +1,12 @@
 name: CI
 
+# Tests sin Azure (lint, unitarios, PostgreSQL, evaluaciones con modelos simulados, Terraform
+# y build de imágenes). Lo llama pipeline.yml antes de desplegar nada en Azure.
 on:
-  pull_request:
-  push:
-    branches: [main]
+  workflow_call:
 
 permissions:
   contents: read
-
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
 
 env:
   TRAZAS_MODO: apagado # CI nunca envía trazas a LangSmith

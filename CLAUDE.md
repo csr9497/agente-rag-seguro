@@ -91,9 +91,10 @@ permisos gestionados desde la UI, access_guardrail contra el registro, integrida
 conversación, feedback, Prompt Shields (Content Safety), data_query, acciones con aprobación humana, Entra ID (JWT), trazas
 LangSmith, evaluaciones por capas y CI (GitHub Actions). Terraform listo (`alcance`,
 `vector_store`, Managed Redis, PostgreSQL; stacks platform, identidad y apps) pero **no
-aplicado**: no tocar Azure sin indicación explícita del usuario. Despliegue completo con
-GitHub Actions (deploy.yml, OIDC) o `make deploy`, con login de GitHub vía Easy Auth (ver
-docs/despliegue.md); el deploy de CI está desactivado hasta `DEPLOY_AZURE=true`. Proveedor de modelos configurable
+aplicado**: no tocar Azure sin indicación explícita del usuario. Pipeline de GitHub
+Actions con entornos efímeros (pipeline.yml → nube.yml, OIDC): PR → CI → dev → staging;
+merge → main; cada entorno se despliega, se prueba y se apaga (activo con `DEPLOY_AZURE=true`;
+ver docs/despliegue.md). `make deploy` desde el equipo, con login de GitHub vía Easy Auth. Proveedor de modelos configurable
 (docs/modelos.md). Siguiente: primer `make deploy` y pruebas en la nube.
 
 ## Cómo trabajar en este repo

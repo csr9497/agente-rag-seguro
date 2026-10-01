@@ -1,0 +1,38 @@
+name: Limpieza nocturna
+
+# Red de seguridad para el crédito de Azure: si un entorno efímero quedó encendido (un apagado
+# que falló, un run interrumpido, un make deploy olvidado), lo borra con su estado de Terraform
+# y purga lo que quede en borrado suave. Comparte la concurrencia de nube.yml: nunca corre a la
+# vez que un entorno en uso.
+on:
+  schedule:
+    - cron: "0 6 * * *" # 01:00 en Perú
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  limpiar:
+    if: vars.DEPLOY_AZURE == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: dev
+    concurrency:
+      group: azure-suscripcion
+      cancel-in-progress: false
+    env:
+      ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_wrapper: false
+      - name: az login (OIDC)
+        uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - run: ./scripts/nube.sh limpiar | tee -a "$GITHUB_STEP_SUMMARY"
