@@ -80,8 +80,14 @@ class Settings(BaseSettings):
     langsmith_project: str = "agente-rag-dev"
     app_version: str = "local"
 
-    # Autenticación: stub (local, sin login) o entra (token de Entra ID validado).
-    auth_modo: Literal["stub", "entra"] = "stub"
+    # Autenticación:
+    # - stub: local, sin login.
+    # - entra: token de Entra ID (Bearer) validado por la API (firma, emisor, audiencia).
+    # - easyauth: en Azure, el login lo hace Easy Auth de Container Apps en la web y la
+    #   identidad llega en X-MS-CLIENT-PRINCIPAL; solo se acepta si viene del proxy (nginx)
+    #   con PROXY_SECRETO (el backend no tiene ingress público).
+    auth_modo: Literal["stub", "entra", "easyauth"] = "stub"
+    proxy_secreto: SecretStr | None = None
     entra_tenant_id: str = ""
     entra_audiencia: str = Field(default="", description="Client ID o App ID URI de la API")
     entra_claim_roles: str = "roles"
@@ -152,15 +158,20 @@ class ConfiguracionInseguraError(RuntimeError):
 
 
 def validar_seguridad(settings: Settings) -> None:
-    """Falla cerrada: en ENTORNO=prod la API no arranca sin Entra ID ni con modos de
-    depuración (identidad por cabecera, selección libre de rol)."""
+    """Falla cerrada: en ENTORNO=prod la API no arranca sin login (Entra ID o Easy Auth) ni
+    con modos de depuración (identidad por cabecera, selección libre de rol)."""
     if settings.entorno != "prod":
         return
     problemas = []
-    if settings.auth_modo != "entra":
-        problemas.append("AUTH_MODO debe ser 'entra'")
-    elif not (settings.entra_tenant_id and settings.entra_audiencia):
+    secreto = settings.proxy_secreto.get_secret_value() if settings.proxy_secreto else ""
+    if settings.auth_modo == "stub":
+        problemas.append("AUTH_MODO debe ser 'entra' o 'easyauth'")
+    elif settings.auth_modo == "entra" and not (
+        settings.entra_tenant_id and settings.entra_audiencia
+    ):
         problemas.append("faltan ENTRA_TENANT_ID / ENTRA_AUDIENCIA")
+    elif settings.auth_modo == "easyauth" and len(secreto) < 32:
+        problemas.append("AUTH_MODO=easyauth requiere PROXY_SECRETO (32+ caracteres)")
     if settings.identidad_debug:
         problemas.append("IDENTIDAD_DEBUG no está permitido")
     if settings.seleccion_libre_de_rol:

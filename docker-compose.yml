@@ -66,6 +66,7 @@ services:
     build: ./web
     environment:
       BACKEND_URL: http://app:8000
+      PROXY_SECRETO: "" # solo en Azure (AUTH_MODO=easyauth)
     ports:
       # Solo este equipo: sin autenticación, desde la red cualquiera podría subir o borrar.
       - "127.0.0.1:8080:8080"
@@ -82,6 +83,12 @@ services:
     environment:
       VECTOR_STORE: qdrant
       QDRANT_URL: http://qdrant:6333
+      # Mismo registro y almacén que la app: lo indexado queda visible con sus permisos.
+      DATABASE_URL: sqlite:////data/app.db
+      ALMACEN_LOCAL_DIR: /data/documentos
+      CONTENT_SAFETY_ENDPOINT: ""
+    volumes:
+      - ./data:/data
     depends_on:
       - qdrant
 

@@ -39,13 +39,12 @@ variable "app_version" {
   default     = "desconocida"
 }
 
-variable "entra_tenant_id" {
-  type    = string
-  default = ""
-}
-
-variable "entra_audiencia" {
-  type        = string
-  description = "Client ID de la app registration de la API. Obligatorio (precondición en main.tf)."
-  default     = ""
+variable "identidad_state" {
+  type = object({
+    resource_group_name  = string
+    storage_account_name = string
+    container_name       = string
+    key                  = string
+  })
+  description = "Ubicación del estado del stack identidad (app registration de Entra ID)"
 }

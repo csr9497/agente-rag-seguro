@@ -28,6 +28,7 @@ if [[ $PROVEEDOR == azure ]]; then
   export ARM_SUBSCRIPTION_ID="${ARM_SUBSCRIPTION_ID:-$(az account show --query id -o tsv 2>/dev/null || true)}"
 fi
 
+source scripts/comun.sh
 paso() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 
 terraform_init() { # idempotente; el backend remoto está en infra/envs/dev/backend.hcl
@@ -103,6 +104,7 @@ levantar() {
     paso "1/5 Modelos en Azure (gpt-4o + text-embedding-ada-002)"
     requisitos_azure > /dev/null || { requisitos_azure; exit 1; }
     [[ -d infra/platform/.terraform ]] || terraform_init
+    proteger_nube
     terraform -chdir=infra/platform apply -input=false -auto-approve -var-file="$TFVARS" \
       -var "developer_principal_ids=[\"$(yo)\"]" \
       | grep -E "Apply complete|No changes|Error" || true
@@ -151,6 +153,7 @@ apagar() {
   fi
   paso "Modelos en Azure"
   [[ -d infra/platform/.terraform ]] || terraform_init
+  proteger_nube
   terraform -chdir=infra/platform destroy -input=false -auto-approve -var-file="$TFVARS" \
     -var "developer_principal_ids=[\"$(yo)\"]" \
     | grep -E "Destroy complete|Error" || true

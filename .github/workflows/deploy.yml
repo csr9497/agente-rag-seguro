@@ -1,7 +1,11 @@
 name: Deploy
 
-# Despliegue completo en Azure: infraestructura (platform) → imágenes → aplicaciones (apps).
+# Actualización del despliegue en Azure: infraestructura (platform) → imágenes → apps.
 # Autenticación con OIDC (sin secretos); variables creadas por infra/bootstrap/bootstrap.sh.
+#
+# El primer despliegue se hace con `make desplegar` (tu sesión): crea además la identidad de
+# la app en Entra ID (stack identidad), que esta identidad de GitHub no puede crear. Después,
+# este workflow actualiza platform, imágenes y apps en cada push a main.
 #
 # Desactivado hasta que se decida desplegar: requiere la variable de repositorio
 # DEPLOY_AZURE=true (Settings → Variables). Sin ella, todos los jobs se omiten.
@@ -55,7 +59,7 @@ jobs:
         working-directory: infra/platform
         run: |
           terraform init -input=false $BACKEND_CONFIG -backend-config=key=dev/platform.tfstate
-          terraform apply -input=false -auto-approve -var-file=../envs/dev/platform.tfvars
+          terraform apply -input=false -auto-approve -var-file=../envs/dev/nube.tfvars
         env:
           TF_VAR_langsmith_api_key: ${{ secrets.LANGSMITH_API_KEY }}
       - id: out
@@ -113,7 +117,8 @@ jobs:
             -var="backend_image=${REGISTRY}/backend:${GITHUB_SHA}" \
             -var="web_image=${REGISTRY}/web:${GITHUB_SHA}" \
             -var="app_version=${GITHUB_SHA}" \
-            -var='platform_state={resource_group_name="${{ vars.TFSTATE_RG }}",storage_account_name="${{ vars.TFSTATE_ACCOUNT }}",container_name="${{ vars.TFSTATE_CONTAINER }}",key="dev/platform.tfstate"}'
+            -var='platform_state={resource_group_name="${{ vars.TFSTATE_RG }}",storage_account_name="${{ vars.TFSTATE_ACCOUNT }}",container_name="${{ vars.TFSTATE_CONTAINER }}",key="dev/platform.tfstate"}' \
+            -var='identidad_state={resource_group_name="${{ vars.TFSTATE_RG }}",storage_account_name="${{ vars.TFSTATE_ACCOUNT }}",container_name="${{ vars.TFSTATE_CONTAINER }}",key="dev/identidad.tfstate"}'
           echo "### Web: $(terraform output -raw web_url)" >> "$GITHUB_STEP_SUMMARY"
       - uses: azure/login@v3
         if: ${{ inputs.run_ingest }}

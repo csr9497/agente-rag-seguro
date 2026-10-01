@@ -9,8 +9,27 @@ data "terraform_remote_state" "platform" {
   }
 }
 
+# Identidad de la app en Entra ID (stack identidad, aplicado con tu sesión por make desplegar).
+data "terraform_remote_state" "identidad" {
+  backend = "azurerm"
+  config = {
+    resource_group_name  = var.identidad_state.resource_group_name
+    storage_account_name = var.identidad_state.storage_account_name
+    container_name       = var.identidad_state.container_name
+    key                  = var.identidad_state.key
+    use_azuread_auth     = true
+  }
+}
+
+# Secreto compartido nginx → backend: solo el proxy puede presentar una identidad de Easy Auth.
+resource "random_password" "proxy" {
+  length  = 48
+  special = false
+}
+
 locals {
-  p = data.terraform_remote_state.platform.outputs
+  p  = data.terraform_remote_state.platform.outputs
+  id = data.terraform_remote_state.identidad.outputs
 
   qdrant_efimero = local.p.vector_store == "qdrant" && local.p.qdrant_modo == "container_efimero"
   qdrant_url = (
@@ -53,11 +72,10 @@ locals {
     # Sin Entra ID todavía: ni selección libre de rol ni gestión de documentos en Azure.
     SELECCION_LIBRE_DE_ROL = "false"
     GESTION_DOCUMENTOS     = "false"
-    # Entra ID obligatorio: la API exige token (roles = app roles de Entra). Con ENTORNO=prod
-    # la app no arranca sin él (app/config.py: validar_seguridad).
-    AUTH_MODO       = "entra"
-    ENTRA_TENANT_ID = var.entra_tenant_id
-    ENTRA_AUDIENCIA = var.entra_audiencia
+    # Login obligatorio: Easy Auth (Entra ID) en la web; el backend toma la identidad del
+    # principal que reenvía nginx con PROXY_SECRETO. Con ENTORNO=prod la app no arranca sin
+    # ello (app/config.py: validar_seguridad).
+    AUTH_MODO = "easyauth"
   }
 }
 
@@ -68,8 +86,8 @@ resource "terraform_data" "validaciones" {
       error_message = "El stack apps requiere que platform se haya desplegado con alcance=completo."
     }
     precondition {
-      condition     = var.entra_tenant_id != "" && var.entra_audiencia != ""
-      error_message = "La web es pública: define entra_tenant_id y entra_audiencia (app registration de Entra ID)."
+      condition     = local.id.client_id != "" && local.id.tenant_id != ""
+      error_message = "La web es pública: aplica antes el stack identidad (make desplegar lo hace)."
     }
   }
 }
@@ -100,6 +118,11 @@ resource "azurerm_container_app" "backend" {
       key_vault_secret_id = "${local.p.key_vault_uri}secrets/${secret.key}"
       identity            = local.p.backend_identity_id
     }
+  }
+
+  secret {
+    name  = "proxy-secreto"
+    value = random_password.proxy.result
   }
 
   # Solo accesible desde dentro del entorno (la web hace de proxy).
@@ -144,6 +167,11 @@ resource "azurerm_container_app" "backend" {
         }
       }
 
+      env {
+        name        = "PROXY_SECRETO"
+        secret_name = "proxy-secreto"
+      }
+
       liveness_probe {
         transport = "HTTP"
         path      = "/health"
@@ -179,6 +207,18 @@ resource "azurerm_container_app" "web" {
     identity = local.p.web_identity_id
   }
 
+  secret {
+    name  = "proxy-secreto"
+    value = random_password.proxy.result
+  }
+
+  # Secreto del cliente de Entra ID para Easy Auth (nombre fijo que espera authConfigs).
+  secret {
+    name                = "microsoft-provider-authentication-secret"
+    key_vault_secret_id = "${local.p.key_vault_uri}secrets/${local.id.secreto_key_vault}"
+    identity            = local.p.web_identity_id
+  }
+
   ingress {
     external_enabled = true
     target_port      = 8080
@@ -204,10 +244,50 @@ resource "azurerm_container_app" "web" {
         value = "https://${azurerm_container_app.backend.ingress[0].fqdn}"
       }
 
+      env {
+        name        = "PROXY_SECRETO"
+        secret_name = "proxy-secreto"
+      }
+
       liveness_probe {
         transport = "HTTP"
         path      = "/healthz"
         port      = 8080
+      }
+    }
+  }
+}
+
+# Login obligatorio en la web (Easy Auth de Container Apps con Entra ID). Sin sesión, redirige
+# al login; solo entran usuarios con algún rol asignado (app_role_assignment_required).
+resource "azapi_resource" "web_auth" {
+  type      = "Microsoft.App/containerApps/authConfigs@2024-03-01"
+  name      = "current"
+  parent_id = azurerm_container_app.web.id
+
+  body = {
+    properties = {
+      platform = { enabled = true }
+      globalValidation = {
+        unauthenticatedClientAction = "RedirectToLoginPage"
+        redirectToProvider          = "azureactivedirectory"
+        excludedPaths               = ["/healthz"]
+      }
+      identityProviders = {
+        azureActiveDirectory = {
+          enabled = true
+          registration = {
+            clientId                = local.id.client_id
+            clientSecretSettingName = "microsoft-provider-authentication-secret"
+            openIdIssuer            = "https://login.microsoftonline.com/${local.id.tenant_id}/v2.0"
+          }
+          validation = {
+            allowedAudiences = [local.id.client_id, "api://${local.id.client_id}"]
+          }
+        }
+      }
+      login = {
+        preserveUrlFragmentsForLogins = false
       }
     }
   }
@@ -248,9 +328,19 @@ resource "azurerm_container_app" "qdrant" {
   }
 }
 
-# ---------------------------------------------------------------- job de ingesta (manual)
+# ---------------------------------------------------------------- jobs de ingesta (manuales)
+# ingest: reindexa desde Blob (originales con sus roles en metadatos).
+# sembrar: carga los documentos de ejemplo de la imagen (registro + Blob + índice); idempotente.
+locals {
+  jobs = {
+    ingest  = ["python", "-m", "ingestor.ingest", "--source", "blob"]
+    sembrar = ["python", "-m", "ingestor.ingest", "--source", "local", "--path", "ingestor/sample_docs"]
+  }
+}
+
 resource "azurerm_container_app_job" "ingest" {
-  name                         = "caj-ingest-${local.p.name}"
+  for_each                     = local.jobs
+  name                         = "caj-${each.key}-${local.p.name}"
   location                     = local.p.location
   resource_group_name          = local.p.resource_group_name
   container_app_environment_id = local.p.container_app_environment_id
@@ -285,11 +375,11 @@ resource "azurerm_container_app_job" "ingest" {
 
   template {
     container {
-      name    = "ingest"
+      name    = each.key
       image   = var.backend_image
       cpu     = 0.5
       memory  = "1Gi"
-      command = ["python", "-m", "ingestor.ingest", "--source", "blob"]
+      command = each.value
 
       dynamic "env" {
         for_each = merge(local.common_env, { AZURE_CLIENT_ID = local.p.ingest_identity_client_id })

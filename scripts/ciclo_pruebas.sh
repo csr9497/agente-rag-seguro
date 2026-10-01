@@ -16,6 +16,7 @@ cd "$(dirname "$0")/.."
 
 export ARM_SUBSCRIPTION_ID="${ARM_SUBSCRIPTION_ID:-$(az account show --query id -o tsv)}"
 TFVARS="../envs/dev/platform.tfvars"
+source scripts/comun.sh
 PUERTO="${PUERTO:-8010}"
 PAUSA="${PAUSA:-2}" # segundos entre escenarios (cuota TPM baja)
 CICLO_FILE=reports/ciclos/.actual
@@ -37,6 +38,7 @@ entorno_app() {
 }
 
 prender() {
+  proteger_nube
   paso "prender: terraform apply"
   terraform -chdir=infra/platform apply -input=false -auto-approve -var-file="$TFVARS" \
     > "$RUN/terraform-apply.log" 2>&1
@@ -108,6 +110,7 @@ EOF
 apagar() {
   paso "apagar: app"
   [[ -f "$RUN/app.pid" ]] && kill "$(cat "$RUN/app.pid")" 2>/dev/null || true
+  proteger_nube
   paso "apagar: terraform destroy"
   terraform -chdir=infra/platform destroy -input=false -auto-approve -var-file="$TFVARS" \
     > "$RUN/terraform-destroy.log" 2>&1

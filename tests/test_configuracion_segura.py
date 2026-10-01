@@ -102,13 +102,19 @@ def test_umbral_de_cache_estricto_para_ada() -> None:
 ENTRA = {"auth_modo": "entra", "entra_tenant_id": "t", "entra_audiencia": "api://x"}
 
 
+EASYAUTH = {"auth_modo": "easyauth", "proxy_secreto": "x" * 48}
+
+
 @pytest.mark.parametrize(
     "kw",
     [
         {},  # stub por defecto: la web es pública y todos serían «anonimo»
         {"auth_modo": "entra"},  # sin tenant ni audiencia
+        {"auth_modo": "easyauth"},  # sin secreto de proxy
+        {"auth_modo": "easyauth", "proxy_secreto": "corto"},
         {**ENTRA, "identidad_debug": True},
         {**ENTRA, "seleccion_libre_de_rol": True},
+        {**EASYAUTH, "identidad_debug": True},
     ],
 )
 def test_prod_falla_cerrada(kw) -> None:
@@ -118,10 +124,14 @@ def test_prod_falla_cerrada(kw) -> None:
 
 def test_prod_con_entra_y_local_sin_restricciones() -> None:
     validar_seguridad(Settings(entorno="prod", **ENTRA))
+    validar_seguridad(Settings(entorno="prod", **EASYAUTH))
     validar_seguridad(Settings(entorno="local", identidad_debug=True, seleccion_libre_de_rol=True))
 
 
-def test_terraform_exige_entra_id() -> None:
-    contenido = (RAIZ / "infra" / "apps" / "main.tf").read_text(encoding="utf-8")
-    assert re.search(r'AUTH_MODO\s*=\s*"entra"', contenido)
-    assert 'var.entra_audiencia != ""' in contenido  # precondición
+def test_terraform_exige_login() -> None:
+    """La web pública siempre con Easy Auth (Entra ID) y el backend en modo easyauth."""
+    apps = (RAIZ / "infra" / "apps" / "main.tf").read_text(encoding="utf-8")
+    assert re.search(r'AUTH_MODO\s*=\s*"easyauth"', apps)
+    assert '"RedirectToLoginPage"' in apps and "Microsoft.App/containerApps/authConfigs" in apps
+    identidad = (RAIZ / "infra" / "identidad" / "main.tf").read_text(encoding="utf-8")
+    assert "app_role_assignment_required = true" in identidad  # solo usuarios con rol

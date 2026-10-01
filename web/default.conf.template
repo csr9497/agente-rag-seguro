@@ -1,4 +1,4 @@
-# BACKEND_URL lo inyecta el entrypoint de nginx (envsubst) al arrancar.
+# BACKEND_URL y PROXY_SECRETO los inyecta el entrypoint de nginx (envsubst) al arrancar.
 # Token de Easy Auth → Authorization para el backend (vacío si no hay: el backend decide).
 map $http_x_ms_token_aad_id_token $autorizacion_backend {
     ""      $http_authorization;
@@ -21,6 +21,9 @@ server {
         proxy_set_header X-Usuario-Grupos "";
         # Easy Auth (Container Apps) inyecta el id token; el backend lo valida (firma incluida).
         proxy_set_header Authorization $autorizacion_backend;
+        # AUTH_MODO=easyauth: X-MS-CLIENT-PRINCIPAL lo pone Easy Auth (sobrescribe el del
+        # cliente) y el secreto prueba al backend que la petición viene de este proxy.
+        proxy_set_header X-Proxy-Secreto "${PROXY_SECRETO}";
         proxy_ssl_server_name on;
         proxy_read_timeout 300s;
         client_max_body_size 2m;
@@ -33,6 +36,9 @@ server {
         proxy_set_header X-Usuario-Grupos "";
         # Easy Auth (Container Apps) inyecta el id token; el backend lo valida (firma incluida).
         proxy_set_header Authorization $autorizacion_backend;
+        # AUTH_MODO=easyauth: X-MS-CLIENT-PRINCIPAL lo pone Easy Auth (sobrescribe el del
+        # cliente) y el secreto prueba al backend que la petición viene de este proxy.
+        proxy_set_header X-Proxy-Secreto "${PROXY_SECRETO}";
         proxy_ssl_server_name on;
         proxy_read_timeout 120s;
         client_max_body_size 16k;

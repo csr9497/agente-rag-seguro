@@ -1,7 +1,7 @@
 CONDA_ENV ?= agente-rag
 BASE_URL  ?= http://localhost:8000
 
-.PHONY: help setup sync lint fmt test test-postgres integration matriz evals evals-simulado evals-langsmith up down ingest studio env-from-azure tf-validate validar-infra verificar-modelos ciclo modelos-up modelos-down instalar levantar apagar accesos
+.PHONY: help setup sync lint fmt test test-postgres integration matriz evals evals-simulado evals-langsmith up down ingest studio env-from-azure tf-validate validar-infra verificar-modelos desplegar estado-nube destruir-nube ciclo modelos-up modelos-down instalar levantar apagar accesos
 
 help: ## Lista los comandos
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-16s %s\n", $$1, $$2}'
@@ -79,6 +79,15 @@ accesos: ## Estado de cada servicio y sus URLs (app, API, Studio, LangSmith)
 modelos-up: levantar ## Alias de levantar
 modelos-down: apagar ## Alias de apagar
 
+desplegar: ## Despliega todo en Azure (web pública con login de Entra ID) y muestra la URL
+	./scripts/nube.sh desplegar
+
+estado-nube: ## URL y salud del despliegue en Azure
+	./scripts/nube.sh estado
+
+destruir-nube: ## Elimina todo lo desplegado en Azure (pide confirmación)
+	./scripts/nube.sh destruir
+
 validar-infra: ## Comprueba cada servicio desplegado (informe en reports/infra/)
 	uv run python scripts/validar_infra.py
 
@@ -87,5 +96,5 @@ ciclo: ## Ciclo contra Azure: PASO=prender|probar|guardar|apagar|informe|todo
 
 tf-validate: ## fmt + validate de los stacks de Terraform
 	terraform fmt -check -recursive infra
-	for s in platform apps; do terraform -chdir=infra/$$s init -backend=false -input=false >/dev/null && terraform -chdir=infra/$$s validate; done
+	for s in platform identidad apps; do terraform -chdir=infra/$$s init -backend=false -input=false >/dev/null && terraform -chdir=infra/$$s validate; done
 	terraform -chdir=infra/platform test

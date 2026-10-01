@@ -36,12 +36,15 @@ locals {
       backend_openai = { scope = module.openai.id, role = "Cognitive Services OpenAI User", principal = local.backend }
       backend_kv     = { scope = module.keyvault[0].id, role = "Key Vault Secrets User", principal = local.backend }
       # El backend también indexa (subida desde la UI): escribe blobs e índice.
-      backend_blob  = { scope = module.storage[0].id, role = "Storage Blob Data Contributor", principal = local.backend }
-      web_acr       = { scope = module.registry[0].id, role = "AcrPull", principal = local.web }
+      backend_blob = { scope = module.storage[0].id, role = "Storage Blob Data Contributor", principal = local.backend }
+      web_acr      = { scope = module.registry[0].id, role = "AcrPull", principal = local.web }
+      # Secreto del login (Easy Auth): lo escribe el stack identidad en Key Vault.
+      web_kv        = { scope = module.keyvault[0].id, role = "Key Vault Secrets User", principal = local.web }
       ingest_acr    = { scope = module.registry[0].id, role = "AcrPull", principal = local.ingest }
       ingest_openai = { scope = module.openai.id, role = "Cognitive Services OpenAI User", principal = local.ingest }
-      ingest_blob   = { scope = module.storage[0].id, role = "Storage Blob Data Reader", principal = local.ingest }
-      ingest_kv     = { scope = module.keyvault[0].id, role = "Key Vault Secrets User", principal = local.ingest }
+      # Contributor: la siembra de documentos de ejemplo guarda los originales en Blob.
+      ingest_blob = { scope = module.storage[0].id, role = "Storage Blob Data Contributor", principal = local.ingest }
+      ingest_kv   = { scope = module.keyvault[0].id, role = "Key Vault Secrets User", principal = local.ingest }
     },
     var.content_safety ? {
       backend_cs = { scope = module.content_safety[0].id, role = "Cognitive Services User", principal = local.backend }

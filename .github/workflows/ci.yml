@@ -93,7 +93,7 @@ jobs:
       - run: terraform fmt -check -recursive infra
       - name: validate
         run: |
-          for stack in platform apps; do
+          for stack in platform identidad apps; do
             terraform -chdir=infra/$stack init -backend=false -input=false
             terraform -chdir=infra/$stack validate
           done

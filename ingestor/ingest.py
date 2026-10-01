@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 from app.config import get_settings
-from app.deps import build_embedder, build_retriever
+from app.deps import build_servicios
 from app.retrieval.base import Embedder, Retriever
 from ingestor.gestor import GestorDocumentos, InformeIngesta
 from ingestor.sources import BlobSource, LocalFolderSource, Source
@@ -25,6 +25,7 @@ logger = logging.getLogger("ingestor")
 def ingestar(
     source: Source, embedder: Embedder, retriever: Retriever, borrar_huerfanos: bool = False
 ) -> InformeIngesta:
+    """Solo índice (tests y herramientas). La app exige además el registro: ver main()."""
     return GestorDocumentos(embedder, retriever).sincronizar(source, borrar_huerfanos)
 
 
@@ -46,9 +47,10 @@ def main() -> None:
         if args.source == "local"
         else BlobSource(settings.azure_storage_account_url, settings.azure_storage_container)
     )
-    informe = ingestar(
-        source, build_embedder(settings), build_retriever(settings), args.borrar_huerfanos
-    )
+    # Con el registro (fuente de verdad de permisos) y el almacén de originales, igual que una
+    # subida desde la API: sin registro, access_guardrail descartaría los fragmentos.
+    gestor = build_servicios(settings).gestor
+    informe = gestor.sincronizar(source, args.borrar_huerfanos)
     logger.info("Ingesta completada: %d chunks, %s", informe.chunks, informe.por_estado())
     if informe.rechazados:
         sys.exit(1)
