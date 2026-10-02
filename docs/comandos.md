@@ -8,9 +8,10 @@ línea de comandos** (`make evals BASE_URL=…`). `make help` los lista.
 
 | Objetivo | Comandos |
 |---|---|
-| Primer uso tras clonar | `make install` → `make check-models` |
-| Probar todo en mi equipo | `make up` → (probar) → `make down` |
-| Publicar en Azure | `make deploy` → (probar) → `make cloud-destroy` |
+| Primer uso tras clonar | `make install` → (en `.env`: proveedor y clave) → `make check-models` |
+| Probar todo en mi equipo con OpenAI | `MODELOS_PROVEEDOR=openai` y `OPENAI_API_KEY` en `.env` → `make up` → (probar) → `make down` |
+| Probar todo en mi equipo con Azure OpenAI | `az login` → `make bootstrap` (una vez) → `make up` → (probar) → `make down` |
+| Publicar en Azure | `az login` → `make bootstrap` (una vez) → `make deploy` → (probar) → `make cloud-destroy` |
 | Mi equipo contra lo publicado en Azure | lo deja arrancado `make deploy` (rearrancar: `make cloud-local`) |
 | Ver qué está en marcha | `make status` (local) · `make cloud-status` (Azure) |
 | Subir los prompts a LangSmith | `make prompts` (también lo hacen `up`, `studio`, `deploy`) |
@@ -103,6 +104,16 @@ app usa la versión de `PROMPTS_ORIGEN`/`PROMPTS_ETIQUETA` (al arrancar).
 
 Requisitos: suscripción activa, `az login` (Owner o Contributor + User Access
 Administrator), Terraform ≥ 1.9 y Docker con buildx. Detalle: [despliegue.md](despliegue.md).
+
+### `make bootstrap`
+Paso 0, una vez por suscripción: crea el estado remoto de Terraform (`rg-ragseg-tfstate`) y
+escribe `infra/envs/dev/backend.hcl`. Lo necesitan `make up` con Azure y `make deploy`.
+
+| Valor | Dónde | Efecto |
+|---|---|---|
+| *(nada)* | — | Solo el estado remoto: desplegar desde tu equipo |
+| `GITHUB_REPO=owner/repo` | línea de comandos | Además, identidad de despliegue con OIDC y variables del environment en GitHub (CI/CD) |
+| `SUBSCRIPTION_ID` | entorno | Por defecto, la de `az account show` |
 
 ### `make deploy`
 Infraestructura → imágenes `linux/amd64` → prompts en LangSmith (`dev` y `prod`) → apps →

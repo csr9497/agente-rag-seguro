@@ -4,13 +4,24 @@ La aplicación se publica en Azure Container Apps con **login obligatorio** (Eas
 defecto se inicia sesión con **GitHub**: no hace falta registrar aplicaciones en Entra ID (en
 tenants universitarios los estudiantes no pueden). Los roles se asignan desde la propia app.
 
-## Desde tu equipo (lo más rápido)
+## Desde tu equipo (lo más rápido, sin GitHub)
 
 Con `az login`, Terraform y Docker:
 
 ```bash
-make deploy      # make cloud-status · make cloud-destroy
+make bootstrap   # paso 0, una sola vez por suscripción (ver abajo)
+make deploy      # crea todo y muestra la URL · make cloud-status · make cloud-destroy
 ```
+
+**Paso 0 (`make bootstrap`)**: crea en tu suscripción el almacén del estado de Terraform
+(grupo `rg-ragseg-tfstate`, una cuenta de almacenamiento sin claves) y escribe
+[infra/envs/dev/backend.hcl](../infra/envs/dev/backend.hcl) apuntando a él. Requiere Owner en
+la suscripción (asigna roles). Es idempotente. Si clonas el repo de otra persona,
+`backend.hcl` apunta a su estado: `make deploy` lo detecta y te pide ejecutar `make bootstrap`.
+No lo borres mientras tengas algo desplegado: es donde Terraform sabe qué existe.
+
+Los modelos en la nube son siempre **Azure OpenAI** (los crea Terraform). OpenAI con clave
+directa se usa en local (camino A del [README](../README.md#a-local-con-openai)).
 
 Sin más configuración se despliega en **modo prueba**: la web solo es accesible desde tu IP
 pública (el resto de Internet recibe 403), sin login y con todos los roles, como en local.
@@ -68,8 +79,9 @@ cualquier `rg-ragseg-<entorno>` que siga encendido, su estado y lo que quede en 
 
 ### Configuración (una vez)
 
-1. **Identidad y estado**: `infra/bootstrap/bootstrap.sh` (responde `s` para crear las
-   variables del environment `dev`). Crea las credenciales federadas de los environments
+1. **Identidad y estado**: `make bootstrap GITHUB_REPO=<owner>/<repo>` (responde `s` para
+   crear las variables del environment `dev`). Con `GITHUB_REPO`, además del estado remoto crea
+   la identidad de despliegue (Managed Identity con OIDC, sin secretos) y sus roles. Crea las credenciales federadas de los environments
    `dev`, `staging` y `main` con los dos formatos de sujeto que usa GitHub: `repo:<owner>/<repo>:…`
    y, en repositorios nuevos, el de ids inmutables `repo:<owner>@<id>/<repo>@<id>:…`. Si
    `azure/login` falla con **AADSTS700213**, el error muestra el sujeto que GitHub envió;

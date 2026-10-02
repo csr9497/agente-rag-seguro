@@ -29,12 +29,12 @@ si algo falla.
    az account show --query "{nombre:name, estado:state}"
    ```
 3. **Permisos**: para crear los recursos con Terraform, Contributor + User Access
-   Administrator en la suscripción (o el bootstrap: [infra/bootstrap](../infra/bootstrap/bootstrap.sh)).
+   Administrator en la suscripción (`make bootstrap` asigna lo necesario: [infra/bootstrap](../infra/bootstrap/bootstrap.sh)).
    Para usar los modelos sin clave, tu usuario necesita el rol **Cognitive Services OpenAI
    User** sobre el recurso (Terraform lo asigna al usuario de `az login`).
 4. **Cuota** del modelo en la región (gpt-4o Standard en eastus2 en la suscripción actual;
    ver [infra/envs/dev](../infra/envs/dev)).
-5. **Terraform** ≥ 1.9 y el estado remoto (bootstrap, una sola vez).
+5. **Terraform** ≥ 1.9 y el estado remoto (`make bootstrap`, una sola vez por suscripción).
 
 ### Uso
 
