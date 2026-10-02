@@ -48,6 +48,9 @@ _CAMPOS_DATOS = {
     "aclaracion",
     "consultas",
     "acciones",
+    "aprobaciones",
+    "thread_id",
+    "agentes",
 }
 
 
@@ -85,6 +88,7 @@ class RepositorioConversaciones(Protocol):
     def agregar_mensaje(
         self, conversacion_id: str, mensaje: MensajeGuardado
     ) -> MensajeGuardado: ...
+    def actualizar_mensaje(self, mensaje: MensajeGuardado) -> MensajeGuardado: ...
     def registrar_feedback(
         self, conversacion_id: str, mensaje_id: int, feedback: Feedback
     ) -> MensajeGuardado | None: ...
@@ -521,6 +525,22 @@ class SqlRepositorioConversaciones:
                 )
             )
         return mensaje.model_copy(update={"id": resultado.inserted_primary_key[0]})
+
+    def actualizar_mensaje(self, mensaje: MensajeGuardado) -> MensajeGuardado:
+        """Tras resolver una aprobación: la respuesta final y las pausas que queden."""
+        if mensaje.id is None:
+            raise ValueError("Mensaje sin id")
+        with self._motor.begin() as c:
+            c.execute(
+                update(t.mensajes)
+                .where(t.mensajes.c.id == mensaje.id)
+                .values(
+                    respuesta=mensaje.respuesta,
+                    sin_contexto=mensaje.sin_contexto,
+                    datos=mensaje.model_dump(mode="json", include=_CAMPOS_DATOS),
+                )  # fmt: skip
+            )
+        return mensaje
 
     def registrar_feedback(
         self, conversacion_id: str, mensaje_id: int, feedback: Feedback

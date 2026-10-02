@@ -76,6 +76,19 @@ def _orquestador(m, supervisor, agentes, sintesis=None, guardrail_entrada=None, 
     )  # fmt: skip
 
 
+class BuscarYResponder(GuionLLM):
+    """Agente que en cada tarea busca una vez y responde (para varios turnos seguidos)."""
+
+    def __init__(self, final: str) -> None:
+        super().__init__([], final=final)
+
+    def decidir(self, mensajes, herramientas, obligar_herramienta=False):  # noqa: ANN001, ANN201
+        ya_busco = any(m.get("role") == "tool" for m in mensajes)
+        self.turnos = [] if ya_busco else [[("search_documents", {"consulta": "v"})]]
+        self.llamadas = []
+        return super().decidir(mensajes, herramientas, obligar_herramienta)
+
+
 def _delegar(*pares):  # noqa: ANN002, ANN202
     return GuionLLM([[(f"delegar_{agente}", {"tarea": tarea}) for agente, tarea in pares]])
 
@@ -289,9 +302,7 @@ def test_modo_chat_con_messages_y_varios_turnos_en_el_mismo_hilo() -> None:
     from langchain_core.messages import AIMessage, HumanMessage
 
     m = Mundo()
-    rag = GuionLLM(
-        [[("search_documents", {"consulta": "v"})]] * 2, final="23 [public/vacaciones.md]."
-    )
+    rag = BuscarYResponder("23 [public/vacaciones.md].")
     sup = GuionLLM([[("delegar_rag_agent", {"tarea": "vacaciones"})]] * 2)
     o = _orquestador(m, sup, {"rag_agent": rag})
     cfg = o.config("chat")
@@ -385,3 +396,46 @@ def test_un_agente_id_only_da_un_mensaje_legible_con_la_referencia() -> None:
     r = o.consultar("No me pagaron las horas extra", ANA)
     r = o.decidir(r.thread_id, r.aprobaciones[0].interrupt_id, aprobado=True, aprobador=ANA.id)
     assert r.respuesta.respuesta == "He registrado tu solicitud con la referencia CASO-1."
+
+
+def test_mientras_una_parte_espera_se_muestra_lo_que_ya_respondieron_los_demas() -> None:
+    """Mensaje mixto: soporte responde y RR.HH. espera confirmación; el usuario ve ya la
+    respuesta de soporte (verificada) además de la tarjeta pendiente."""
+    m = Mundo()
+    rag = GuionLLM(
+        [[("search_documents", {"consulta": "v"})]], final="Son 23 días [public/vacaciones.md]."
+    )
+    rrhh = GuionLLM([[("create_hr_case", {"resumen": "Horas extra"})]], final="Caso.")
+    o = _orquestador(m, _delegar(("rag_agent", "vacaciones"), ("hr_agent", "horas extra")),
+                     {"rag_agent": rag, "hr_agent": rrhh})  # fmt: skip
+    r = o.consultar("vacaciones y horas extra", ANA)
+    assert r.aprobaciones and "Son 23 días [1]." in r.respuesta.respuesta
+    assert (
+        "Antes de seguir" in r.respuesta.respuesta
+        and r.respuesta.citas[0].doc_id == "public/vacaciones.md"
+    )
+
+
+def test_lo_provisional_tambien_pasa_las_comprobaciones() -> None:
+    m = Mundo()
+    rag = GuionLLM([[("search_documents", {"consulta": "v"})]], final="Ver [rrhh/secreto.md].")
+    rrhh = GuionLLM([[("create_hr_case", {"resumen": "Horas extra"})]], final="Caso.")
+    o = _orquestador(m, _delegar(("rag_agent", "v"), ("hr_agent", "h")),
+                     {"rag_agent": rag, "hr_agent": rrhh})  # fmt: skip
+    r = o.consultar("v y h", ANA)
+    assert "secreto" not in r.respuesta.respuesta and r.respuesta.respuesta.startswith(
+        "Antes de seguir"
+    )
+
+
+def test_el_verifier_rechaza_citas_numericas_escritas_por_el_modelo() -> None:
+    m = Mundo()
+    rag = GuionLLM([[("search_documents", {"consulta": "v"})]], final="23 [public/vacaciones.md].")
+    soporte = GuionLLM([], final="Reinicia el router.")
+    sintesis = FakeLLM(RespuestaLLM(respuesta="Son 23 días [1] y reinicia el router.",
+                                    citas_usadas=[], encontrado=True))  # fmt: skip
+    o = _orquestador(m, _delegar(("rag_agent", "v"), ("support_agent", "r")),
+                     {"rag_agent": rag, "support_agent": soporte}, sintesis=sintesis)  # fmt: skip
+    o.consultar("vacaciones y router", ANA)
+    assert len(sintesis.llamadas) > 1  # se pidió reescribir
+    assert "números de cita" in sintesis.llamadas[1][1]

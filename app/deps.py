@@ -14,7 +14,7 @@ from app.acciones.servicio import ServicioAcciones
 from app.agents.aprobaciones import SqlRepositorioAprobaciones
 from app.agents.hr import HerramientasHR, SqlRepositorioCasosRRHH, crear_hr_agent
 from app.agents.orquestador import Orquestador
-from app.agents.rag import HerramientasRag, crear_rag_agent
+from app.agents.rag import HerramientasRag, adaptar_lectura, crear_rag_agent
 from app.agents.registry import RegistroAgentes
 from app.agents.subgraph import AuditoriaSql
 from app.agents.support import HerramientasSoporte, SqlRepositorioTickets, crear_support_agent
@@ -279,7 +279,18 @@ def build_registro_agentes(servicios: Servicios) -> RegistroAgentes:
         servicios.solicitudes,
         top_k=servicios.settings.retrieval_top_k, min_score=servicios.settings.min_score,
     )  # fmt: skip
-    registro.register(crear_rag_agent(rag))
+    verificador = VerificadorRegistro(servicios.registro, permisos_por_consulta())
+    top_k = servicios.settings.retrieval_top_k
+    lectura = {
+        h.nombre: adaptar_lectura(h, verificador, servicios.registro, top_k)
+        for h in (
+            DataQuery(servicios.motor),
+            ListarDocumentos(servicios.retriever, servicios.registro),
+            LeerDocumento(servicios.retriever),
+            BuscarEnDocumento(servicios.embedder, servicios.retriever),
+        )
+    }
+    registro.register(crear_rag_agent(rag, lectura))
     # Casos de RR.HH. solo con RLS (PostgreSQL): sin ella, el agente no existe (fallo cerrado).
     if servicios.motor.dialect.name == "postgresql":
         casos = SqlRepositorioCasosRRHH(servicios.motor)

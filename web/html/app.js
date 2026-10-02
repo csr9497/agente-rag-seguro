@@ -28,6 +28,7 @@ const estado = {
   historial: [],       // mis conversaciones con el rol activo (resúmenes)
   aviso: null,         // aviso en el chat { tipo, titulo, texto } (sustituye a alert())
   errorCarga: null,    // no se pudieron cargar los roles
+  aprobaciones: [],    // cola de aprobaciones que puedo resolver (multiagente)
   yo: null,            // { id, roles }: identidad de la sesión (para pedir acceso)
   asignaciones: [],    // roles asignados a personas (solo administrador)
 };
@@ -128,6 +129,7 @@ async function cargarDatosDelRol() {
     admin ? api("roles/todos") : Promise.resolve({ ok: false }),
     admin ? api("roles/asignaciones") : Promise.resolve({ ok: false }),
     cargarHistorial(),
+    cargarAprobaciones(), // al final: el resultado se desestructura por posición
   ]);
   estado.docs = docs.ok ? docs.cuerpo : [];
   estado.todos = todos.ok ? todos.cuerpo : [];
@@ -336,6 +338,85 @@ async function decidir(m, a, aprobar) {
   pintarChat();
 }
 
+// ------------------------------------------------------------ aprobaciones (multiagente)
+const ETIQUETA_TOOL = {
+  create_ticket: "Crear ticket de soporte",
+  add_ticket_comment: "Comentar tu ticket",
+  create_hr_case: "Crear caso para RR.HH.",
+  add_hr_case_note: "Añadir información a tu caso",
+  request_document_access: "Solicitar acceso a un documento",
+  escalate_human: "Revisión por una persona",
+};
+const CAMPO = { category: "Categoría", priority: "Prioridad", title: "Título", steps: "Detalle",
+  summary: "Resumen", titulo: "Documento", motivo: "Motivo", comment: "Comentario", note: "Nota" };
+
+function detalleAprobacion(textoJson) {
+  let datos;
+  try { datos = JSON.parse(textoJson); } catch { return el("p", { class: "hint" }, textoJson); }
+  if (!datos || typeof datos !== "object") return null;
+  return el("dl", {}, Object.entries(datos).flatMap(([k, v]) => [el("dt", {}, CAMPO[k] || k), el("dd", {}, String(v))]));
+}
+
+function tarjetasAprobacion(m) {
+  return el("div", { class: "acciones" }, m.aprobaciones.map((p) => {
+    const titulo = ETIQUETA_TOOL[p.tool] || p.tool;
+    const [clase, insignia, nota] = p.type === "confirm_user"
+      ? ["warn", "Pendiente de tu confirmación", "Nada se ejecuta hasta que lo confirmes."]
+      : p.type === "approve_staff"
+        ? ["info", "Pendiente de Soporte IT", "La aprobará una persona de Soporte IT (no puedes aprobarla tú)."]
+        : ["info", "Escalada a una persona", "Una persona del equipo revisará tu consulta y te responderá aquí."];
+    const tarjeta = el("div", { class: `accion ${clase}`, role: "group", "aria-label": titulo },
+      el("div", { class: "accion-head" }, el("strong", {}, titulo), el("span", { class: `badge ${clase}` }, insignia)),
+      p.type === "escalate_human" ? null : detalleAprobacion(p.args_preview));
+    if (p.type === "confirm_user" && p.aprobacion_id) {
+      const si = el("button", { class: "btn btn-primary", type: "button" }, icono("i-check"), "Confirmar");
+      const no = el("button", { class: "btn btn-secondary", type: "button" }, "Cancelar");
+      si.addEventListener("click", () => decidirAprobacion(m, p.aprobacion_id, true, [si, no]));
+      no.addEventListener("click", () => decidirAprobacion(m, p.aprobacion_id, false, [si, no]));
+      tarjeta.append(el("div", { class: "row" }, no, si));
+    }
+    tarjeta.append(el("p", { class: "hint" }, nota));
+    return tarjeta;
+  }));
+}
+
+async function decidirAprobacion(m, aprobacionId, aprobar, botones = []) {
+  botones.forEach((b) => { b.disabled = true; });
+  const r = await api(`aprobaciones/${encodeURIComponent(aprobacionId)}/decision`, { metodo: "POST", json: { aprobar } });
+  botones.forEach((b) => { b.disabled = false; });
+  if (!r.ok) { alert(mensajeError(r)); return; }
+  if (m && r.cuerpo.mensaje) {
+    const i = estado.conversacion.mensajes.findIndex((x) => x.id === m.id);
+    if (i >= 0) estado.conversacion.mensajes[i] = r.cuerpo.mensaje;
+    pintarChat();
+  }
+  await cargarAprobaciones();
+  pintarAprobaciones();
+}
+
+async function cargarAprobaciones() {
+  const r = await api("aprobaciones");
+  estado.aprobaciones = r.ok ? r.cuerpo : [];
+}
+
+// Cola de quien aprueba por rol (Soporte IT: P1; administrador: escalados). Las propias van
+// en el chat.
+function pintarAprobaciones() {
+  const ajenas = estado.aprobaciones.filter((a) => !a.propia);
+  $("aprob-panel").hidden = !estado.rol || !ajenas.length;
+  $("aprob-list").replaceChildren(...ajenas.map((a) => {
+    const aprobar = el("button", { class: "btn btn-primary", type: "button" }, icono("i-check"), "Aprobar");
+    const rechazar = el("button", { class: "btn btn-secondary", type: "button" }, "Rechazar");
+    aprobar.addEventListener("click", () => decidirAprobacion(null, a.id, true, [aprobar, rechazar]));
+    rechazar.addEventListener("click", () => decidirAprobacion(null, a.id, false, [aprobar, rechazar]));
+    return el("li", { class: "accion info" },
+      el("div", { class: "accion-head" }, el("strong", {}, ETIQUETA_TOOL[a.accion] || a.accion),
+        el("span", { class: "badge info" }, a.riesgo === "alto" ? "Prioridad alta" : "Pendiente")),
+      el("p", { class: "hint" }, `Lo pide ${a.solicitante} · vence ${hora(a.vence)}`),
+      detalleAprobacion(a.detalle), el("div", { class: "row" }, rechazar, aprobar));
+  }));
+}
+
 // Aviso cuando se ocultaron datos personales o sensibles de la pregunta (no se guardaron).
 function avisoOcultados(m) {
   const tipos = new Set(m.hallazgos.filter((h) => h.accion === "enmascarar" && ["pii", "dato_sensible"].includes(h.tipo)).map((h) => h.tipo));
@@ -356,6 +437,11 @@ function pintarRespuesta(m, i) {
   if (bloqueo) {
     const motivo = MOTIVO_BLOQUEO[bloqueo.tipo] || "La consulta infringe la política de uso";
     return notice("warn", "i-ban", "Consulta bloqueada por la política de uso", `${motivo}. No se ha consultado ningún documento.`);
+  }
+  if (m.aprobaciones && m.aprobaciones.length) {
+    return el("article", { class: "msg-bot" },
+      el("div", { class: "msg-meta" }, `Asistente · ${hora(m.creado_en)}`),
+      el("p", { class: "answer" }, m.respuesta), tarjetasAprobacion(m));
   }
   if (m.acciones && m.acciones.length && m.sin_contexto) {
     return el("article", { class: "msg-bot" },
@@ -519,6 +605,7 @@ async function preguntar(texto) {
       estado.pendiente = null;
       $("pregunta").value = "";
       cargarHistorial().then(pintarHistorial);
+      cargarAprobaciones().then(pintarAprobaciones);
     } else if (r.status === 404) {
       salirDelRol();
       estado.aviso = { tipo: "danger", titulo: "La conversación ya no está disponible",
@@ -802,7 +889,7 @@ async function crearRol(ev) {
 }
 
 // ------------------------------------------------------------------ eventos
-function pintarTodo() { pintarCabecera(); pintarChat(); pintarHistorial(); pintarDocumentos(); pintarRoles(); }
+function pintarTodo() { pintarCabecera(); pintarChat(); pintarAprobaciones(); pintarHistorial(); pintarDocumentos(); pintarRoles(); }
 
 $("composer").addEventListener("submit", (ev) => {
   ev.preventDefault();

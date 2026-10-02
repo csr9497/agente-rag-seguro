@@ -96,6 +96,8 @@ class Settings(BaseSettings):
     # Departamento(s) de cada persona al arrancar (DEPARTAMENTOS_INICIALES, JSON): dan acceso a
     # los documentos internos de ese departamento. Solo añade; los inexistentes se ignoran.
     departamentos_iniciales: dict[str, list[str]] = {}
+    # Orquestador multiagente en la API (fase 5). False vuelve al grafo anterior sin desplegar.
+    multiagente: bool = True
     # Clave AES (hex, 32 bytes) del checkpointer cifrado (app/agents/checkpointer.py).
     checkpoint_clave: SecretStr | None = None
     entra_tenant_id: str = ""

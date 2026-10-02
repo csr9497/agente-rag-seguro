@@ -6,20 +6,20 @@ revocado, expira_en, ACL y hash) dentro de la propia tool, antes de que el LLM l
 este agente no necesita el nodo access_guardrail del grafo anterior.
 """
 
-from typing import Any
+from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.agents.registry import AgentSpec, ToolPolicy
 from app.agents.subgraph import ContextoTool
-from app.models.schemas import Chunk
+from app.models.schemas import Chunk, Usuario
 from app.persistencia.modelos import DocumentoRegistrado, SolicitudAcceso
 from app.persistencia.repositorios import RepositorioDocumentos, SqlRepositorioSolicitudesAcceso
 from app.prompts import local
 from app.retrieval.base import Embedder, Retriever
 from app.security.acceso import VerificadorAcceso
 from app.security.acl import clasificacion
-from app.tools.base import SIN_ACCESO, DocId
+from app.tools.base import SIN_ACCESO, DocId, ResultadoHerramienta
 
 RAG_PROMPT = local("rag_agent")
 
@@ -122,7 +122,57 @@ class HerramientasRag:
         return self._verificador.motivo_rechazo(sintetico, grupos) is None
 
 
-def crear_rag_agent(h: HerramientasRag) -> AgentSpec:
+class HerramientaDeLectura(Protocol):
+    """Las tools de solo lectura del grafo anterior (data_query, listar/leer/buscar en
+    documentos)."""
+
+    nombre: str
+    descripcion: str
+    args_model: type[BaseModel]
+
+    def ejecutar(self, args: Any, usuario: Usuario, top_k: int) -> ResultadoHerramienta: ...
+
+
+def adaptar_lectura(
+    herramienta: HerramientaDeLectura,
+    verificador: VerificadorAcceso,
+    registro: RepositorioDocumentos,
+    top_k: int = 4,
+) -> ToolPolicy:
+    """Una tool de lectura del grafo anterior como tool de rag_agent: actúa con los grupos
+    efectivos del usuario del token y cada fragmento pasa el re-chequeo contra el registro
+    (lo que antes hacía access_guardrail)."""
+
+    def ejecutar(args: Any, ctx: ContextoTool) -> dict[str, Any]:
+        usuario = Usuario(id=ctx.user.id, groups=list(ctx.user.acl))
+        resultado = herramienta.ejecutar(args, usuario, top_k)
+        fragmentos = []
+        for r in resultado.chunks:
+            if verificador.motivo_rechazo(r.chunk, usuario.groups) is not None:
+                continue
+            doc = _titulo_registrado(registro, r.chunk.doc_id)
+            fragmentos.append({
+                "n": len(fragmentos) + 1, "doc_id": r.chunk.doc_id,
+                "titulo": doc or r.chunk.fuente, "contenido": r.chunk.contenido,
+                "score": round(r.score, 3),
+            })  # fmt: skip
+        salida: dict[str, Any] = {"fragmentos": fragmentos}
+        if resultado.nota:
+            salida["nota"] = resultado.nota
+        return salida
+
+    return ToolPolicy(
+        ejecutar, herramienta.args_model, scope="docs:read", mode="auto",
+        description=herramienta.descripcion,
+    )  # fmt: skip
+
+
+def _titulo_registrado(registro: RepositorioDocumentos, doc_id: str) -> str | None:
+    doc = registro.obtener(doc_id) if "/" in doc_id else None
+    return doc.titulo if doc else None
+
+
+def crear_rag_agent(h: HerramientasRag, lectura: dict[str, ToolPolicy] | None = None) -> AgentSpec:
     return AgentSpec(
         name="rag_agent",
         description=(
@@ -144,5 +194,7 @@ def crear_rag_agent(h: HerramientasRag) -> AgentSpec:
                 mode="confirm_user", writes=True,
                 description="Pide acceso a un documento que el usuario no puede leer.",
             ),
+            # data_query, listar_documentos, leer_documento, buscar_en_documento.
+            **(lectura or {}),
         },
     )  # fmt: skip

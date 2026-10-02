@@ -6,14 +6,17 @@ la clave (32 bytes, en hex) vive en Key Vault / `.env` (CHECKPOINT_CLAVE), nunca
 Sin clave válida no se arranca: fallo cerrado.
 """
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from typing import Any
 
 import psycopg
+from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.checkpoint.serde.encrypted import EncryptedSerializer
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
 
 
 def clave_checkpointer(hexadecimal: str | None) -> bytes:
@@ -63,3 +66,19 @@ def checkpointer_postgres(url: str, clave: bytes) -> Iterator[PostgresSaver]:
         saver = PostgresSaver(conexion, serde=serializador_cifrado(clave))
         saver.setup()  # idempotente: crea sus tablas si faltan
         yield saver
+
+
+def crear_checkpointer(database_url: str, clave_hex: str | None) -> tuple[Any, Callable[[], None]]:
+    """(checkpointer, cerrar) de larga vida para la app. Con PostgreSQL: pool de conexiones y
+    estado cifrado; sin CHECKPOINT_CLAVE no se arranca (fallo cerrado). Sin PostgreSQL (tests,
+    demos sin Docker): en memoria."""
+    if not database_url.startswith("postgresql"):
+        return InMemorySaver(), lambda: None
+    clave = clave_checkpointer(clave_hex)
+    pool = ConnectionPool(
+        url_psycopg(database_url), max_size=10, open=True,
+        kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row},
+    )  # fmt: skip
+    saver = PostgresSaver(pool, serde=serializador_cifrado(clave))
+    saver.setup()
+    return saver, pool.close

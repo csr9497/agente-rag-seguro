@@ -1,3 +1,5 @@
+import asyncio
+import json
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -8,10 +10,12 @@ from azure.core.exceptions import AzureError
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
-from app.api import acciones, admin, conversaciones, documentos, roles
+from app.agents.aprobaciones import Aprobacion, SqlRepositorioAprobaciones
+from app.agents.checkpointer import crear_checkpointer
+from app.api import acciones, admin, aprobaciones, conversaciones, documentos, roles
 from app.api.dependencias import ServiciosDep
 from app.config import Settings, get_settings, validar_seguridad
-from app.deps import build_servicios
+from app.deps import build_orquestador, build_servicios
 from app.graph import topologia
 from app.graph.agente import Agente
 from app.modelos.errores import ModeloError, clasificar
@@ -39,7 +43,36 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.servicios = servicios
     app.state.agente = servicios.agente
     app.state.gestor = servicios.gestor
+    cerrar_checkpointer, tarea_vencimiento = lambda: None, None
+    if settings.multiagente:
+        clave = settings.checkpoint_clave.get_secret_value() if settings.checkpoint_clave else None
+        checkpointer, cerrar_checkpointer = crear_checkpointer(settings.database_url, clave)
+        aprobaciones = SqlRepositorioAprobaciones(servicios.motor, notificar=_aviso_vencida)
+        servicios.conversaciones.usar_orquestador(
+            build_orquestador(servicios, checkpointer), aprobaciones
+        )
+        tarea_vencimiento = asyncio.create_task(_vencer_periodicamente(aprobaciones))
     yield
+    if tarea_vencimiento is not None:
+        tarea_vencimiento.cancel()
+    cerrar_checkpointer()
+
+
+async def _vencer_periodicamente(aprobaciones: SqlRepositorioAprobaciones) -> None:
+    """Cancela las aprobaciones pendientes con más de 24 h (y avisa)."""
+    while True:
+        try:
+            await asyncio.to_thread(aprobaciones.vencer)
+        except Exception:  # noqa: BLE001 — la tarea no debe morir por un fallo puntual
+            logger.exception("No se pudieron vencer las aprobaciones")
+        await asyncio.sleep(600)
+
+
+def _aviso_vencida(aprobacion: Aprobacion) -> None:
+    logging.getLogger("audit").info(json.dumps({
+        "accion": "aprobacion_vencida", "aprobacion_id": aprobacion.id,
+        "usuario": aprobacion.user_id, "herramienta": aprobacion.tool, "agente": aprobacion.agent,
+    }))  # fmt: skip
 
 
 app = FastAPI(title="Asistente RAG", version="0.2.0", lifespan=lifespan)
@@ -48,6 +81,7 @@ for router in (
     roles.router,
     conversaciones.router,
     acciones.router,
+    aprobaciones.router,
     admin.router,
 ):
     app.include_router(router)

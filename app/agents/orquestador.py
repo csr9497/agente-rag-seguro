@@ -24,6 +24,7 @@ import time
 import unicodedata
 import uuid
 from collections.abc import Callable
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import Annotated, Any, Protocol
 
@@ -50,6 +51,7 @@ from app.agents.subgraph import (
 )
 from app.models.schemas import (
     Aclaracion,
+    AprobacionPendiente,
     Cita,
     Hallazgo,
     RespuestaConsulta,
@@ -78,10 +80,12 @@ MENSAJE_ESCALADO = (
     "No he podido darte una respuesta fiable. He pasado tu consulta a una persona del equipo, "
     "que te responderá aquí."
 )
-_CITA = re.compile(r"\[([a-z0-9][\w\-./]*/[\w\-./]+)\]")
+# [public/x.md] o [datos:festivos] (resultado de data_query).
+_CITA = re.compile(r"\[([a-z0-9][\w\-./]*(?:/|:)[\w\-./]+)\]")
 # Enlace Markdown a un documento («[Título](public/x.md)»): se normaliza a «Título [public/x.md]»
 # para que el verifier lo compruebe y se numere como cualquier otra cita.
 _ENLACE_DOC = re.compile(r"\[([^\]]+)\]\(([a-z0-9][\w\-./]*/[\w\-./]+)\)")
+_CITA_NUMERICA = re.compile(r"\[\d+\]")
 _UUID = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b")
 
 
@@ -100,17 +104,6 @@ class ResultadoSub(BaseModel):
     resumen: Privado
     ids: list[str] = Field(default_factory=list)
     fuentes: list[dict[str, Any]] = Field(default_factory=list)
-
-
-class AprobacionPendiente(BaseModel):
-    interrupt_id: str
-    aprobacion_id: str | None = None
-    type: str
-    agent: str
-    tool: str
-    args_preview: str = ""
-    risk: str = ""
-    expires_at: str = ""
 
 
 class ResultadoOrquestacion(BaseModel):
@@ -211,6 +204,17 @@ class Orquestador:
     ) -> None:
         self._registro, self._supervisor, self._llm = registro, supervisor, llm_sintesis
         self._entrada, self._salida = guardrail_entrada, guardrail_salida
+        # Roles de quien decide: los de la fuente de verdad más los que la API conoce en esa
+        # petición (token, asignados, rol activo). Variable de contexto: aislada por petición.
+        self._roles_peticion: ContextVar[dict[str, set[str]] | None] = ContextVar(
+            f"roles_aprobador_{id(self)}", default=None
+        )
+        base = roles_de
+
+        def roles_efectivos(uid: str) -> set[str]:
+            return set(base(uid)) | (self._roles_peticion.get() or {}).get(uid, set())
+
+        roles_de = roles_efectivos
         self._roles_de, self._aprobaciones, self._ahora = roles_de, aprobaciones, ahora
         self._alcance = alcance
         self._cache = cache if cache is not None else (CacheExactaMemoria() if alcance else None)
@@ -277,9 +281,22 @@ class Orquestador:
         edited_args: dict | None = None,
         motivo: str | None = None,
         respuesta: str | None = None,
+        roles_aprobador: set[str] | None = None,
     ) -> ResultadoOrquestacion:
-        """Resuelve UNA aprobación pendiente; las demás siguen pendientes. `aprobador` sale
-        del token de quien decide (la API nunca lo toma del cuerpo de la petición)."""
+        """Resuelve UNA aprobación pendiente; las demás siguen pendientes. `aprobador` y
+        `roles_aprobador` salen del token de quien decide (nunca del cuerpo de la petición)."""
+        token = self._roles_peticion.set({aprobador: set(roles_aprobador or ())})
+        try:
+            return self._decidir(
+                thread_id, interrupt_id, aprobado, aprobador, edited_args, motivo, respuesta
+            )
+        finally:
+            self._roles_peticion.reset(token)
+
+    def _decidir(
+        self, thread_id: str, interrupt_id: str, aprobado: bool, aprobador: str,
+        edited_args: dict | None, motivo: str | None, respuesta: str | None,
+    ) -> ResultadoOrquestacion:  # fmt: skip
         valor = {
             "approved": aprobado, "approver_id": aprobador, "edited_args": edited_args,
             "reason": motivo, "respuesta": respuesta,
@@ -490,23 +507,13 @@ class Orquestador:
 
     def _verifier(self, estado: EstadoOrquestador) -> dict[str, Any]:
         texto = _ENLACE_DOC.sub(r"\1 [\2]", str(estado.texto or ""))
-        problemas = []
+        problemas = problemas_de(texto, estado.resultados)
         if len(estado.resultados) < len(estado.tareas):
-            problemas.append("Falta el resultado de alguno de los agentes.")
-        fuentes = {f["doc_id"] for r in estado.resultados for f in r.fuentes}
-        if inventadas := sorted({d for d in _CITA.findall(texto) if d not in fuentes}):
-            problemas.append(
-                f"Cita documentos que ningún agente recuperó: {', '.join(inventadas)}."
-            )
-        ids = {i for r in estado.resultados for i in r.ids}
-        if falsos := sorted({i for i in _UUID.findall(texto) if i not in ids}):
-            problemas.append(f"Menciona identificadores que no se crearon: {', '.join(falsos)}.")
-        if enmascarar_pii(texto, TIPOS_PII)[1]:
-            problemas.append("Incluye datos personales.")
-        if not texto.strip():
-            problemas.append("La respuesta está vacía.")
+            problemas.insert(0, "Falta el resultado de alguno de los agentes.")
         if not problemas:
-            return {"verificado": True, "respuesta": self._respuesta_final(texto, estado)}
+            return {
+                "verificado": True, "respuesta": respuesta_con_citas(texto, estado.resultados),
+            }  # fmt: skip
         if estado.reintentos >= MAX_REINTENTOS:  # 1 intento + MAX_REINTENTOS reescrituras
             return {"verificado": False, "agotado": True, "correcciones": problemas}
         return {
@@ -636,27 +643,6 @@ class Orquestador:
             respaldo=respaldo,
         )  # fmt: skip
 
-    def _respuesta_final(self, texto: str, estado: EstadoOrquestador) -> RespuestaConsulta:
-        """[doc_id] → [n] con el fragmento real, como espera la web (contrato de la API)."""
-        fuentes: dict[str, dict] = {}
-        for r in estado.resultados:
-            for f in r.fuentes:
-                fuentes.setdefault(f["doc_id"], f)
-        citas: list[Cita] = []
-        numeros: dict[str, int] = {}
-        for doc_id in _CITA.findall(texto):
-            if doc_id in fuentes and doc_id not in numeros:
-                numeros[doc_id] = len(numeros) + 1
-                f = fuentes[doc_id]
-                citas.append(Cita(
-                    numero=numeros[doc_id], doc_id=doc_id, chunk_id=f"{doc_id}#0", fuente=doc_id,
-                    fragmento=f.get("contenido") or "", score=float(f.get("score") or 0),
-                ))  # fmt: skip
-        final = _CITA.sub(
-            lambda m: f"[{numeros[m.group(1)]}]" if m.group(1) in numeros else "", texto
-        )
-        return RespuestaConsulta(respuesta=final.strip(), citas=citas, sin_contexto=not citas)
-
     def _clave_cache(self, estado: EstadoOrquestador) -> str | None:
         if self._alcance is None or estado.user is None:
             return None
@@ -684,7 +670,7 @@ class Orquestador:
         pendientes = [_pendiente(i) for i in salida.get("__interrupt__", [])]
         respuesta = salida.get("respuesta")
         if pendientes:
-            respuesta = _respuesta_provisional(pendientes)
+            respuesta = _respuesta_provisional(pendientes, salida.get("resultados") or [])
         return ResultadoOrquestacion(
             respuesta=respuesta or _sin_contexto(SIN_CONTEXTO), aprobaciones=pendientes,
             thread_id=thread_id, traza_id=str(salida.get("trace_id") or ""),
@@ -744,15 +730,79 @@ def _pendiente(interrupcion: Any) -> AprobacionPendiente:
         interrupt_id=interrupcion.id, aprobacion_id=v.get("aprobacion_id"),
         type=str(v.get("type", "")), agent=str(v.get("agent", "")), tool=str(v.get("tool", "")),
         args_preview=str(v.get("args_preview", "")), risk=str(v.get("risk", "")),
-        expires_at=str(v.get("expires_at", "")),
+        expires_at=str(v.get("expires_at", "")), como_responder=str(v.get("como_responder", "")),
     )  # fmt: skip
 
 
-def _respuesta_provisional(pendientes: list[AprobacionPendiente]) -> RespuestaConsulta:
+ACCIONES = {
+    "create_ticket": "crear un ticket de soporte",
+    "add_ticket_comment": "comentar tu ticket",
+    "create_hr_case": "crear un caso para RR.HH.",
+    "add_hr_case_note": "añadir información a tu caso de RR.HH.",
+    "request_document_access": "solicitar acceso a un documento",
+}
+
+
+def problemas_de(texto: str, resultados: list[ResultadoSub]) -> list[str]:
+    """Comprobaciones deterministas del verifier sobre un texto y los resultados que lo
+    respaldan (también para lo que se muestra mientras otra parte espera una aprobación)."""
+    problemas = []
+    if _CITA_NUMERICA.search(texto):  # los números los pone el sistema al convertir [doc_id]
+        problemas.append(
+            "Usa números de cita ([1]); cita con el identificador del documento entre corchetes."
+        )
+    fuentes = {f["doc_id"] for r in resultados for f in r.fuentes}
+    if inventadas := sorted({d for d in _CITA.findall(texto) if d not in fuentes}):
+        problemas.append(f"Cita documentos que ningún agente recuperó: {', '.join(inventadas)}.")
+    ids = {i for r in resultados for i in r.ids}
+    if falsos := sorted({i for i in _UUID.findall(texto) if i not in ids}):
+        problemas.append(f"Menciona identificadores que no se crearon: {', '.join(falsos)}.")
+    if enmascarar_pii(texto, TIPOS_PII)[1]:
+        problemas.append("Incluye datos personales.")
+    if not texto.strip():
+        problemas.append("La respuesta está vacía.")
+    return problemas
+
+
+def respuesta_con_citas(texto: str, resultados: list[ResultadoSub]) -> RespuestaConsulta:
+    """[doc_id] → [n] con el fragmento real, como espera la web (contrato de la API)."""
+    fuentes: dict[str, dict] = {}
+    for r in resultados:
+        for f in r.fuentes:
+            fuentes.setdefault(f["doc_id"], f)
+    citas: list[Cita] = []
+    numeros: dict[str, int] = {}
+    for doc_id in _CITA.findall(texto):
+        if doc_id in fuentes and doc_id not in numeros:
+            numeros[doc_id] = len(numeros) + 1
+            f = fuentes[doc_id]
+            citas.append(Cita(
+                numero=numeros[doc_id], doc_id=doc_id, chunk_id=f"{doc_id}#0", fuente=doc_id,
+                fragmento=f.get("contenido") or "", score=float(f.get("score") or 0),
+            ))  # fmt: skip
+    final = _CITA.sub(lambda m: f"[{numeros[m.group(1)]}]" if m.group(1) in numeros else "", texto)
+    return RespuestaConsulta(respuesta=final.strip(), citas=citas, sin_contexto=not citas)
+
+
+def _respuesta_provisional(
+    pendientes: list[AprobacionPendiente], terminados: list[ResultadoSub]
+) -> RespuestaConsulta:
+    """Mientras algo espera una aprobación: lo que ya respondieron los demás agentes (si pasa
+    las comprobaciones del verifier) y qué queda pendiente."""
     if any(p.type == "escalate_human" for p in pendientes):
         return _sin_contexto(MENSAJE_ESCALADO)
+    parcial = RespuestaConsulta(respuesta="", citas=[], sin_contexto=True)
+    if terminados:
+        texto = _ENLACE_DOC.sub(r"\1 [\2]", "\n\n".join(str(r.resumen) for r in terminados))
+        if not problemas_de(texto, terminados):
+            parcial = respuesta_con_citas(texto, terminados)
     partes = []
     for p in pendientes:
-        quien = "la aprobación de Soporte IT" if p.type == "approve_staff" else "tu confirmación"
-        partes.append(f"«{p.tool}» necesita {quien}")
-    return _sin_contexto("He preparado lo siguiente y está pendiente: " + "; ".join(partes) + ".")
+        accion = ACCIONES.get(p.tool, p.tool)
+        if p.type == "approve_staff":
+            partes.append(f"{accion} (lo aprobará Soporte IT)")
+        else:
+            partes.append(f"{accion} (confírmalo abajo)")
+    pendiente = "Antes de seguir: " + "; ".join(partes) + "."
+    texto = f"{parcial.respuesta}\n\n{pendiente}" if parcial.respuesta else pendiente
+    return parcial.model_copy(update={"respuesta": texto, "sin_contexto": not parcial.citas})

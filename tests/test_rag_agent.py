@@ -70,6 +70,11 @@ def test_rag_agent_declara_sus_tools_con_scope_y_modo(rag) -> None:
         "search_documents": ("docs:read", "auto", False),
         "get_document_metadata": ("docs:read", "auto", False),
         "request_document_access": ("docs:request", "confirm_user", True),
+        # Lo que hacía el grafo anterior, solo lectura.
+        "data_query": ("docs:read", "auto", False),
+        "listar_documentos": ("docs:read", "auto", False),
+        "leer_documento": ("docs:read", "auto", False),
+        "buscar_en_documento": ("docs:read", "auto", False),
     }
 
 
@@ -203,3 +208,30 @@ def test_la_politica_va_dentro_de_la_consulta_al_indice(servicios) -> None:
     usuario = contexto_de_usuario("github:ana", ["public"], departamentos=["it"])
     _buscar(rag, usuario, "vacaciones")
     assert pedidos == [["public", "dept:it", "user:github:ana"]]
+
+
+def _tool(rag, nombre, user, **args):  # noqa: ANN001, ANN202
+    politica = rag.tools[nombre]
+    return politica.fn(politica.args_model(**args), _ctx(user))
+
+
+def test_datos_internos_con_los_permisos_de_cada_consulta(rag) -> None:
+    festivos = _tool(rag, "data_query", PUBLIC, consulta="festivos", anio=2026)["fragmentos"]
+    assert [f["doc_id"] for f in festivos] == ["datos:festivos"]
+    assert "Navidad" in festivos[0]["contenido"]
+    plantilla = _tool(rag, "data_query", PUBLIC, consulta="plantilla_por_departamento")
+    assert plantilla["fragmentos"] == []  # solo RR.HH.
+    assert _tool(rag, "data_query", RRHH, consulta="plantilla_por_departamento")["fragmentos"]
+
+
+def test_listar_documentos_solo_muestra_los_del_rol(rag) -> None:
+    (catalogo,) = _tool(rag, "listar_documentos", PUBLIC)["fragmentos"]
+    assert "Política de vacaciones" in catalogo["contenido"]
+    assert "Bandas" not in catalogo["contenido"] and "Nómina" not in catalogo["contenido"]
+
+
+def test_leer_un_documento_ajeno_no_devuelve_nada(rag) -> None:
+    ajeno = _tool(rag, "leer_documento", PUBLIC, doc_id="rrhh/bandas-salariales.md")
+    assert ajeno["fragmentos"] == []
+    propio = _tool(rag, "leer_documento", PUBLIC, doc_id="public/politica-vacaciones.md")
+    assert "23 días" in propio["fragmentos"][0]["contenido"]
