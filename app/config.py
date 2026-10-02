@@ -74,7 +74,9 @@ class Settings(BaseSettings):
     cache_ttl_s: int = 86400
 
     # Observabilidad (LangSmith). Ver app/observabilidad.py.
-    entorno: Literal["local", "dev", "prod"] = "local"
+    # dev, staging y main son los entornos efímeros del pipeline (el runner exporta ENTORNO); solo
+    # prod endurece la configuración (validar_seguridad).
+    entorno: Literal["local", "dev", "staging", "main", "prod"] = "local"
     trazas_modo: Literal["apagado", "completo", "enmascarado"] = "apagado"
     langsmith_api_key: SecretStr | None = None
     langsmith_project: str = "agente-rag-dev"

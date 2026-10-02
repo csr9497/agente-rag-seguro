@@ -138,3 +138,13 @@ def test_terraform_exige_login() -> None:
     assert '"RedirectToLoginPage"' in apps and "Microsoft.App/containerApps/authConfigs" in apps
     identidad = (RAIZ / "infra" / "identidad" / "main.tf").read_text(encoding="utf-8")
     assert "app_role_assignment_required = true" in identidad  # solo usuarios con rol
+
+
+@pytest.mark.parametrize("entorno", ["dev", "staging", "main"])
+def test_los_entornos_del_pipeline_son_validos_y_no_de_produccion(entorno, monkeypatch) -> None:
+    """El runner exporta ENTORNO=<entorno> y scripts como evals o publicar prompts leen la
+    configuración (con staging fallaban al arrancar)."""
+    monkeypatch.setenv("ENTORNO", entorno)
+    s = Settings()
+    assert s.entorno == entorno
+    validar_seguridad(s)  # no exige la configuración de producción
