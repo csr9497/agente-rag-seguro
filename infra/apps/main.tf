@@ -57,6 +57,7 @@ locals {
       "qdrant-api-key"       = "QDRANT_API_KEY"
       "azure-search-api-key" = "AZURE_SEARCH_API_KEY"
       "redis-url"            = "REDIS_URL"
+      "checkpoint-clave"     = "CHECKPOINT_CLAVE"
     } : nombre => variable if contains(local.p.secretos_en_key_vault, nombre)
   }
 

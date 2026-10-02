@@ -105,7 +105,16 @@ locals {
     var.langsmith_api_key != "" ? { "langsmith-api-key" = var.langsmith_api_key } : {},
     local.completo ? { "database-url" = module.postgres[0].database_url } : {},
     local.completo && var.cache_redis ? { "redis-url" = module.redis[0].redis_url } : {},
+    local.completo ? { "checkpoint-clave" = random_id.checkpoint[0].hex } : {},
   )
+}
+
+# Clave AES-256 del checkpointer de los agentes (estado de los hilos cifrado en Postgres). Sin
+# ella la app no arranca en modo multiagente (falla cerrado). Cambiarla invalida los hilos
+# pausados (aprobaciones pendientes), no los datos.
+resource "random_id" "checkpoint" {
+  count       = local.completo ? 1 : 0
+  byte_length = 32
 }
 
 resource "azurerm_key_vault_secret" "this" {
