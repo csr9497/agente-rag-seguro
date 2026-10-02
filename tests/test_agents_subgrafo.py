@@ -318,3 +318,11 @@ def test_ningun_texto_plano_del_estado_lleva_datos_del_usuario() -> None:
         if campo.annotation in (str, str | None)
     }  # fmt: skip
     assert texto_plano <= CAMPOS_TEXTO_INOCUOS, texto_plano - CAMPOS_TEXTO_INOCUOS
+
+
+def test_un_hilo_reutilizado_procesa_la_nueva_tarea() -> None:
+    grafo, h, _, llm, _ = _montar([[("search_it_kb", {"consulta": "vpn"})], []], final="Hecho.")
+    grafo.invoke(ENTRADA, CFG)
+    grafo.invoke({**ENTRADA, "task": "Otra cosa"}, CFG)
+    assert len(llm.llamadas) == 3  # la segunda tarea llega al LLM (no devuelve el resumen viejo)
+    assert "Otra cosa" in llm.llamadas[2][1]["content"]

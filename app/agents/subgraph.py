@@ -154,6 +154,9 @@ class EstadoSubagente(BaseModel):
     inicio: float | None = None
     limite_s: float = 120.0
     ids: list[str] = Field(default_factory=list)
+    # Fragmentos que el agente recuperó (doc_id, titulo, contenido, score): el orquestador
+    # construye las citas con ellos y el verifier rechaza citas a documentos no recuperados.
+    fuentes: list[dict[str, Any]] = Field(default_factory=list)
     summary: Privado | None = None
 
 
@@ -207,10 +210,23 @@ class SubgrafoPrivado:
         return getattr(self._grafo, nombre)
 
 
+# Campos de una ejecución y su valor inicial: una entrada nueva en un hilo reutilizado no
+# arrastra nada de la anterior (si no, un `summary` viejo terminaría el grafo sin trabajar).
+REINICIO_SUBAGENTE: dict[str, Any] = {
+    "mensajes": [], "pendientes": [], "actual": None, "gate": None, "expira": None,
+    "aprobacion_id": None, "resultado": None, "iteraciones": 0, "inicio": None, "ids": [],
+    "fuentes": [], "summary": None,
+}  # fmt: skip
+
+
 def _entrada_privada(entrada: Any) -> Any:
-    if isinstance(entrada, dict) and isinstance(entrada.get("task"), str):
-        return {**entrada, "task": TextoPrivado(valor=entrada["task"])}
-    return entrada  # Command(resume=…) y demás, sin cambios
+    if not isinstance(entrada, dict):
+        return entrada  # Command(resume=…) y demás, sin cambios
+    tarea = entrada.get("task")
+    return {
+        **REINICIO_SUBAGENTE, **entrada,
+        "task": TextoPrivado(valor=tarea) if isinstance(tarea, str) else tarea,
+    }  # fmt: skip
 
 
 class _Subgrafo:
@@ -322,6 +338,7 @@ class _Subgrafo:
             carga = {
                 "type": tipo, "agent": self._spec.name, "tool": gate.tool,
                 "args_preview": _vista(args), "risk": _riesgo(tipo), "expires_at": expira,
+                "aprobacion_id": estado.aprobacion_id,
             }  # fmt: skip
             if aviso:
                 carga["aviso"] = aviso
@@ -384,13 +401,21 @@ class _Subgrafo:
         actual, gate = _requerido(estado.actual), _requerido(estado.gate)
         resultado = estado.resultado
         ids = list(estado.ids)
+        fuentes = list(estado.fuentes)
         if isinstance(resultado, dict) and resultado.get("id") is not None:
             ids.append(str(resultado["id"]))
+        if isinstance(resultado, dict):
+            fuentes += [
+                {k: f.get(k) for k in ("doc_id", "titulo", "contenido", "score")}
+                for f in resultado.get("fragmentos", [])
+                if isinstance(f, dict) and f.get("doc_id")
+            ]
         contenido = _como_dato(gate.tool, resultado)
         return {
             "mensajes": [*estado.mensajes, _mensaje_tool(actual, contenido)],
             "resultado": None,
             "ids": ids,
+            "fuentes": fuentes,
         }
 
     # --------------------------------------------------------------------------- apoyo

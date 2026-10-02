@@ -29,10 +29,18 @@ def clave_checkpointer(hexadecimal: str | None) -> bytes:
 # Únicos tipos propios que el checkpoint puede reconstruir (además de los de LangGraph): con una
 # lista explícita, un checkpoint manipulado no puede instanciar clases arbitrarias.
 TIPOS_PERMITIDOS = [
+    ("app.agents.orquestador", "EnvioAgente"),
+    ("app.agents.orquestador", "ResultadoSub"),
     ("app.agents.policy_gate", "DecisionGate"),
     ("app.agents.scopes", "UserContext"),
     ("app.agents.subgraph", "TextoPrivado"),
+    ("app.models.schemas", "Aclaracion"),
+    ("app.models.schemas", "Cita"),
+    ("app.models.schemas", "Hallazgo"),
+    ("app.models.schemas", "RespuestaConsulta"),
     ("app.models.schemas", "ToolCall"),
+    ("app.models.schemas", "Turno"),
+    ("app.models.schemas", "Usuario"),
 ]
 
 
