@@ -149,12 +149,22 @@ borrar_postgres_fallido() { # borrar_postgres_fallido <log de terraform>
   fi
 }
 
+# Regiones que permite la política de la suscripción (Azure for Students: «Allowed resource
+# deployment regions»); vacío si no hay política (se prueban todas las candidatas).
+regiones_permitidas() {
+  az policy assignment list \
+    --query "[].parameters.listOfAllowedLocations.value[]" -o tsv 2> /dev/null | tr '\n' ' ' || true
+}
+
 regiones_postgres() {
-  local base r vistas=" "
+  local base r vistas=" " permitidas
   base=$(sed -nE 's/^location *= *"(.*)"/\1/p' infra/envs/dev/nube.tfvars)
-  for r in ${POSTGRES_LOCATION:-} "$base" southcentralus centralus eastus westus2 westus3 northcentralus canadacentral; do
+  permitidas=" $(regiones_permitidas)"
+  for r in ${POSTGRES_LOCATION:-} "$base" southcentralus centralus eastus westus2 westus3 \
+    northcentralus canadacentral brazilsouth chilecentral; do
     [[ $vistas == *" $r "* ]] && continue
     vistas+="$r "
+    [[ $permitidas == " " || $permitidas == *" $r "* ]] || continue
     if az postgres flexible-server list-skus --location "$r" \
       --query "[?restricted!='Enabled'].supportedServerVersions[].name" -o tsv 2> /dev/null | grep -qx 16; then
       echo "$r"
@@ -200,8 +210,9 @@ desplegar() {
       aplicado=true
       break
     fi
-    grep -q "CapacityNotAvailable" "$LOG_DIR/platform.log" || break
-    echo "   $pg sin capacidad para PostgreSQL ahora mismo: se prueba la siguiente región"
+    # Sin capacidad (temporal) o región vetada por la política de la suscripción: la siguiente.
+    grep -qE "CapacityNotAvailable|RequestDisallowedByAzure" "$LOG_DIR/platform.log" || break
+    echo "   $pg no disponible para PostgreSQL ahora mismo: se prueba la siguiente región"
     borrar_postgres_fallido "$LOG_DIR/platform.log"
   done
   $aplicado || falla "Falló platform (log: $LOG_DIR/platform.log)."
