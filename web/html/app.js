@@ -344,6 +344,9 @@ function avisoOcultados(m) {
     "No se guardan ni se envían al asistente. Evita compartir datos personales, bancarios o contraseñas en el chat.");
 }
 
+// Respaldo del servidor cuando no hay nada que decir (app/rag/prompts.py: SIN_CONTEXTO).
+const FRASE_SIN_CONTEXTO = "No encuentro esa información en los documentos a los que tienes acceso.";
+
 function pintarRespuesta(m, i) {
   const bloqueo = m.hallazgos.find((h) => h.accion === "bloquear");
   if (bloqueo && POLITICA[bloqueo.tipo]) {
@@ -375,6 +378,12 @@ function pintarRespuesta(m, i) {
     return el("article", { class: "msg-bot" },
       el("div", { class: "msg-meta" }, `Asistente · ${hora(m.creado_en)}`),
       el("p", { class: "answer" }, m.respuesta));
+  }
+  if (m.sin_contexto && m.respuesta && m.respuesta.trim() !== FRASE_SIN_CONTEXTO) {
+    // El asistente redactó la respuesta (orientación, siguiente paso…): se muestra su texto.
+    return el("article", { class: "msg-bot" },
+      el("div", { class: "msg-meta" }, `Asistente · ${hora(m.creado_en)}`),
+      el("p", { class: "answer" }, m.respuesta), feedback(m));
   }
   if (m.sin_contexto) {
     const busque = (m.consultas || []).map((q) => `«${q}»`).join(", ");
