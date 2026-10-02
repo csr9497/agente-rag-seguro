@@ -66,8 +66,8 @@ run "completo_con_ai_search_y_langsmith" {
   }
   assert {
     condition = toset(output.secretos_en_key_vault) == toset([
-      "azure-openai-api-key", "azure-search-api-key", "database-url", "langsmith-api-key",
-      "redis-url",
+      "azure-openai-api-key", "azure-search-api-key", "checkpoint-clave", "database-url",
+      "langsmith-api-key", "redis-url",
     ])
     error_message = "Secretos esperados en Key Vault"
   }
@@ -207,5 +207,48 @@ run "solo_modelos_ignora_azure_search" {
   assert {
     condition     = length(module.search) == 0
     error_message = "solo_modelos usa Qdrant local aunque vector_store diga azure_search"
+  }
+}
+
+run "modelo_ligero_opcional" {
+  command = plan
+  variables {
+    alcance       = "solo_modelos"
+    vector_store  = "qdrant"
+    qdrant_modo   = "local"
+    modelo_ligero = null
+  }
+  assert {
+    condition     = output.ligero_deployment == ""
+    error_message = "modelo_ligero = null no crea el despliegue ligero"
+  }
+}
+
+run "postgres_en_otra_region_es_publico_y_restringido" {
+  command = plan
+  variables {
+    alcance           = "completo"
+    search_sku        = "basic"
+    postgres_location = "southcentralus"
+  }
+  assert {
+    condition     = module.postgres[0].publico_efectivo && length(module.postgres[0].reglas_firewall) == 1
+    error_message = "PostgreSQL fuera de la región de la VNet: público con firewall solo para servicios de Azure"
+  }
+  assert {
+    condition     = local.sufijo_postgres == substr(md5("southcentralus"), 0, 4)
+    error_message = "El nombre depende de la región: el reintento en otra región no choca con el fallido"
+  }
+}
+
+run "postgres_en_la_region_es_privado" {
+  command = plan
+  variables {
+    alcance    = "completo"
+    search_sku = "basic"
+  }
+  assert {
+    condition     = !module.postgres[0].publico_efectivo && length(module.postgres[0].reglas_firewall) == 0
+    error_message = "Por defecto PostgreSQL solo es accesible desde la VNet"
   }
 }

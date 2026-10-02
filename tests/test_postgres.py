@@ -23,7 +23,8 @@ from app.persistencia.repositorios import (
     crear_motor,
     inicializar,
 )
-from tests.fakes import FakeEmbedder, FakeLLM, FakeSupervisor
+from tests.conftest import ROLES_SEMILLA, conectar_orquestador
+from tests.fakes import FakeEmbedder, FakeLLM, RagEco
 
 URL = os.environ.get("TEST_DATABASE_URL", "")
 pytestmark = [
@@ -51,7 +52,7 @@ def test_es_postgres(motor) -> None:
 
 def test_roles_documentos_y_conversaciones(motor) -> None:
     roles = SqlRepositorioRoles(motor)
-    assert {r.id for r in roles.listar()} == {"administrador", "rrhh", "finanzas", "public"}
+    assert {r.id for r in roles.listar()} == ROLES_SEMILLA
     roles.guardar(Rol(id="compras", nombre="Compras", publica_para=["public"]))
     assert roles.obtener("compras").publica_para == ["public"]
 
@@ -79,9 +80,10 @@ def test_roles_documentos_y_conversaciones(motor) -> None:
 def test_flujo_completo_sobre_postgres(motor, retriever, tmp_path) -> None:
     s = build_servicios(
         Settings(database_url=URL, seleccion_libre_de_rol=True, almacen_local_dir=str(tmp_path)),
-        modelos=(FakeEmbedder(), FakeLLM(), FakeSupervisor()),
+        modelos=(FakeEmbedder(), FakeLLM(), RagEco()),
         retriever=retriever,
     )
+    conectar_orquestador(s)  # en Postgres registra también hr_agent y support_agent (RLS)
     assert (
         s.gestor.indexar("rrhh/v.md", b"Vacaciones: 23 dias.", roles=["public"]).estado
         == "indexado"
@@ -90,8 +92,5 @@ def test_flujo_completo_sobre_postgres(motor, retriever, tmp_path) -> None:
     conv = s.conversaciones.iniciar(usuario, "public")
     msg = s.conversaciones.preguntar(usuario, conv.id, "vacaciones")
     assert msg.documentos_consultados == ["rrhh/v.md"]
+    assert msg.agentes == ["rag_agent"] and not msg.sin_contexto
     assert s.verificar_integridad().ok
-    p = s.acciones.proponer(
-        "abrir_ticket", {"asunto": "VPN caída", "descripcion": "x"}, "public", "u"
-    )
-    assert s.acciones.decidir(p.id, True, "public", "u").estado == "ejecutada"

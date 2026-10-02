@@ -4,7 +4,7 @@ from fastapi import APIRouter, status
 
 from app.api.dependencias import Actor, ServiciosDep, UsuarioDep
 from app.persistencia.modelos import Rol
-from app.servicios.roles import RolActualizar, RolCrear
+from app.servicios.roles import AsignacionUsuario, AsignarRoles, RolActualizar, RolCrear
 
 router = APIRouter(prefix="/roles", tags=["roles"])
 
@@ -29,3 +29,18 @@ def crear(datos: RolCrear, actor: Actor, servicios: ServiciosDep) -> Rol:
 @router.patch("/{rol_id}", response_model=Rol)
 def actualizar(rol_id: str, cambios: RolActualizar, actor: Actor, servicios: ServiciosDep) -> Rol:
     return servicios.roles.actualizar(actor, rol_id, cambios)
+
+
+# ------------------------------------------------------------------ roles de las personas
+@router.get("/asignaciones", response_model=list[AsignacionUsuario])
+def asignaciones(actor: Actor, servicios: ServiciosDep) -> list[AsignacionUsuario]:
+    """Roles asignados desde la app a cada persona (requiere administrar_roles)."""
+    return servicios.roles.listar_asignaciones(actor)
+
+
+@router.put("/asignaciones/{usuario_id}", response_model=AsignacionUsuario)
+def asignar(
+    usuario_id: str, datos: AsignarRoles, actor: Actor, usuario: UsuarioDep, servicios: ServiciosDep
+) -> AsignacionUsuario:
+    """Sustituye los roles de la persona (lista vacía = sin acceso). Se audita."""
+    return servicios.roles.asignar(actor, usuario, usuario_id, datos)

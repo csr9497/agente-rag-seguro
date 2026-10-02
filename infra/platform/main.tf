@@ -98,6 +98,7 @@ module "openai" {
   public_network_access_enabled = local.public
   chat                          = var.chat_model
   embedding                     = var.embedding_model
+  ligero                        = var.modelo_ligero
   tags                          = local.tags
 }
 
@@ -144,11 +145,19 @@ module "registry" {
   tags                = local.tags
 }
 
+locals {
+  # El nombre del servidor incluye la región (ver module "postgres").
+  sufijo_postgres = var.postgres_location == null ? "" : substr(md5(var.postgres_location), 0, 4)
+}
+
 module "postgres" {
-  count               = local.completo ? 1 : 0
-  source              = "../modules/postgres"
-  name                = "psql-${local.flat}"
-  location            = var.location
+  count  = local.completo ? 1 : 0
+  source = "../modules/postgres"
+  # El nombre incluye la región: si una no tiene capacidad (CapacityNotAvailable), Azure deja
+  # el servidor fallido medio borrado y el reintento en otra región no puede reutilizar el nombre.
+  name                = "psql-${local.flat}${local.sufijo_postgres}"
+  location            = coalesce(var.postgres_location, var.location)
+  publico             = coalesce(var.postgres_location, var.location) != var.location
   resource_group_name = azurerm_resource_group.this.name
   tenant_id           = data.azurerm_client_config.current.tenant_id
   vnet_id             = module.network[0].vnet_id

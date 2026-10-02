@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Entorno de desarrollo completo: modelos en Azure (solo gpt-4o y ada-002) + app, web, Qdrant
-# y Redis en Docker + LangGraph Studio en el host. Todo escucha solo en 127.0.0.1.
+# Entorno de desarrollo completo: modelos (Azure OpenAI u OpenAI/compatible, según
+# MODELOS_PROVEEDOR en .env) + app, web, Qdrant y Redis en Docker + LangGraph Studio en el
+# host. Todo escucha solo en 127.0.0.1.
 #
 #   ./scripts/entorno_local.sh instalar   # comprueba requisitos, dependencias, .env y Terraform
 #   ./scripts/entorno_local.sh levantar   # crea/actualiza lo necesario y muestra los accesos
@@ -8,15 +9,26 @@
 #   ./scripts/entorno_local.sh apagar     # para Studio y Docker, elimina los modelos de Azure
 #                                         # y quita endpoint y clave de .env
 #
-# Requisitos: az login, Docker Desktop abierto y el estado remoto de Terraform (bootstrap).
+# Requisitos comunes: uv y Docker Desktop abierto.
+#   MODELOS_PROVEEDOR=azure (por defecto): Azure CLI con `az login`, suscripción activa,
+#     Terraform y el estado remoto (bootstrap). make up / make down crean y borran los modelos.
+#   MODELOS_PROVEEDOR=openai: OPENAI_API_KEY (y OPENAI_BASE_URL si no es OpenAI) en .env.
+#     No se toca Azure.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+
+# Variable de entorno > .env > azure.
+PROVEEDOR="${MODELOS_PROVEEDOR:-$(grep -E '^MODELOS_PROVEEDOR=' .env 2> /dev/null | tail -1 | cut -d= -f2- | tr -d '"' || true)}"
+PROVEEDOR="${PROVEEDOR:-azure}"
 
 TFVARS="../envs/dev/solo_modelos.tfvars"
 STUDIO_PID=data/.studio.pid
 STUDIO_LOG=data/studio.log
-export ARM_SUBSCRIPTION_ID="${ARM_SUBSCRIPTION_ID:-$(az account show --query id -o tsv 2>/dev/null || true)}"
+if [[ $PROVEEDOR == azure ]]; then
+  export ARM_SUBSCRIPTION_ID="${ARM_SUBSCRIPTION_ID:-$(az account show --query id -o tsv 2>/dev/null || true)}"
+fi
 
+source scripts/comun.sh
 paso() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 
 terraform_init() { # idempotente; el backend remoto está en infra/envs/dev/backend.hcl
@@ -26,34 +38,82 @@ terraform_init() { # idempotente; el backend remoto está en infra/envs/dev/back
 
 yo() { az ad signed-in-user show --query id -o tsv 2>/dev/null; }
 
+requisitos_azure() { # devuelve 1 si falta algo
+  local falta=0 estado
+  for cmd in az terraform; do
+    if command -v "$cmd" > /dev/null; then echo "✅ $cmd"; else echo "⛔ $cmd no está instalado"; falta=1; fi
+  done
+  command -v az > /dev/null || { echo "   → https://learn.microsoft.com/cli/azure/install-azure-cli"; return 1; }
+  if ! az account show > /dev/null 2>&1; then
+    echo "⛔ sin sesión en Azure: ejecuta az login (y az account set -s <suscripción>)"; return 1
+  fi
+  estado=$(az account show --query state -o tsv)
+  echo "✅ az login: $(az account show --query user.name -o tsv)"
+  if [[ $estado == Enabled ]]; then echo "✅ suscripción: $(az account show --query name -o tsv) (activa)"
+  else echo "⛔ suscripción $(az account show --query name -o tsv) en estado $estado: crédito agotado o deshabilitada"; falta=1; fi
+  return $falta
+}
+
 instalar() {
-  paso "Requisitos"
+  paso "Requisitos (MODELOS_PROVEEDOR=$PROVEEDOR)"
   local falta=0
-  for cmd in uv docker az terraform; do
+  for cmd in uv docker; do
     if command -v "$cmd" > /dev/null; then echo "✅ $cmd"; else echo "⛔ $cmd no está instalado"; falta=1; fi
   done
   docker info > /dev/null 2>&1 && echo "✅ Docker en marcha" || { echo "⛔ abre Docker Desktop"; falta=1; }
-  if az account show > /dev/null 2>&1; then echo "✅ az login ($(az account show --query name -o tsv))"
-  else echo "⛔ ejecuta: az login"; falta=1; fi
-  [[ $falta == 0 ]] || { echo; echo "Resuelve lo marcado con ⛔ y repite: make instalar"; exit 1; }
+  if [[ $PROVEEDOR == azure ]]; then requisitos_azure || falta=1; fi
+  [[ $falta == 0 ]] || { echo; echo "Resuelve lo marcado con ⛔ y repite: make install"; exit 1; }
 
   paso "Dependencias de Python (uv, Python 3.12)"
   uv sync --frozen 2>&1 | tail -1
 
   paso ".env"
   if [[ -f .env ]]; then echo "ya existe"; else cp .env.example .env && echo "creado desde .env.example"; fi
-  if ! grep -q '^POSTGRES_PASSWORD=.\+' .env; then # la pide docker-compose (perfil postgres)
-    sed -i.bak '/^POSTGRES_PASSWORD=/d' .env && rm -f .env.bak
-    echo "POSTGRES_PASSWORD=$(openssl rand -hex 16)" >> .env
-    echo "✅ POSTGRES_PASSWORD local generada"
-  fi
+  secretos_locales
   grep -q '^LANGSMITH_API_KEY=.\+' .env && echo "✅ LANGSMITH_API_KEY definida" \
     || echo "ℹ️  opcional: añade LANGSMITH_API_KEY en .env para trazas y evaluaciones en LangSmith"
 
-  paso "Terraform (estado remoto)"
-  terraform_init && echo "listo"
+  if [[ $PROVEEDOR == azure ]]; then
+    paso "Terraform (estado remoto)"
+    terraform_init && echo "listo"
+  else
+    paso "Modelos (OpenAI o endpoint compatible)"
+    grep -qE '^OPENAI_(API_KEY|BASE_URL)=.+' .env && echo "✅ OPENAI_API_KEY / OPENAI_BASE_URL en .env" \
+      || echo "⛔ define OPENAI_API_KEY (y OPENAI_BASE_URL si no es OpenAI) en .env"
+  fi
   mkdir -p data
-  echo; echo "Instalación completa. Siguiente paso: make levantar"
+  echo; echo "Instalación completa. Siguiente paso: make check-models y make up"
+}
+
+# Añade al final de un fichero .env sin pegarse a la última línea si no termina en salto de
+# línea (si no, «OPENAI_API_KEY=…CHECKPOINT_CLAVE=…» rompería las dos variables).
+asegurar_salto() { [[ ! -s "$1" || -z $(tail -c1 "$1") ]] || echo >> "$1"; }
+
+# Valores locales que no van al repo; idempotente (también para .env creados antes de que
+# existieran). La app en Docker usa PostgreSQL por la red de compose; los procesos del host
+# (Studio, scripts) por localhost:55432 con DATABASE_URL.
+secretos_locales() {
+  if ! grep -q '^POSTGRES_PASSWORD=.\+' .env; then
+    sed -i.bak '/^POSTGRES_PASSWORD=/d' .env && rm -f .env.bak
+    asegurar_salto .env
+    echo "POSTGRES_PASSWORD=$(openssl rand -hex 16)" >> .env
+    echo "✅ POSTGRES_PASSWORD local generada"
+  fi
+  if ! grep -q '^CHECKPOINT_CLAVE=[0-9a-f]\{64\}$' .env; then # cifra el estado de los agentes
+    sed -i.bak '/^CHECKPOINT_CLAVE=/d' .env && rm -f .env.bak
+    asegurar_salto .env
+    echo "CHECKPOINT_CLAVE=$(openssl rand -hex 32)" >> .env
+    echo "✅ CHECKPOINT_CLAVE local generada"
+  fi
+  local clave url
+  clave=$(grep '^POSTGRES_PASSWORD=' .env | cut -d= -f2-)
+  url="postgresql+psycopg://agente_app:${clave}@localhost:55432/agente"
+  if ! grep -qxF "DATABASE_URL=$url" .env; then
+    sed -i.bak '/^DATABASE_URL=/d' .env && rm -f .env.bak
+    asegurar_salto .env
+    echo "DATABASE_URL=$url" >> .env
+    echo "✅ DATABASE_URL: PostgreSQL local"
+  fi
 }
 
 esperar() { # esperar URL segundos
@@ -61,20 +121,49 @@ esperar() { # esperar URL segundos
   return 1
 }
 
+# Con la nube desplegada, local usa sus modelos (Azure OpenAI) y nada más: búsqueda, Blob y
+# Content Safety siguen siendo los locales (Qdrant, data/).
+modelos_de_la_nube() {
+  local tmp=data/.modelos-nube.env linea
+  rm -f "$tmp"
+  ENV_FILE="$tmp" ./scripts/env_from_azure.sh > /dev/null
+  sed -i.bak -E '/^(AZURE_OPENAI_(ENDPOINT|API_KEY|CHAT_DEPLOYMENT|EMBEDDING_DEPLOYMENT|LIGERO_DEPLOYMENT)|VECTOR_STORE|AZURE_SEARCH_(ENDPOINT|API_KEY)|CONTENT_SAFETY_ENDPOINT|AZURE_STORAGE_(ACCOUNT_URL|CONTAINER)|ALMACEN_DOCUMENTOS)=/d' .env
+  rm -f .env.bak
+  asegurar_salto .env
+  grep -E '^AZURE_OPENAI_(ENDPOINT|API_KEY|CHAT_DEPLOYMENT|EMBEDDING_DEPLOYMENT|LIGERO_DEPLOYMENT)=' "$tmp" >> .env
+  rm -f "$tmp"
+}
+
 studio_activo() { [[ -f "$STUDIO_PID" ]] && kill -0 "$(cat "$STUDIO_PID")" 2> /dev/null; }
 
 levantar() {
   docker info > /dev/null 2>&1 || { echo "Docker no está en marcha: abre Docker Desktop y repite."; exit 1; }
+  secretos_locales > /dev/null
 
-  paso "1/5 Modelos en Azure (gpt-4o + text-embedding-ada-002)"
-  [[ -d infra/platform/.terraform ]] || terraform_init
   mkdir -p data
-  terraform -chdir=infra/platform apply -input=false -auto-approve -var-file="$TFVARS" \
-    -var "developer_principal_ids=[\"$(yo)\"]" \
-    | grep -E "Apply complete|No changes|Error" || true
+  if [[ $PROVEEDOR == azure ]]; then
+    paso "1/5 Modelos en Azure (gpt-4o + text-embedding-ada-002)"
+    requisitos_azure > /dev/null || { requisitos_azure; exit 1; }
+    [[ -d infra/platform/.terraform ]] || terraform_init
+    if hay_nube; then
+      echo "Hay un despliegue en la nube (make deploy): se usan sus modelos, no se crea nada."
+      paso "2/5 .env con el endpoint y la clave de los modelos de la nube (el resto, local)"
+      modelos_de_la_nube && echo "listo"
+    else
+      terraform -chdir=infra/platform apply -input=false -auto-approve -var-file="$TFVARS" \
+        -var "developer_principal_ids=[\"$(yo)\"]" \
+        | grep -E "Apply complete|No changes|Error" || true
 
-  paso "2/5 .env con el endpoint y la clave de los modelos"
-  ./scripts/env_from_azure.sh > /dev/null && echo "listo"
+      paso "2/5 .env con el endpoint y la clave de los modelos"
+      ./scripts/env_from_azure.sh > /dev/null && echo "listo"
+    fi
+  else
+    paso "1-2/5 Modelos: OpenAI o endpoint compatible (no se crea nada en Azure)"
+  fi
+
+  paso "Verificación de los modelos (credenciales, saldo, modelos y capacidades)"
+  uv run python -m app.modelos.diagnostico \
+    || { echo; echo "Los modelos no están listos: corrige lo anterior y repite make up."; exit 1; }
 
   paso "3/5 App, web, Qdrant y Redis en Docker"
   docker compose up --build -d 2>&1 | grep -E "Started|Running|Error" || true
@@ -83,7 +172,8 @@ levantar() {
   paso "4/5 Documentos de ejemplo (idempotente)"
   ./scripts/sembrar_local.sh
 
-  paso "5/5 LangGraph Studio"
+  paso "5/5 LangGraph Studio (y prompts en LangSmith)"
+  publicar_prompts
   if studio_activo || curl -sf http://127.0.0.1:2024/ok > /dev/null 2>&1; then
     echo "ya estaba en marcha"
   else
@@ -104,14 +194,23 @@ apagar() {
   paso "Docker (app, web, Qdrant, Redis)"
   docker compose down 2>&1 | grep -E "Removed|Stopped" | tail -4 || true
 
+  if [[ $PROVEEDOR != azure ]]; then
+    echo; echo "listo (MODELOS_PROVEEDOR=$PROVEEDOR: no hay recursos de Azure que borrar)."
+    return
+  fi
   paso "Modelos en Azure"
   [[ -d infra/platform/.terraform ]] || terraform_init
+  if hay_nube; then
+    echo "Son los del despliegue en la nube: se mantienen (make cloud-destroy los elimina)."
+    echo; echo "listo."
+    return
+  fi
   terraform -chdir=infra/platform destroy -input=false -auto-approve -var-file="$TFVARS" \
     -var "developer_principal_ids=[\"$(yo)\"]" \
     | grep -E "Destroy complete|Error" || true
 
   paso ".env sin endpoint ni clave"
-  sed -i.bak -E '/^(AZURE_OPENAI_(ENDPOINT|API_KEY|CHAT_DEPLOYMENT|EMBEDDING_DEPLOYMENT)|VECTOR_STORE|AZURE_SEARCH_(ENDPOINT|API_KEY)|CONTENT_SAFETY_ENDPOINT|AZURE_STORAGE_(ACCOUNT_URL|CONTAINER)|ALMACEN_DOCUMENTOS)=/d' .env
+  sed -i.bak -E '/^(AZURE_OPENAI_(ENDPOINT|API_KEY|CHAT_DEPLOYMENT|EMBEDDING_DEPLOYMENT|LIGERO_DEPLOYMENT)|VECTOR_STORE|AZURE_SEARCH_(ENDPOINT|API_KEY)|CONTENT_SAFETY_ENDPOINT|AZURE_STORAGE_(ACCOUNT_URL|CONTAINER)|ALMACEN_DOCUMENTOS)=/d' .env
   rm -f .env.bak
   echo "listo. Sin costes en Azure; tus datos locales siguen en data/ para la próxima vez."
 }
@@ -122,6 +221,16 @@ estado() { # estado URL → "✅" o "⛔"
 
 accesos() {
   paso "Accesos (solo desde este equipo)"
+  if [[ -n ${SSH_CONNECTION:-} ]]; then # servidor remoto: túnel SSH (sin login no se expone a la red)
+    printf '   Estás en un servidor remoto: abre la app desde tu equipo con un túnel SSH y usa las
+'
+    printf '   mismas URLs (localhost):
+'
+    printf '     ssh -N -L 8080:localhost:8080 -L 8000:localhost:8000 -L 2024:127.0.0.1:2024 %s@%s
+
+' \
+      "$(whoami)" "$(awk '{print $3}' <<< "$SSH_CONNECTION")"
+  fi
   printf '%s  Aplicación web ............ http://localhost:8080\n' "$(estado http://localhost:8080/)"
   printf '%s  API (docs interactivos) ... http://localhost:8000/docs\n' "$(estado http://localhost:8000/health)"
   printf '%s  Estado de la app .......... http://localhost:8000/ready\n' "$(estado http://localhost:8000/ready)"
@@ -144,7 +253,7 @@ PY
 
    Roles para probar: Empleado general · Recursos Humanos · Finanzas · Administrador
    Evaluación automática:  make evals-langsmith BASE_URL=http://localhost:8000
-   Apagar todo:            make apagar
+   Apagar todo:            make down
 EOF
 }
 

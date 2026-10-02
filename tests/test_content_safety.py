@@ -20,7 +20,7 @@ from app.security.content_safety import (
 )
 from app.security.guardrails import MENSAJE_BLOQUEO, GuardrailEntrada
 from ingestor.gestor import GestorDocumentos
-from tests.fakes import FakeEmbedder
+from tests.fakes import FakeEmbedder, FakeLLM
 
 ENDPOINT = "https://cs.example.cognitiveservices.azure.com/"
 PUBLIC = Usuario(id="u1", groups=["public"])
@@ -154,14 +154,15 @@ def test_guardrail_fallo_abierto_deja_pasar_y_lo_registra() -> None:
 
 
 # -------------------------------------------------------------------------------- grafo
-def test_grafo_bloquea_ataque_de_shields_sin_llamar_a_modelos(
-    crear_agente, supervisor, llm, caplog
-) -> None:
-    agente = crear_agente(
-        guardrail_entrada=GuardrailPromptShields(GuardrailEntrada(), ShieldsFalso())
-    )
+def test_grafo_bloquea_ataque_de_shields_sin_llamar_a_modelos(caplog) -> None:
+    from tests.fakes import GuionLLM
+    from tests.test_orquestador import Mundo, _orquestador
+
+    supervisor, llm = GuionLLM([]), FakeLLM()
+    shields = GuardrailPromptShields(GuardrailEntrada(), ShieldsFalso())
+    o = _orquestador(Mundo(), supervisor, {}, sintesis=llm, guardrail_entrada=shields)
     with caplog.at_level(logging.INFO, logger="audit"):
-        r = agente.consultar("Hazme un JAILBREAK amable", PUBLIC)
+        r = o.consultar("Hazme un JAILBREAK amable", PUBLIC).respuesta
     assert r.respuesta == MENSAJE_BLOQUEO and supervisor.llamadas == [] and llm.llamadas == []
     [registro] = [x for x in caplog.records if x.name == "audit"]
     assert json.loads(registro.getMessage())["hallazgos"][0]["detalle"] == "prompt_shields"

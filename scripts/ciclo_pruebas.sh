@@ -16,6 +16,7 @@ cd "$(dirname "$0")/.."
 
 export ARM_SUBSCRIPTION_ID="${ARM_SUBSCRIPTION_ID:-$(az account show --query id -o tsv)}"
 TFVARS="../envs/dev/platform.tfvars"
+source scripts/comun.sh
 PUERTO="${PUERTO:-8010}"
 PAUSA="${PAUSA:-2}" # segundos entre escenarios (cuota TPM baja)
 CICLO_FILE=reports/ciclos/.actual
@@ -37,6 +38,7 @@ entorno_app() {
 }
 
 prender() {
+  proteger_nube
   paso "prender: terraform apply"
   terraform -chdir=infra/platform apply -input=false -auto-approve -var-file="$TFVARS" \
     > "$RUN/terraform-apply.log" 2>&1
@@ -108,12 +110,13 @@ EOF
 apagar() {
   paso "apagar: app"
   [[ -f "$RUN/app.pid" ]] && kill "$(cat "$RUN/app.pid")" 2>/dev/null || true
+  proteger_nube
   paso "apagar: terraform destroy"
   terraform -chdir=infra/platform destroy -input=false -auto-approve -var-file="$TFVARS" \
     > "$RUN/terraform-destroy.log" 2>&1
   grep -E "Destroy complete|Error" "$RUN/terraform-destroy.log" | tee -a "$RUN/pasos.log"
   paso "apagar: .env sin los valores de los recursos eliminados (endpoints y claves)"
-  sed -i.bak -E '/^(AZURE_OPENAI_(ENDPOINT|API_KEY|CHAT_DEPLOYMENT|EMBEDDING_DEPLOYMENT)|VECTOR_STORE|AZURE_SEARCH_(ENDPOINT|API_KEY)|CONTENT_SAFETY_ENDPOINT|AZURE_STORAGE_(ACCOUNT_URL|CONTAINER)|QDRANT_(URL|API_KEY))=/d' .env
+  sed -i.bak -E '/^(AZURE_OPENAI_(ENDPOINT|API_KEY|CHAT_DEPLOYMENT|EMBEDDING_DEPLOYMENT|LIGERO_DEPLOYMENT)|VECTOR_STORE|AZURE_SEARCH_(ENDPOINT|API_KEY)|CONTENT_SAFETY_ENDPOINT|AZURE_STORAGE_(ACCOUNT_URL|CONTAINER)|QDRANT_(URL|API_KEY))=/d' .env
   rm -f .env.bak
 }
 
@@ -122,6 +125,13 @@ informe() {
   uv run python scripts/informe_ciclo.py "$RUN"
 }
 
+# Pasos en inglés (make cycle STEP=…) o en español.
+paso_cli="${1:-}"
+case "$paso_cli" in
+  on) paso_cli=prender ;; test) paso_cli=probar ;; save) paso_cli=guardar ;;
+  off) paso_cli=apagar ;; report) paso_cli=informe ;; all) paso_cli=todo ;;
+esac
+set -- "$paso_cli"
 case "${1:-}" in
   prender | probar | guardar | apagar | informe) "$1" ;;
   todo)

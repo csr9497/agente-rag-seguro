@@ -22,6 +22,8 @@ dependencies = [
     "pyjwt[crypto]",           # validación de tokens de Entra ID (RS256 + JWKS)
     "redis",                   # caché semántica compartida (Azure Cache for Redis)
     "httpx",                   # Prompt Shields por REST (ya dependencia de openai; uso directo)
+    "langgraph-checkpoint-postgres>=2",  # checkpointer de interrupts: reanudar tras un reinicio (fase 3)
+    "pycryptodome>=3.20",  # AES del serializador cifrado del checkpointer (sin PII en claro)
 ]
 
 [dependency-groups]

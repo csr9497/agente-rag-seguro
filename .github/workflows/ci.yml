@@ -1,16 +1,12 @@
 name: CI
 
+# Tests sin Azure (lint, unitarios, PostgreSQL, evaluaciones con modelos simulados, Terraform
+# y build de imágenes). Lo llama pipeline.yml antes de desplegar nada en Azure.
 on:
-  pull_request:
-  push:
-    branches: [main]
+  workflow_call:
 
 permissions:
   contents: read
-
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
 
 env:
   TRAZAS_MODO: apagado # CI nunca envía trazas a LangSmith
@@ -33,7 +29,7 @@ jobs:
         run: uv run python -m tests.integration.evaluador >> "$GITHUB_STEP_SUMMARY"
 
   postgres:
-    name: Paridad con PostgreSQL
+    name: PostgreSQL (paridad, RLS, checkpointer cifrado)
     timeout-minutes: 15
     runs-on: ubuntu-latest
     services:
@@ -53,7 +49,7 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --frozen
-      - run: uv run pytest tests/test_postgres.py -v
+      - run: uv run pytest -m postgres -v
         env:
           TEST_DATABASE_URL: postgresql+psycopg://agente_app:solo-para-ci@localhost:5432/agente
 
@@ -93,12 +89,14 @@ jobs:
       - run: terraform fmt -check -recursive infra
       - name: validate
         run: |
-          for stack in platform apps; do
+          for stack in platform identidad apps; do
             terraform -chdir=infra/$stack init -backend=false -input=false
             terraform -chdir=infra/$stack validate
           done
       - name: test de flags (sin credenciales ni llamadas a Azure)
-        run: terraform -chdir=infra/platform test
+        run: |
+          terraform -chdir=infra/platform test
+          terraform -chdir=infra/apps test
 
   docker:
     name: Build de imágenes

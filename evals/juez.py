@@ -3,7 +3,7 @@ estructurada. Es una señal, no una puerta única: se calibra con etiquetas huma
 
 from typing import Protocol
 
-from openai import AzureOpenAI
+from openai import OpenAI
 
 from evals.modelos import JuicioRespuesta
 
@@ -21,8 +21,10 @@ class Juez(Protocol):
     def juzgar(self, pregunta: str, fragmentos: list[str], respuesta: str) -> JuicioRespuesta: ...
 
 
-class JuezAzureOpenAI:
-    def __init__(self, cliente: AzureOpenAI, deployment: str) -> None:
+class JuezOpenAI:
+    """Juez con el modelo de chat del proveedor configurado (Azure OpenAI u OpenAI)."""
+
+    def __init__(self, cliente: OpenAI, deployment: str) -> None:
         self._cliente = cliente
         self._deployment = deployment
 

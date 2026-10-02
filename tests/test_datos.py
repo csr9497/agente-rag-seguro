@@ -3,16 +3,17 @@
 import json
 
 import pytest
+from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import ValidationError
 
 from app.config import Settings
 from app.datos.catalogo import permisos_por_consulta
-from app.deps import build_servicios
+from app.deps import build_orquestador, build_servicios
 from app.models.schemas import Chunk, Usuario
 from app.persistencia.repositorios import crear_motor, inicializar
 from app.security.acceso import VerificadorRegistro
 from app.tools.datos import SIN_ACCESO_DATOS, DataQuery, DataQueryArgs
-from tests.fakes import FakeEmbedder, FakeLLM, FakeSupervisor
+from tests.fakes import FakeEmbedder, FakeLLM, GuionLLM
 
 PUBLIC = Usuario(id="u", groups=["public"])
 RRHH = Usuario(id="r", groups=["rrhh"])
@@ -78,29 +79,46 @@ def test_verificador_contrasta_con_el_catalogo(tool) -> None:
     assert v.motivo_rechazo(inventado, ["rrhh"]) == "consulta_no_autorizada"
 
 
-def test_agente_usa_data_query_y_no_cachea(retriever, tmp_path) -> None:
-    llm = FakeLLM()
-    sup = FakeSupervisor([[("data_query", json.dumps({"consulta": "festivos", "anio": 2026}))]])
-    s = build_servicios(
-        Settings(database_url="sqlite://", almacen_local_dir=str(tmp_path)),
-        modelos=(FakeEmbedder(), llm, sup),
-        retriever=retriever,
-    )
-    r = s.agente.consultar_detallado("¿Qué festivos hay en 2026?", PUBLIC)
-    assert r.documentos_consultados == ["datos:festivos"]
-    _, user = llm.llamadas[0]
-    assert 'fuente="datos internos: festivos"' in user
-    assert not s.agente.consultar_detallado("¿Qué festivos hay en 2026?", PUBLIC).desde_cache
+class SupervisorDeDatos:
+    """Supervisor y rag_agent falsos: delega, pide `consulta` a data_query y cita el resultado."""
+
+    def __init__(self, consulta: dict) -> None:
+        self.consulta, self.vistos = consulta, []
+
+    def decidir(self, mensajes, herramientas, obligar_herramienta=False):  # noqa: ANN001, ANN201
+        self.vistos += mensajes
+        nombres = {h["function"]["name"] for h in herramientas}
+        tool = [m["content"] for m in mensajes if m["role"] == "tool"]
+        if "delegar_rag_agent" in nombres:
+            guion = GuionLLM([[("delegar_rag_agent", {"tarea": "datos"})]])
+        elif not tool:
+            guion = GuionLLM([[("data_query", self.consulta)]])
+        else:
+            cita = f"[datos:{self.consulta['consulta']}]" if "datos:" in tool[-1] else ""
+            guion = GuionLLM([], final=f"Resultado {cita}".strip())
+        return guion.decidir(mensajes, herramientas, obligar_herramienta)
 
 
-def test_agente_public_no_obtiene_datos_de_rrhh(retriever, tmp_path) -> None:
-    llm = FakeLLM()
-    sup = FakeSupervisor([[("data_query", json.dumps({"consulta": "plantilla_por_departamento"}))]])
+def _orquestador(retriever, tmp_path, sup, cache: bool = True):  # noqa: ANN001, ANN202
     s = build_servicios(
-        Settings(database_url="sqlite://", almacen_local_dir=str(tmp_path)),
-        modelos=(FakeEmbedder(), llm, sup),
-        retriever=retriever,
-    )
-    r = s.agente.consultar_detallado("¿Cuánta gente hay en IT?", PUBLIC)
-    assert r.respuesta.sin_contexto and llm.llamadas == []
-    assert SIN_ACCESO_DATOS in json.dumps(sup.llamadas[1], ensure_ascii=False)
+        Settings(database_url="sqlite://", almacen_local_dir=str(tmp_path), cache_semantica=cache),
+        modelos=(FakeEmbedder(), FakeLLM(), sup), retriever=retriever,
+    )  # fmt: skip
+    return build_orquestador(s, InMemorySaver(), (FakeEmbedder(), FakeLLM(), sup))
+
+
+def test_rag_agent_usa_data_query_y_no_se_cachea(retriever, tmp_path) -> None:
+    sup = SupervisorDeDatos({"consulta": "festivos", "anio": 2026})
+    o = _orquestador(retriever, tmp_path, sup)
+    r = o.consultar("¿Qué festivos hay en 2026?", PUBLIC)
+    assert r.documentos_consultados == ["datos:festivos"] and not r.respuesta.sin_contexto
+    assert r.respuesta.citas[0].fuente == "datos internos: festivos"
+    assert not o.consultar("¿Qué festivos hay en 2026?", PUBLIC).desde_cache
+
+
+def test_public_no_obtiene_datos_de_rrhh(retriever, tmp_path) -> None:
+    sup = SupervisorDeDatos({"consulta": "plantilla_por_departamento"})
+    r = _orquestador(retriever, tmp_path, sup).consultar("¿Cuánta gente hay en IT?", PUBLIC)
+    assert r.respuesta.sin_contexto and r.documentos_consultados == []
+    vistos = json.dumps(sup.vistos, ensure_ascii=False)
+    assert "Tecnología" not in vistos and SIN_ACCESO_DATOS in vistos

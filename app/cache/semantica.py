@@ -14,12 +14,14 @@ import hashlib
 import math
 import threading
 from collections import OrderedDict
+from datetime import UTC, datetime
 from typing import Protocol
 
 from pydantic import BaseModel
 
 from app.models.schemas import RespuestaConsulta
 from app.persistencia.repositorios import RepositorioDocumentos
+from app.security.acl import es_rol
 
 
 class EntradaCache(BaseModel):
@@ -77,13 +79,31 @@ class CacheMemoria:
         return len(self._entradas)
 
 
-def alcance_de_permisos(registro: RepositorioDocumentos, roles: list[str], version: str) -> str:
-    """Huella de lo que `roles` puede ver ahora mismo (+ versión de modelo/app)."""
+def alcance_de_permisos(
+    registro: RepositorioDocumentos,
+    roles: list[str],
+    version: str,
+    ahora: datetime | None = None,
+) -> str:
+    """Huella de lo que el usuario puede ver AHORA (+ versión de modelo/app).
+
+    `roles` son los grupos efectivos (roles, «dept:», «user:»). Entran los roles reales (los
+    datos internos dependen del rol) y los documentos visibles y vigentes: revocar o caducar
+    un documento cambia el alcance, así que una respuesta construida con él no se reutiliza.
+    «dept:»/«user:» solo cuentan a través de lo que dejan ver: dos personas con la misma
+    visibilidad comparten caché."""
+    momento = ahora or datetime.now(UTC)
+    grupos = set(roles)
     docs = sorted(
-        (d.doc_id, d.doc_hash, d.estado) for d in registro.listar() if set(d.roles) & set(roles)
+        (d.doc_id, d.doc_hash, d.estado)
+        for d in registro.listar()
+        if grupos & set(d.roles)
+        and not d.revocado
+        and not (d.expira_en and datetime.fromisoformat(d.expira_en) <= momento)
     )
-    huella = hashlib.sha256(repr((sorted(roles), docs, version)).encode()).hexdigest()
-    return f"{','.join(sorted(roles))}:{huella[:24]}"
+    reales = sorted(r for r in roles if es_rol(r))
+    huella = hashlib.sha256(repr((reales, docs, version)).encode()).hexdigest()
+    return f"{','.join(reales)}:{huella[:24]}"
 
 
 class CacheRedis:

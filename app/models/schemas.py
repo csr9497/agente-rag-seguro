@@ -84,6 +84,20 @@ class RespuestaLLM(BaseModel):
     encontrado: bool = Field(description="False si la respuesta no está en el contexto")
 
 
+class AprobacionPendiente(BaseModel):
+    """Una pausa (interrupt) que espera a una persona: confirmar, aprobar o resolver."""
+
+    interrupt_id: str
+    aprobacion_id: str | None = None
+    type: str  # confirm_user | approve_staff | escalate_human
+    agent: str
+    tool: str
+    args_preview: str = ""
+    risk: str = ""
+    expires_at: str = ""
+    como_responder: str = ""
+
+
 class Usuario(BaseModel):
     id: str
     groups: list[str]
@@ -104,6 +118,9 @@ class Hallazgo(BaseModel):
         "autolesion",
         "acoso",
         "dato_sensible",
+        "manipulacion",
+        "ilicito",
+        "fuera_de_ambito",
     ]
     detalle: str
     accion: Literal["bloquear", "enmascarar", "eliminar", "registrar"]

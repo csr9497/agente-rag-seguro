@@ -1,0 +1,109 @@
+name: Entorno efímero en Azure
+
+# Despliega un entorno completo, lo prueba y lo apaga, en un solo job (la web solo acepta la
+# IP de este runner: modo «ip», sin login). Lo llama pipeline.yml para dev, staging y main.
+#
+#   deploy (scripts/nube.sh desplegar) → integración + evaluaciones (LangSmith) → destroy
+#
+# El destroy se ejecuta siempre, también si los tests fallan o el run se cancela.
+on:
+  workflow_call:
+    inputs:
+      entorno:
+        description: dev, staging o main
+        type: string
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  ENTORNO: ${{ inputs.entorno }}
+  # Prompts de LangSmith con la etiqueta del entorno: solo main mueve «prod».
+  PROMPTS_ETIQUETA: ${{ inputs.entorno == 'main' && 'prod' || inputs.entorno }}
+  LOGIN_PROVEEDOR: ip
+  LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
+  # Identidad de despliegue del bootstrap (OIDC, sin contraseñas). Terraform pide un token
+  # nuevo a GitHub en cada llamada, así que no caduca aunque el job dure más de una hora.
+  ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+  ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  ARM_USE_OIDC: "true"
+  TF_IN_AUTOMATION: "true"
+
+jobs:
+  entorno:
+    name: Desplegar, probar y apagar (${{ inputs.entorno }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    # Las credenciales OIDC de Azure están ligadas a los environments dev, staging y main.
+    environment: ${{ inputs.entorno }}
+    # Un solo entorno a la vez en toda la suscripción: AI Search free y Content Safety F0
+    # admiten uno por suscripción y la cuota de gpt-4o es compartida.
+    concurrency:
+      group: azure-suscripcion
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_wrapper: false
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - uses: docker/setup-buildx-action@v4
+      - name: az login (OIDC)
+        uses: azure/login@v3
+        with:
+          client-id: ${{ env.ARM_CLIENT_ID }}
+          tenant-id: ${{ env.ARM_TENANT_ID }}
+          subscription-id: ${{ env.ARM_SUBSCRIPTION_ID }}
+
+      - name: Desplegar
+        run: ./scripts/nube.sh desplegar
+      - name: URL de la web
+        id: web
+        run: |
+          url=$(./scripts/nube.sh url)
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "### ${ENTORNO}: $url" >> "$GITHUB_STEP_SUMMARY"
+          echo "Trazas en LangSmith: proyecto \`agente-rag-ragseg-${ENTORNO}\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Matriz de escenarios (permisos por rol)
+        env:
+          INTEGRATION_BASE_URL: ${{ steps.web.outputs.url }}/api
+          INTEGRATION_REPORT: reports/integracion-${{ inputs.entorno }}.md
+        run: uv run pytest -m integration
+      - name: Evaluaciones por capas (dataset y experimento en LangSmith)
+        if: ${{ !cancelled() && steps.web.outcome == 'success' }}
+        run: >-
+          uv run python -m evals.ejecutar --base-url "${{ steps.web.outputs.url }}/api" --langsmith
+          --salida "reports/evaluacion-${ENTORNO}.md"
+      - name: Informes
+        if: always()
+        run: cat reports/integracion-"$ENTORNO".md reports/evaluacion-"$ENTORNO".md >> "$GITHUB_STEP_SUMMARY" 2> /dev/null || true
+
+      # El token de az login dura ~1 h y no se puede renovar: se repite antes de apagar.
+      - name: az login (OIDC) para apagar
+        if: always()
+        uses: azure/login@v3
+        with:
+          client-id: ${{ env.ARM_CLIENT_ID }}
+          tenant-id: ${{ env.ARM_TENANT_ID }}
+          subscription-id: ${{ env.ARM_SUBSCRIPTION_ID }}
+      - name: Apagar (siempre)
+        if: always()
+        env:
+          CONFIRM: "yes"
+        run: ./scripts/nube.sh destruir
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: informes-${{ inputs.entorno }}
+          path: |
+            reports/integracion-${{ inputs.entorno }}.md
+            reports/evaluacion-${{ inputs.entorno }}.md
+            data/nube/${{ inputs.entorno }}/
+          if-no-files-found: ignore

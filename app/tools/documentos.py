@@ -8,6 +8,12 @@ from app.retrieval.base import Embedder, Retriever
 from app.tools.base import PATRON_GRUPO, SIN_ACCESO, DocId, ResultadoHerramienta
 
 MAX_CATALOGO = 50
+# El catálogo solo trae títulos: si la pregunta es sobre lo que dicen, hay que leerlos (con
+# gpt-4o de Azure, «¿cuáles son las políticas?» se respondía solo con la lista de títulos).
+NOTA_CATALOGO = (
+    "\n\n(Solo son títulos. Si la pregunta es sobre lo que dicen estos documentos, léelos con "
+    "search_documents o leer_documento antes de responder y cita cada uno.)"
+)
 
 
 # ------------------------------------------------------------------ listar_documentos
@@ -49,7 +55,7 @@ class ListarDocumentos:
             chunk_id=f"catalogo#{args.grupo or '*'}",
             doc_id="catalogo",
             fuente="catálogo de documentos",
-            contenido="Documentos disponibles:\n" + "\n".join(lineas),
+            contenido="Documentos disponibles:\n" + "\n".join(lineas) + NOTA_CATALOGO,
             acl_groups=grupos,
         )
         return ResultadoHerramienta(chunks=[ChunkRecuperado(chunk=catalogo, score=1.0)])

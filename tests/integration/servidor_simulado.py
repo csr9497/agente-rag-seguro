@@ -17,58 +17,59 @@ from qdrant_client import QdrantClient
 from app.config import Settings
 from app.deps import build_servicios
 from app.main import app as api
-from app.models.schemas import DecisionSupervisor, ToolCall
+from app.models.schemas import DecisionSupervisor
 from app.retrieval.qdrant_retriever import QdrantRetriever
 from ingestor.sources import LocalFolderSource
-from tests.fakes import DIM, FakeEmbedder, FakeLLM
+from tests.conftest import conectar_orquestador
+from tests.fakes import DIM, FakeEmbedder, FakeLLM, GuionLLM, RagEco
 
 RAIZ = Path(__file__).parents[2]
 
 
-class SupervisorPorPalabras:
-    """Elige la tool por palabras de la pregunta actual (no del historial)."""
+class SupervisorPorPalabras(RagEco):
+    """Supervisor y rag_agent simulados. Como supervisor elige por palabras de la pregunta
+    actual (no del historial): conversación, aclaración o delegar en rag_agent. Como rag_agent
+    busca (o consulta data_query si pregunta por festivos) y cita lo primero que encuentra."""
 
     def decidir(self, mensajes, herramientas, obligar_herramienta=False) -> DecisionSupervisor:  # noqa: ANN001
-        if any(m["role"] == "assistant" for m in mensajes):
-            return DecisionSupervisor(
-                tool_calls=[], mensaje_asistente={"role": "assistant", "content": "LISTO"}
-            )
+        nombres = {h["function"]["name"] for h in herramientas}
         contenido = next(m["content"] for m in mensajes if m["role"] == "user")
-        pregunta = contenido.split("<pregunta>")[-1].lower()
-        if pregunta.strip(" ¡!¿?.").startswith(("hola", "gracias", "adiós", "buenos días")):
-            nombre, args = "conversacion", {"tipo": "saludo"}
-        elif any(p in pregunta for p in ("receta", "pizza", "fútbol", "chiste")):
-            nombre, args = "conversacion", {"tipo": "fuera_de_ambito"}
-        elif pregunta.strip().startswith("¿y eso") and "<historial>" not in contenido:
-            nombre, args = (
-                "pedir_aclaracion",
-                {
+        pregunta = contenido.split("<pregunta>")[-1].split("</pregunta>")[0].strip().lower()
+        tool = [m["content"] for m in mensajes if m["role"] == "tool"]
+        if "delegar_rag_agent" in nombres:
+            if pregunta.strip(" ¡!¿?.").startswith(("hola", "gracias", "adiós", "buenos días")):
+                return self._llamar("conversacion", {"tipo": "saludo"})
+            if any(p in pregunta for p in ("receta", "pizza", "fútbol", "chiste")):
+                return self._llamar("conversacion", {"tipo": "fuera_de_ambito"})
+            if pregunta.strip().startswith("¿y eso") and "<historial>" not in contenido:
+                return self._llamar("pedir_aclaracion", {
                     "pregunta": "¿A qué te refieres? ¿Sobre qué tema necesitas el dato?",
                     "opciones": ["Días de vacaciones al año", "Compensación por teletrabajo"],
-                },
-            )
-        elif "ticket" in pregunta:
-            nombre, args = (
-                "proponer_accion",
-                {
-                    "accion": "abrir_ticket",
-                    "asunto": "Incidencia de IT",
-                    "descripcion": pregunta[:200],
-                    "prioridad": "media",
-                },
-            )
-        elif "festivos" in pregunta:
-            nombre, args = "data_query", {"consulta": "festivos", "anio": 2026}
-        else:
-            nombre, args = "rag_retrieve", {"consulta": pregunta[:500]}
-        tc = ToolCall(id="c0", nombre=nombre, argumentos=json.dumps(args))
-        funcion = {"name": nombre, "arguments": tc.argumentos}
-        mensaje = {
-            "role": "assistant",
-            "content": None,
-            "tool_calls": [{"id": "c0", "type": "function", "function": funcion}],
-        }
-        return DecisionSupervisor(tool_calls=[tc], mensaje_asistente=mensaje)
+                })  # fmt: skip
+        elif not tool and "festivos" in contenido.lower():
+            return self._llamar("data_query", {"consulta": "festivos", "anio": 2026})
+        elif tool:  # respuesta extractiva: el primer fragmento recuperado, con su cita
+            self.vistos += [dict(m) for m in mensajes]
+            fragmentos = _fragmentos(tool[-1])
+            self.turnos, self.llamadas = [], []
+            self.final = (
+                f"{' '.join(fragmentos[0]['contenido'].split())[:400]} [{fragmentos[0]['doc_id']}]"
+                if fragmentos else "No lo encuentro."
+            )  # fmt: skip
+            return GuionLLM.decidir(self, mensajes, herramientas, obligar_herramienta)
+        return super().decidir(mensajes, herramientas, obligar_herramienta)
+
+    def _llamar(self, nombre: str, args: dict) -> DecisionSupervisor:
+        guion = GuionLLM([[(nombre, args)]])
+        return guion.decidir([], [], False)
+
+
+def _fragmentos(dato: str) -> list[dict]:
+    """Fragmentos del resultado de una tool (JSON dentro de <dato_herramienta>)."""
+    try:
+        return json.loads(dato[dato.index("{") : dato.rindex("}") + 1]).get("fragmentos", [])
+    except ValueError:
+        return []
 
 
 @asynccontextmanager
@@ -83,13 +84,15 @@ async def lifespan(_: FastAPI):
         cache_backend="memoria",
         almacen_local_dir=tempfile.mkdtemp(),
     )
+    modelos = (FakeEmbedder(), FakeLLM(), SupervisorPorPalabras())
     s = build_servicios(
         settings,
-        modelos=(FakeEmbedder(), FakeLLM(), SupervisorPorPalabras()),
+        modelos=modelos,
         retriever=QdrantRetriever(QdrantClient(":memory:"), "documentos", DIM),
     )
     s.gestor.sincronizar(LocalFolderSource(RAIZ / "ingestor" / "sample_docs"))
-    api.state.servicios, api.state.agente, api.state.gestor = s, s.agente, s.gestor
+    api.state.servicios, api.state.gestor = s, s.gestor
+    conectar_orquestador(s, modelos)  # como app/main.py, con checkpointer en memoria
     yield
 
 

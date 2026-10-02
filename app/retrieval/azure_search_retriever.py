@@ -17,9 +17,9 @@ from azure.search.documents.indexes.models import (
 from azure.search.documents.models import VectorizedQuery
 
 from app.models.schemas import Chunk, ChunkRecuperado, DocumentoIndexado, indice_chunk
+from app.security.acl import entrada_valida
 
 # IDs de grupo permitidos en el filtro OData (nombres simples o GUIDs de Entra ID).
-_GRUPO_VALIDO = re.compile(r"^[A-Za-z0-9_.\-]+$")
 
 
 def build_acl_filter(groups: list[str]) -> str:
@@ -27,7 +27,7 @@ def build_acl_filter(groups: list[str]) -> str:
     if not groups:
         raise ValueError("Se requiere al menos un grupo")
     for g in groups:
-        if not _GRUPO_VALIDO.match(g):
+        if not entrada_valida(g):  # rol, dept:<d> o user:<id>; nunca comillas ni comas
             raise ValueError(f"Identificador de grupo no válido: {g!r}")
     return f"acl_groups/any(g: search.in(g, '{','.join(groups)}', ','))"
 

@@ -5,6 +5,8 @@ documentos (fuente de verdad de permisos). Dos fuentes independientes: detecta c
 huérfanos, ACL desincronizadas, documentos en cuarentena o un índice manipulado.
 """
 
+from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Protocol
 
 from app.models.schemas import Chunk
@@ -30,10 +32,14 @@ class VerificadorPermisivo:
 
 class VerificadorRegistro:
     def __init__(
-        self, registro: RepositorioDocumentos, permisos_datos: dict[str, list[str]] | None = None
+        self,
+        registro: RepositorioDocumentos,
+        permisos_datos: dict[str, list[str]] | None = None,
+        ahora: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self._registro = registro
         self._permisos_datos = permisos_datos or {}
+        self._ahora = ahora
 
     def motivo_rechazo(self, chunk: Chunk, roles_usuario: list[str]) -> str | None:
         roles = set(roles_usuario)
@@ -50,6 +56,10 @@ class VerificadorRegistro:
             return "no_registrado"
         if doc.estado != "activo":
             return f"documento_{doc.estado}"
+        if doc.revocado:
+            return "documento_revocado"
+        if doc.expira_en and datetime.fromisoformat(doc.expira_en) <= self._ahora():
+            return "documento_caducado"
         if not roles & set(doc.roles):
             return "rol_no_autorizado_registro"
         if not roles & set(chunk.acl_groups):

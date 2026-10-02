@@ -1,10 +1,77 @@
 CONDA_ENV ?= agente-rag
 BASE_URL  ?= http://localhost:8000
 
-.PHONY: help setup sync lint fmt test test-postgres integration matriz evals evals-simulado evals-langsmith up down ingest studio env-from-azure tf-validate validar-infra ciclo modelos-up modelos-down instalar levantar apagar accesos
+.PHONY: help install bootstrap check-models up down status docker-up docker-down ingest studio prompts \
+	deploy cloud-status cloud-destroy cloud-local cloud-local-stop env-from-azure check-infra cycle \
+	setup sync lint fmt test test-postgres evals-mock evals evals-langsmith integration matrix tf-validate
 
-help: ## Lista los comandos
-	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-16s %s\n", $$1, $$2}'
+help: ## Lista los comandos (guía completa con valores: docs/comandos.md)
+	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-17s %s\n", $$1, $$2}'
+
+# --- Local ---------------------------------------------------------------------------------
+
+install: ## Primer uso tras clonar: requisitos, dependencias, .env y Terraform
+	./scripts/entorno_local.sh instalar
+
+check-models: ## Credenciales, saldo, modelos y capacidades del proveedor (NO_CALLS=1: sin llamadas)
+	uv run python -m app.modelos.diagnostico $(if $(NO_CALLS),--sin-llamadas,)
+
+up: ## Entorno local completo: modelos + Docker + documentos + Studio, y muestra las URLs
+	./scripts/entorno_local.sh levantar
+
+down: ## Para el entorno local (sin nube desplegada, borra también los modelos de Azure)
+	./scripts/entorno_local.sh apagar
+
+status: ## Estado y URLs del entorno local (app, API, Studio, LangSmith)
+	./scripts/entorno_local.sh accesos
+
+docker-up: ## Solo los contenedores (app, web, Qdrant, Redis), sin preparar modelos
+	docker compose up --build -d
+
+docker-down: ## Para los contenedores
+	docker compose down
+
+ingest: ## Indexa ingestor/sample_docs en el Qdrant local
+	docker compose run --rm ingest
+
+studio: ## Solo LangGraph Studio (:2024) con .env; publica antes los prompts
+	@bash -c 'source scripts/comun.sh && publicar_prompts'
+	uv run langgraph dev --allow-blocking
+
+prompts: ## Publica app/prompts/ en LangSmith (TAG=dev por defecto; TAG=prod para promover)
+	uv run python -m app.prompts.publicar --etiqueta $(or $(TAG),dev)
+
+# --- Azure ---------------------------------------------------------------------------------
+
+bootstrap: ## Paso 0 (una vez por suscripción): estado remoto de Terraform; GITHUB_REPO=owner/repo añade CI/CD
+	$(if $(GITHUB_REPO),GITHUB_REPO=$(GITHUB_REPO)) ./infra/bootstrap/bootstrap.sh
+
+# ENV=dev|staging|main (defecto dev): entorno de Azure, con sus propios recursos y estado.
+deploy: ## Despliega en Azure y deja todo listo: web, prompts, app y Studio locales contra la nube
+	ENTORNO=$(or $(ENV),dev) $(if $(LOGIN_PROVIDER),LOGIN_PROVIDER=$(LOGIN_PROVIDER)) $(if $(ALLOWED_IPS),ALLOWED_IPS='$(ALLOWED_IPS)') ./scripts/nube.sh desplegar
+
+cloud-status: ## URL y salud del despliegue en Azure, y enlace de LangSmith
+	ENTORNO=$(or $(ENV),dev) ./scripts/nube.sh estado
+
+cloud-destroy: ## Elimina todo lo desplegado en Azure (pide confirmación; CONFIRM=yes la omite)
+	ENTORNO=$(or $(ENV),dev) ./scripts/nube.sh destruir
+
+cloud-local: ## (Re)arranca en segundo plano app (:8090) y Studio (:2025) contra Azure (lo hace deploy)
+	./scripts/local_nube.sh
+
+cloud-local-stop: ## Detiene la app y Studio de cloud-local
+	./scripts/local_nube.sh parar
+
+env-from-azure: ## Rellena .env con endpoints y claves de lo desplegado en Azure (Key Vault)
+	./scripts/env_from_azure.sh
+
+check-infra: ## Comprueba cada servicio desplegado (informe en reports/infra/)
+	uv run python scripts/validar_infra.py
+
+cycle: ## Ciclo de pruebas contra Azure: STEP=on|test|save|off|report|all (defecto all)
+	./scripts/ciclo_pruebas.sh $(or $(STEP),all)
+
+# --- Calidad y entorno ---------------------------------------------------------------------
 
 setup: ## Crea el entorno conda (Python 3.12) y la .venv de uv sobre ese intérprete
 	conda env create -f environment.yml --yes
@@ -24,12 +91,15 @@ fmt: ## Aplica formato
 test: ## Tests unitarios
 	uv run pytest
 
-test-postgres: ## Paridad con PostgreSQL (levanta el perfil postgres de docker-compose)
-	docker compose --profile postgres up -d postgres
-	TEST_DATABASE_URL=postgresql+psycopg://agente_app:$$(grep '^POSTGRES_PASSWORD=' .env | cut -d= -f2-)@localhost:55432/agente \
-		uv run pytest tests/test_postgres.py -v
+test-postgres: ## Tests con PostgreSQL real (RLS, checkpointer, paridad) en la base agente_test
+	docker compose up -d --wait postgres
+	docker compose exec -T postgres psql -U agente_app -d agente -tAc \
+		"SELECT 1 FROM pg_database WHERE datname='agente_test'" | grep -q 1 \
+		|| docker compose exec -T postgres psql -U agente_app -d agente -c "CREATE DATABASE agente_test"
+	TEST_DATABASE_URL=postgresql+psycopg://agente_app:$$(grep '^POSTGRES_PASSWORD=' .env | cut -d= -f2-)@localhost:55432/agente_test \
+		uv run pytest -m postgres -v
 
-evals-simulado: ## Gate de CI en local: app con modelos simulados + evaluaciones por capas
+evals-mock: ## Gate de CI en local: app con modelos simulados + evaluaciones por capas
 	uv run uvicorn tests.integration.servidor_simulado:app --port 8767 & echo $$! > .servidor.pid; \
 	for i in $$(seq 1 30); do curl -sf localhost:8767/api/health >/dev/null && break; sleep 1; done; \
 	uv run python -m evals.ejecutar --base-url http://localhost:8767/api; r=$$?; kill $$(cat .servidor.pid); rm -f .servidor.pid; exit $$r
@@ -37,52 +107,17 @@ evals-simulado: ## Gate de CI en local: app con modelos simulados + evaluaciones
 integration: ## Matriz de escenarios contra BASE_URL (informe en reports/integracion.md)
 	INTEGRATION_BASE_URL=$(BASE_URL) uv run pytest -m integration
 
-evals: ## Evaluaciones por capas contra BASE_URL (umbrales bloqueantes; JUEZ=1 añade gpt-4o)
-	uv run python -m evals.ejecutar --base-url $(BASE_URL) $(if $(JUEZ),--juez,)
+evals: ## Evaluaciones por capas contra BASE_URL (umbrales bloqueantes; JUDGE=1 añade el juez LLM)
+	uv run python -m evals.ejecutar --base-url $(BASE_URL) $(if $(JUDGE),--juez,)
 
-evals-langsmith: ## Igual que evals + dataset y experimento en LangSmith
-	uv run python -m evals.ejecutar --base-url $(BASE_URL) --langsmith $(if $(JUEZ),--juez,)
+evals-langsmith: ## Igual que evals + dataset y experimento en LangSmith (JUDGE=1 opcional)
+	uv run python -m evals.ejecutar --base-url $(BASE_URL) --langsmith $(if $(JUDGE),--juez,)
 
-matriz: ## Informe de cobertura de la matriz sin ejecutar nada
+matrix: ## Informe de cobertura de la matriz sin ejecutar nada
 	uv run python -m tests.integration.evaluador
-
-up: ## Levanta app + web + qdrant + redis
-	docker compose up --build -d
-
-down:
-	docker compose down
-
-ingest: ## Indexa ingestor/sample_docs en el Qdrant local
-	docker compose run --rm ingest
-
-studio: ## LangGraph Studio: servidor de desarrollo del grafo en http://127.0.0.1:2024
-	uv run langgraph dev --allow-blocking
-
-env-from-azure: ## Rellena .env con endpoint y clave de Azure OpenAI (desde Key Vault)
-	./scripts/env_from_azure.sh
-
-instalar: ## Primer uso tras clonar: requisitos, dependencias, .env y Terraform
-	./scripts/entorno_local.sh instalar
-
-levantar: ## Todo el entorno: modelos en Azure + Docker + documentos + Studio, y muestra los accesos
-	./scripts/entorno_local.sh levantar
-
-apagar: ## Para Studio y Docker, elimina los modelos de Azure y limpia .env (sin costes)
-	./scripts/entorno_local.sh apagar
-
-accesos: ## Estado de cada servicio y sus URLs (app, API, Studio, LangSmith)
-	./scripts/entorno_local.sh accesos
-
-modelos-up: levantar ## Alias de levantar
-modelos-down: apagar ## Alias de apagar
-
-validar-infra: ## Comprueba cada servicio desplegado (informe en reports/infra/)
-	uv run python scripts/validar_infra.py
-
-ciclo: ## Ciclo contra Azure: PASO=prender|probar|guardar|apagar|informe|todo
-	./scripts/ciclo_pruebas.sh $(or $(PASO),todo)
 
 tf-validate: ## fmt + validate de los stacks de Terraform
 	terraform fmt -check -recursive infra
-	for s in platform apps; do terraform -chdir=infra/$$s init -backend=false -input=false >/dev/null && terraform -chdir=infra/$$s validate; done
+	for s in platform identidad apps; do terraform -chdir=infra/$$s init -backend=false -input=false >/dev/null && terraform -chdir=infra/$$s validate; done
 	terraform -chdir=infra/platform test
+	terraform -chdir=infra/apps test

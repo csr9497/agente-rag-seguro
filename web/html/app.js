@@ -28,6 +28,9 @@ const estado = {
   historial: [],       // mis conversaciones con el rol activo (resúmenes)
   aviso: null,         // aviso en el chat { tipo, titulo, texto } (sustituye a alert())
   errorCarga: null,    // no se pudieron cargar los roles
+  aprobaciones: [],    // cola de aprobaciones que puedo resolver (multiagente)
+  yo: null,            // { id, roles }: identidad de la sesión (para pedir acceso)
+  asignaciones: [],    // roles asignados a personas (solo administrador)
 };
 
 // ------------------------------------------------------------------ utilidades
@@ -101,6 +104,8 @@ async function iniciar() {
   try { r = await api("roles", { conRol: false }); } catch (err) { r = { ok: false, status: 0, cuerpo: null }; }
   estado.errorCarga = r.ok ? null : (r.status ? mensajeError(r) : "No hay conexión con el servidor");
   estado.roles = r.ok ? r.cuerpo : [];
+  const yo = await api("yo", { conRol: false }).catch(() => ({ ok: false }));
+  estado.yo = yo.ok ? yo.cuerpo : null;
   const guardada = leer("conversacion");
   if (guardada) {
     const rc = await api(`conversaciones/${encodeURIComponent(guardada)}`, { conRol: false });
@@ -110,18 +115,25 @@ async function iniciar() {
     } else guardar("conversacion", null);
   }
   if (estado.rol) await cargarDatosDelRol();
+  document.querySelector(".env").textContent = conLogin()
+    ? `Sesión iniciada como ${estado.yo.id} · solo ves los roles que tienes asignados`
+    : "Sin login · selección de rol libre (modo demo)";
   pintarTodo();
 }
 
 async function cargarDatosDelRol() {
   if (!estado.rol) return;
-  const [docs, todos] = await Promise.all([
+  const admin = puede("administrar_roles");
+  const [docs, todos, asignaciones] = await Promise.all([
     api("documentos"),
-    puede("administrar_roles") ? api("roles/todos") : Promise.resolve({ ok: false }),
+    admin ? api("roles/todos") : Promise.resolve({ ok: false }),
+    admin ? api("roles/asignaciones") : Promise.resolve({ ok: false }),
     cargarHistorial(),
+    cargarAprobaciones(), // al final: el resultado se desestructura por posición
   ]);
   estado.docs = docs.ok ? docs.cuerpo : [];
   estado.todos = todos.ok ? todos.cuerpo : [];
+  estado.asignaciones = asignaciones.ok ? asignaciones.cuerpo : [];
 }
 
 async function cargarHistorial() {
@@ -159,16 +171,34 @@ function salirDelRol() {
 }
 
 // ------------------------------------------------------------------ cabecera
+// Sin login (local o un servidor propio, rol libre) o con Easy Auth de Azure: lo dice el
+// servidor (/yo), no el nombre del host desde el que se abre la web.
+const conLogin = () => Boolean(estado.yo && estado.yo.login);
+
+function cerrarSesion() {
+  if (!conLogin()) return null;
+  return el("a", { class: "btn btn-ghost", href: "/.auth/logout?post_logout_redirect_uri=/" }, "Cerrar sesión");
+}
+
 function pintarCabecera() {
   const cont = $("header-actions");
-  if (!estado.rol) { cont.replaceChildren(el("span", { class: "hint" }, "Elige un rol para empezar")); return; }
+  if (!estado.rol) {
+    cont.replaceChildren(...[el("span", { class: "hint" }, "Elige un rol para empezar"), cerrarSesion()].filter(Boolean));
+    return;
+  }
   const cambiar = el("button", { class: "btn btn-ghost", type: "button" }, "Cambiar rol");
   cambiar.addEventListener("click", salirDelRol);
   const nueva = el("button", { class: "btn btn-secondary", type: "button" }, icono("i-new"), "Nueva conversación");
   nueva.addEventListener("click", () => elegirRol(estado.rol));
-  cont.replaceChildren(
+  cont.replaceChildren(...[
     el("span", { class: "role-chip" }, icono("i-users"), el("span", {}, "Rol: ", el("strong", {}, estado.rol.nombre))),
-    cambiar, nueva);
+    cambiar, nueva, cerrarSesion()].filter(Boolean));
+}
+
+function sinRoles() {
+  if (!estado.yo) return el("p", { class: "hint" }, "No tienes roles disponibles.");
+  return notice("info", "i-lock", "Aún no tienes acceso",
+    el("span", {}, "Pide a un administrador que te asigne un rol. Tu usuario es ", el("strong", { class: "mono" }, estado.yo.id), "."));
 }
 
 // ------------------------------------------------------------------ chat
@@ -196,7 +226,7 @@ function pintarChat() {
     });
     body.replaceChildren(...[aviso].filter(Boolean), el("div", { class: "role-picker" },
       el("p", {}, "¿Con qué rol quieres consultar? Solo verás respuestas basadas en los documentos de ese rol."),
-      tarjetas.length ? el("div", { class: "role-cards" }, tarjetas) : el("p", { class: "hint" }, "No tienes roles disponibles.")));
+      tarjetas.length ? el("div", { class: "role-cards" }, tarjetas) : sinRoles()));
     return;
   }
   $("chat-sub").textContent = `Con permisos de ${estado.rol.nombre} · ${estado.docs.length} documentos disponibles`;
@@ -273,39 +303,91 @@ async function valorar(m, valoracion, comentario = null) {
   pintarChat();
 }
 
-const ETIQUETA_ACCION = { abrir_ticket: "Abrir ticket de soporte", solicitar_vacaciones: "Solicitar vacaciones" };
-const ESTADO_ACCION = {
-  pendiente: ["warn", "Pendiente de tu aprobación"],
-  ejecutada: ["ok", "Ejecutada"],
-  rechazada: ["info", "Rechazada"],
-  error: ["danger", "Error al ejecutar"],
+// ------------------------------------------------------------ aprobaciones (human-in-the-loop)
+const ETIQUETA_TOOL = {
+  create_ticket: "Crear ticket de soporte",
+  add_ticket_comment: "Comentar tu ticket",
+  create_hr_case: "Crear caso para RR.HH.",
+  add_hr_case_note: "Añadir información a tu caso",
+  request_document_access: "Solicitar acceso a un documento",
+  escalate_human: "Revisión por una persona",
 };
+const CAMPO = { category: "Categoría", priority: "Prioridad", title: "Título", steps: "Detalle",
+  summary: "Resumen", titulo: "Documento", motivo: "Motivo", comment: "Comentario", note: "Nota" };
 
-function tarjetasAccion(m) {
-  if (!m.acciones || !m.acciones.length) return null;
-  return el("div", { class: "acciones" }, m.acciones.map((a) => {
-    const [clase, texto] = ESTADO_ACCION[a.estado] || ["", a.estado];
-    const datos = el("dl", {}, Object.entries(a.datos).flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, String(v))]));
-    const tarjeta = el("div", { class: `accion ${clase}`, role: "group", "aria-label": ETIQUETA_ACCION[a.tipo] || a.tipo },
-      el("div", { class: "accion-head" }, el("strong", {}, ETIQUETA_ACCION[a.tipo] || a.tipo), el("span", { class: `badge ${clase}` }, texto)),
-      datos, a.resultado ? el("p", { class: "hint" }, a.resultado) : null);
-    if (a.estado === "pendiente") {
-      const aprobar = el("button", { class: "btn btn-primary", type: "button" }, icono("i-check"), "Aprobar");
-      const rechazar = el("button", { class: "btn btn-secondary", type: "button" }, "Rechazar");
-      aprobar.addEventListener("click", () => decidir(m, a, true));
-      rechazar.addEventListener("click", () => decidir(m, a, false));
-      tarjeta.append(el("div", { class: "row" }, rechazar, aprobar),
-        el("p", { class: "hint" }, "Nada se ejecuta hasta que lo apruebes."));
+function detalleAprobacion(textoJson) {
+  let datos;
+  try { datos = JSON.parse(textoJson); } catch { return el("p", { class: "hint" }, textoJson); }
+  if (!datos || typeof datos !== "object") return null;
+  return el("dl", {}, Object.entries(datos).flatMap(([k, v]) => [el("dt", {}, CAMPO[k] || k), el("dd", {}, String(v))]));
+}
+
+function tarjetasAprobacion(m) {
+  return el("div", { class: "acciones" }, m.aprobaciones.map((p) => {
+    const titulo = ETIQUETA_TOOL[p.tool] || p.tool;
+    const [clase, insignia, nota] = p.type === "confirm_user"
+      ? ["warn", "Pendiente de tu confirmación", "Nada se ejecuta hasta que lo confirmes."]
+      : p.type === "approve_staff"
+        ? ["info", "Pendiente de Soporte IT", "La aprobará una persona de Soporte IT (no puedes aprobarla tú)."]
+        : ["info", "Escalada a una persona", "Una persona del equipo revisará tu consulta y te responderá aquí."];
+    const tarjeta = el("div", { class: `accion ${clase}`, role: "group", "aria-label": titulo },
+      el("div", { class: "accion-head" }, el("strong", {}, titulo), el("span", { class: `badge ${clase}` }, insignia)),
+      p.type === "escalate_human" ? null : detalleAprobacion(p.args_preview));
+    if (p.type === "confirm_user" && p.aprobacion_id) {
+      const si = el("button", { class: "btn btn-primary", type: "button" }, icono("i-check"), "Confirmar");
+      const no = el("button", { class: "btn btn-secondary", type: "button" }, "Cancelar");
+      si.addEventListener("click", () => decidirAprobacion(m, p.aprobacion_id, true, [si, no]));
+      no.addEventListener("click", () => decidirAprobacion(m, p.aprobacion_id, false, [si, no]));
+      tarjeta.append(el("div", { class: "row" }, no, si));
     }
+    tarjeta.append(el("p", { class: "hint" }, nota));
     return tarjeta;
   }));
 }
 
-async function decidir(m, a, aprobar) {
-  const r = await api(`acciones/${encodeURIComponent(a.id)}/decision`, { metodo: "POST", json: { aprobar } });
+async function decidirAprobacion(m, aprobacionId, aprobar, botones = [], respuesta = null) {
+  botones.forEach((b) => { b.disabled = true; });
+  const json = respuesta ? { aprobar, respuesta } : { aprobar };
+  const r = await api(`aprobaciones/${encodeURIComponent(aprobacionId)}/decision`, { metodo: "POST", json });
+  botones.forEach((b) => { b.disabled = false; });
   if (!r.ok) { alert(mensajeError(r)); return; }
-  m.acciones = m.acciones.map((x) => (x.id === a.id ? r.cuerpo : x));
-  pintarChat();
+  if (m && r.cuerpo.mensaje) {
+    const i = estado.conversacion.mensajes.findIndex((x) => x.id === m.id);
+    if (i >= 0) estado.conversacion.mensajes[i] = r.cuerpo.mensaje;
+    pintarChat();
+  }
+  await cargarAprobaciones();
+  pintarAprobaciones();
+}
+
+async function cargarAprobaciones() {
+  const r = await api("aprobaciones");
+  estado.aprobaciones = r.ok ? r.cuerpo : [];
+}
+
+// Cola de quien aprueba por rol (Soporte IT: P1; administrador: escalados). Las propias van
+// en el chat.
+function pintarAprobaciones() {
+  const ajenas = estado.aprobaciones.filter((a) => !a.propia);
+  $("aprob-panel").hidden = !estado.rol || !ajenas.length;
+  $("aprob-list").replaceChildren(...ajenas.map((a) => {
+    // Un escalado se resuelve respondiendo a la persona (el texto le llega en su chat).
+    const escalado = a.accion === "escalate_human";
+    const texto = escalado ? el("textarea", { rows: "3", "aria-label": "Respuesta para quien preguntó", placeholder: "Escribe la respuesta para quien preguntó" }) : null;
+    const aprobar = el("button", { class: "btn btn-primary", type: "button" }, icono("i-check"), escalado ? "Responder" : "Aprobar");
+    const rechazar = el("button", { class: "btn btn-secondary", type: "button" }, escalado ? "Descartar" : "Rechazar");
+    aprobar.addEventListener("click", () => {
+      if (escalado && !texto.value.trim()) { texto.focus(); return; }
+      decidirAprobacion(null, a.id, true, [aprobar, rechazar], escalado ? texto.value.trim() : null);
+    });
+    rechazar.addEventListener("click", () => decidirAprobacion(null, a.id, false, [aprobar, rechazar]));
+    return el("li", { class: "accion info" },
+      el("div", { class: "accion-head" }, el("strong", {}, ETIQUETA_TOOL[a.accion] || a.accion),
+        el("span", { class: "badge info" }, a.riesgo === "alto" ? "Prioridad alta" : "Pendiente")),
+      el("p", { class: "hint" }, `Lo pide ${a.solicitante} · vence ${hora(a.vence)}`),
+      escalado ? el("p", { class: "hint" }, `Motivo: ${a.detalle}`) : detalleAprobacion(a.detalle),
+      texto, el("div", { class: "row" }, rechazar, aprobar));
+  }));
 }
 
 // Aviso cuando se ocultaron datos personales o sensibles de la pregunta (no se guardaron).
@@ -315,6 +397,9 @@ function avisoOcultados(m) {
   return notice("warn", "i-lock", "Hemos ocultado datos de tu mensaje",
     "No se guardan ni se envían al asistente. Evita compartir datos personales, bancarios o contraseñas en el chat.");
 }
+
+// Respaldo del servidor cuando no hay nada que decir (app/rag/prompts.py: SIN_CONTEXTO).
+const FRASE_SIN_CONTEXTO = "No encuentro esa información en los documentos a los que tienes acceso.";
 
 function pintarRespuesta(m, i) {
   const bloqueo = m.hallazgos.find((h) => h.accion === "bloquear");
@@ -326,10 +411,10 @@ function pintarRespuesta(m, i) {
     const motivo = MOTIVO_BLOQUEO[bloqueo.tipo] || "La consulta infringe la política de uso";
     return notice("warn", "i-ban", "Consulta bloqueada por la política de uso", `${motivo}. No se ha consultado ningún documento.`);
   }
-  if (m.acciones && m.acciones.length && m.sin_contexto) {
+  if (m.aprobaciones && m.aprobaciones.length) {
     return el("article", { class: "msg-bot" },
       el("div", { class: "msg-meta" }, `Asistente · ${hora(m.creado_en)}`),
-      el("p", { class: "answer" }, m.respuesta), tarjetasAccion(m), feedback(m));
+      el("p", { class: "answer" }, m.respuesta), tarjetasAprobacion(m));
   }
   if (m.aclaracion) {
     const opciones = m.aclaracion.opciones.map((o) => {
@@ -347,6 +432,12 @@ function pintarRespuesta(m, i) {
     return el("article", { class: "msg-bot" },
       el("div", { class: "msg-meta" }, `Asistente · ${hora(m.creado_en)}`),
       el("p", { class: "answer" }, m.respuesta));
+  }
+  if (m.sin_contexto && m.respuesta && m.respuesta.trim() !== FRASE_SIN_CONTEXTO) {
+    // El asistente redactó la respuesta (orientación, siguiente paso…): se muestra su texto.
+    return el("article", { class: "msg-bot" },
+      el("div", { class: "msg-meta" }, `Asistente · ${hora(m.creado_en)}`),
+      el("p", { class: "answer" }, m.respuesta), feedback(m));
   }
   if (m.sin_contexto) {
     const busque = (m.consultas || []).map((q) => `«${q}»`).join(", ");
@@ -374,7 +465,7 @@ function pintarRespuesta(m, i) {
   return el("article", { class: "msg-bot", "aria-label": `Respuesta de las ${hora(m.creado_en)}` },
     el("div", { class: "msg-meta" }, `Asistente · ${hora(m.creado_en)}`,
       m.desde_cache ? el("span", { class: "badge", title: "Respuesta reutilizada: mismos documentos visibles para tu rol" }, " desde caché") : null),
-    answer, fuentesPlegadas(m, id), tarjetasAccion(m), feedback(m));
+    answer, fuentesPlegadas(m, id), feedback(m));
 }
 
 // Fuentes plegadas: un botón con el número de documentos citados; al desplegarlo, cada
@@ -482,6 +573,7 @@ async function preguntar(texto) {
       estado.pendiente = null;
       $("pregunta").value = "";
       cargarHistorial().then(pintarHistorial);
+      cargarAprobaciones().then(pintarAprobaciones);
     } else if (r.status === 404) {
       salirDelRol();
       estado.aviso = { tipo: "danger", titulo: "La conversación ya no está disponible",
@@ -638,6 +730,7 @@ function pintarRoles() {
     ? "Como administrador puedes crear roles y asignar permisos."
     : "Qué puede hacer este rol. Solo un rol administrador puede cambiarlo.";
   $("new-role").hidden = !admin;
+  pintarPersonas(admin);
   $("role-list").replaceChildren(...lista.flatMap((r) => {
     let editarBtn = null;
     const desc = el("span", { class: "role-item-desc" }, r.descripcion || "Sin descripción.",
@@ -656,6 +749,50 @@ function pintarRoles() {
       desc, editarBtn);
     return admin && estado.editando === r.id ? [li, editorRol(r)] : [li];
   }));
+}
+
+function pintarPersonas(admin) {
+  $("personas").hidden = !admin;
+  if (!admin) return;
+  const roles = estado.todos.filter((x) => x.activo);
+  const fila = (a) => {
+    const editar = el("button", { class: "link role-item-edit", type: "button" }, "Editar");
+    editar.addEventListener("click", () => { formPersona(a.usuario_id, a.roles); });
+    return el("li", { class: "role-item" },
+      el("span", { class: "role-item-name mono" }, a.usuario_id),
+      el("span", { class: "role-item-desc" }, a.roles.length ? a.roles.map(nombreRol).join(", ") : "Sin roles"),
+      editar);
+  };
+  const lista = estado.asignaciones.length
+    ? el("ul", { class: "role-list" }, estado.asignaciones.map(fila))
+    : el("p", { class: "hint" }, "Nadie tiene roles asignados desde la app.");
+  const form = el("form", { class: "stack", id: "persona-form" });
+  $("personas-body").replaceChildren(
+    el("p", { class: "hint" }, "Quien inicia sesión sin roles ve su usuario (p. ej. github:nombre) para pedir acceso."),
+    lista, form);
+  function formPersona(usuario = "", marcados = []) {
+    const chips = roles.map((x) => el("label", { class: "chip" },
+      el("input", { type: "checkbox", value: x.id, checked: marcados.includes(x.id) }),
+      el("span", {}, icono("i-check"), x.nombre)));
+    const input = el("input", { type: "text", id: "persona-id", value: usuario, required: true, placeholder: "github:nombre", maxLength: 160 });
+    const error = el("p", { class: "form-error", role: "alert" });
+    const boton = el("button", { class: "btn btn-secondary", type: "submit" }, "Guardar roles");
+    form.replaceChildren(
+      el("div", { class: "field" }, el("label", { for: "persona-id" }, "Usuario"), input),
+      el("fieldset", { class: "roles-pick" }, el("legend", {}, "Roles"), el("div", { class: "chips" }, chips),
+        el("p", { class: "hint" }, "Sin ningún rol marcado, la persona pierde el acceso.")),
+      error, boton);
+    form.onsubmit = async (ev) => {
+      ev.preventDefault();
+      const elegidos = [...form.querySelectorAll(".chips input:checked")].map((i) => i.value);
+      boton.disabled = true;
+      const r = await api(`roles/asignaciones/${encodeURIComponent(input.value.trim())}`, { metodo: "PUT", json: { roles: elegidos } });
+      boton.disabled = false;
+      if (!r.ok) { error.textContent = mensajeError(r); return; }
+      await refrescarRoles();
+    };
+  }
+  formPersona();
 }
 
 function editorRol(r) {
@@ -720,7 +857,7 @@ async function crearRol(ev) {
 }
 
 // ------------------------------------------------------------------ eventos
-function pintarTodo() { pintarCabecera(); pintarChat(); pintarHistorial(); pintarDocumentos(); pintarRoles(); }
+function pintarTodo() { pintarCabecera(); pintarChat(); pintarAprobaciones(); pintarHistorial(); pintarDocumentos(); pintarRoles(); }
 
 $("composer").addEventListener("submit", (ev) => {
   ev.preventDefault();

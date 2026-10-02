@@ -4,7 +4,7 @@ import pytest
 
 from evals import capas
 from evals.ejecutar import UMBRALES, aplicar_umbrales, evaluar_respuesta, informe_markdown
-from evals.juez import JuezAzureOpenAI
+from evals.juez import JuezOpenAI
 from evals.langsmith import construir_ejemplos
 from evals.modelos import InformeEvaluacion, JuicioRespuesta, ResultadoEvaluacion, Umbral
 from tests.integration.evaluador import Escenario, cargar_matriz
@@ -95,7 +95,7 @@ def test_juez_azure_usa_salida_estructurada() -> None:
         return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(parsed=juicio))])
 
     cliente = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(parse=parse)))
-    r = JuezAzureOpenAI(cliente, "gpt-4o").juzgar("¿B3?", ["frag"], "58.000")
+    r = JuezOpenAI(cliente, "gpt-4o").juzgar("¿B3?", ["frag"], "58.000")
     assert r == juicio and llamadas["response_format"] is JuicioRespuesta
     assert "<fragmentos>" in llamadas["messages"][1]["content"]
 

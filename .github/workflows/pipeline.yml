@@ -1,0 +1,69 @@
+name: Pipeline
+
+# Ramas → main, con entornos efímeros en Azure (se despliegan, se prueban y se apagan):
+#
+#   PR hacia main (cada push):  CI → dev → staging       (checks obligatorios para el merge)
+#   merge a main:               CI → main                (todos los tests y apagado)
+#   manual (Actions → Run):     CI → el entorno elegido
+#
+# Los entornos de Azure solo corren con la variable de repositorio DEPLOY_AZURE=true; sin ella
+# se omiten (el CI sí corre). Si algo queda encendido, limpieza.yml lo borra cada noche.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      entorno:
+        description: Entorno a desplegar, probar y apagar
+        type: choice
+        options: [dev, staging, main]
+        default: dev
+
+permissions:
+  id-token: write
+  contents: read
+
+# Un push nuevo al PR espera a que termine el run en curso (cancelarlo a medias dejaría
+# recursos encendidos); si llegan varios, solo se ejecuta el último.
+concurrency:
+  group: pipeline-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+
+  dev:
+    needs: ci
+    if: >-
+      vars.DEPLOY_AZURE == 'true' && (github.event_name == 'pull_request'
+      || (github.event_name == 'workflow_dispatch' && inputs.entorno == 'dev'))
+    uses: ./.github/workflows/nube.yml
+    with:
+      entorno: dev
+    secrets: inherit
+
+  staging:
+    needs: [ci, dev]
+    # Tras dev en verde (en un PR), o directamente si se pide a mano.
+    if: >-
+      !cancelled() && vars.DEPLOY_AZURE == 'true' && needs.ci.result == 'success'
+      && ((github.event_name == 'pull_request' && needs.dev.result == 'success')
+      || (github.event_name == 'workflow_dispatch' && inputs.entorno == 'staging'))
+    uses: ./.github/workflows/nube.yml
+    with:
+      entorno: staging
+    secrets: inherit
+
+  main:
+    needs: ci
+    if: >-
+      vars.DEPLOY_AZURE == 'true' && (github.event_name == 'push'
+      || (github.event_name == 'workflow_dispatch' && inputs.entorno == 'main'))
+    uses: ./.github/workflows/nube.yml
+    with:
+      entorno: main
+    secrets: inherit

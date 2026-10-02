@@ -36,12 +36,15 @@ locals {
       backend_openai = { scope = module.openai.id, role = "Cognitive Services OpenAI User", principal = local.backend }
       backend_kv     = { scope = module.keyvault[0].id, role = "Key Vault Secrets User", principal = local.backend }
       # El backend también indexa (subida desde la UI): escribe blobs e índice.
-      backend_blob  = { scope = module.storage[0].id, role = "Storage Blob Data Contributor", principal = local.backend }
-      web_acr       = { scope = module.registry[0].id, role = "AcrPull", principal = local.web }
+      backend_blob = { scope = module.storage[0].id, role = "Storage Blob Data Contributor", principal = local.backend }
+      web_acr      = { scope = module.registry[0].id, role = "AcrPull", principal = local.web }
+      # Secreto del login (Easy Auth): lo escribe el stack identidad en Key Vault.
+      web_kv        = { scope = module.keyvault[0].id, role = "Key Vault Secrets User", principal = local.web }
       ingest_acr    = { scope = module.registry[0].id, role = "AcrPull", principal = local.ingest }
       ingest_openai = { scope = module.openai.id, role = "Cognitive Services OpenAI User", principal = local.ingest }
-      ingest_blob   = { scope = module.storage[0].id, role = "Storage Blob Data Reader", principal = local.ingest }
-      ingest_kv     = { scope = module.keyvault[0].id, role = "Key Vault Secrets User", principal = local.ingest }
+      # Contributor: la siembra de documentos de ejemplo guarda los originales en Blob.
+      ingest_blob = { scope = module.storage[0].id, role = "Storage Blob Data Contributor", principal = local.ingest }
+      ingest_kv   = { scope = module.keyvault[0].id, role = "Key Vault Secrets User", principal = local.ingest }
     },
     var.content_safety ? {
       backend_cs = { scope = module.content_safety[0].id, role = "Cognitive Services User", principal = local.backend }
@@ -102,7 +105,16 @@ locals {
     var.langsmith_api_key != "" ? { "langsmith-api-key" = var.langsmith_api_key } : {},
     local.completo ? { "database-url" = module.postgres[0].database_url } : {},
     local.completo && var.cache_redis ? { "redis-url" = module.redis[0].redis_url } : {},
+    local.completo ? { "checkpoint-clave" = random_id.checkpoint[0].hex } : {},
   )
+}
+
+# Clave AES-256 del checkpointer de los agentes (estado de los hilos cifrado en Postgres). Sin
+# ella la app no arranca en modo multiagente (falla cerrado). Cambiarla invalida los hilos
+# pausados (aprobaciones pendientes), no los datos.
+resource "random_id" "checkpoint" {
+  count       = local.completo ? 1 : 0
+  byte_length = 32
 }
 
 resource "azurerm_key_vault_secret" "this" {

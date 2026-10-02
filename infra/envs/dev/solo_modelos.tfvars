@@ -1,6 +1,6 @@
 # Solo los modelos en Azure (gpt-4o + text-embedding-ada-002) para desarrollar en local:
 # Qdrant, SQLite y Redis corren en docker-compose. Coste fijo 0 (pago por token).
-#   make modelos-up   ·   make modelos-down
+#   make up   ·   make down
 project     = "ragseg"
 environment = "dev"
 location    = "eastus2"

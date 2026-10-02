@@ -4,8 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.acciones.modelos import PropuestaAccion
-from app.models.schemas import Aclaracion, Cita, Hallazgo
+from app.models.schemas import Aclaracion, AprobacionPendiente, Cita, Hallazgo
 
 PATRON_ROL = r"^[a-z0-9][a-z0-9_\-]{0,63}$"
 Permiso = Literal["gestionar_documentos", "administrar_roles"]
@@ -33,7 +32,10 @@ class Rol(BaseModel):
 
 
 class DocumentoRegistrado(BaseModel):
-    """Fuente de verdad de los permisos de un documento (se contrasta con el índice)."""
+    """Fuente de verdad de los permisos de un documento (se contrasta con el índice).
+
+    `roles` es la ACL completa, igual que `acl_groups` en el índice: roles, «dept:<d>» y
+    «user:<id>» (app/security/acl.py)."""
 
     doc_id: str
     titulo: str
@@ -44,11 +46,25 @@ class DocumentoRegistrado(BaseModel):
     motivo_estado: str | None = None
     subido_por: str | None = None
     indexado_en: str = ""
+    revocado: bool = False
+    expira_en: str | None = None  # ISO 8601 con zona
 
     @field_validator("roles")
     @classmethod
     def _roles_ordenados(cls, v: list[str]) -> list[str]:
         return sorted(set(v))
+
+
+class SolicitudAcceso(BaseModel):
+    id: str
+    solicitante_id: str
+    titulo: str
+    motivo: str
+    doc_id: str | None = None
+    propietario_id: str | None = None
+    estado: Literal["pendiente", "concedida", "denegada"] = "pendiente"
+    trace_id: str | None = None
+    creada_en: str = ""
 
 
 class Feedback(BaseModel):
@@ -72,7 +88,10 @@ class MensajeGuardado(BaseModel):
     aclaracion: Aclaracion | None = None
     consultas: list[str] = Field(default_factory=list, description="Consultas curadas enviadas")
     feedback: Feedback | None = None
-    acciones: list[PropuestaAccion] = Field(default_factory=list)
+    # Orquestador multiagente: pausas pendientes, hilo del checkpointer y agentes que actuaron.
+    aprobaciones: list[AprobacionPendiente] = Field(default_factory=list)
+    thread_id: str | None = None
+    agentes: list[str] = Field(default_factory=list)
     creado_en: str = ""
 
 

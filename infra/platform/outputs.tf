@@ -7,6 +7,7 @@ output "alcance" { value = var.alcance }
 output "openai_endpoint" { value = module.openai.endpoint }
 output "chat_deployment" { value = module.openai.chat_deployment }
 output "embedding_deployment" { value = module.openai.embedding_deployment }
+output "ligero_deployment" { value = module.openai.ligero_deployment }
 output "embedding_dimensions" { value = var.embedding_dimensions }
 
 output "vector_store" { value = var.vector_store }
@@ -28,9 +29,12 @@ output "secretos_en_key_vault" { value = nonsensitive(sort(keys(local.secretos))
 output "acr_name" { value = local.completo ? module.registry[0].name : "" }
 output "acr_login_server" { value = local.completo ? module.registry[0].login_server : "" }
 output "container_app_environment_id" { value = local.completo ? azurerm_container_app_environment.this[0].id : "" }
+# Dominio de las apps (<app>.<dominio>): la identidad lo usa para la URL de retorno del login.
+output "container_app_environment_default_domain" { value = local.completo ? azurerm_container_app_environment.this[0].default_domain : "" }
 output "backend_identity_id" { value = local.completo ? azurerm_user_assigned_identity.backend[0].id : "" }
 output "backend_identity_client_id" { value = local.completo ? azurerm_user_assigned_identity.backend[0].client_id : "" }
 output "web_identity_id" { value = local.completo ? azurerm_user_assigned_identity.web[0].id : "" }
 output "ingest_identity_id" { value = local.completo ? azurerm_user_assigned_identity.ingest[0].id : "" }
 output "ingest_identity_client_id" { value = local.completo ? azurerm_user_assigned_identity.ingest[0].client_id : "" }
+output "key_vault_id" { value = local.base ? module.keyvault[0].id : "" }
 output "key_vault_uri" { value = local.base ? "https://${module.keyvault[0].name}.vault.azure.net/" : "" }

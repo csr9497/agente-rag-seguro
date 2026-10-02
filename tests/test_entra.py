@@ -90,7 +90,7 @@ def client(retriever, tmp_path, monkeypatch):
     s = build_servicios(
         ajustes, modelos=(FakeEmbedder(), FakeLLM(), FakeSupervisor()), retriever=retriever
     )
-    app.state.servicios, app.state.agente = s, s.agente
+    app.state.servicios = s
     app.dependency_overrides[get_settings] = lambda: ajustes
     yield TestClient(app)
     app.dependency_overrides.clear()
@@ -129,3 +129,69 @@ def test_en_modo_entra_se_ignora_la_cabecera_de_depuracion(client) -> None:
         "X-Usuario-Grupos": "rrhh,administrador",
     }
     assert [x["id"] for x in client.get("/roles", headers=auth).json()] == ["public"]
+
+
+# ------------------------------------------------------------------ Easy Auth (Azure)
+def _principal(claims: list[tuple[str, str]], role_typ: str = "roles") -> str:
+    import base64
+    import json
+
+    cuerpo = {"auth_typ": "aad", "role_typ": role_typ,
+              "claims": [{"typ": t, "val": v} for t, v in claims]}  # fmt: skip
+    return base64.b64encode(json.dumps(cuerpo).encode()).decode()
+
+
+SECRETO = "s" * 40
+OID = "http://schemas.microsoft.com/identity/claims/objectidentifier"
+
+
+def _usuario_easyauth(principal: str | None, secreto: str | None):
+    from app.config import Settings
+    from app.security.identity import get_usuario
+
+    s = Settings(auth_modo="easyauth", proxy_secreto=SECRETO)
+    return get_usuario(s, x_ms_client_principal=principal, x_proxy_secreto=secreto)
+
+
+def test_easyauth_lee_oid_y_app_roles() -> None:
+    u = _usuario_easyauth(
+        _principal([(OID, "oid-1"), ("roles", "rrhh"), ("roles", "public"), ("name", "Ana")]),
+        SECRETO,
+    )
+    assert u.id == "oid-1" and u.groups == ["public", "rrhh"]
+
+
+def test_easyauth_con_role_typ_largo() -> None:
+    largo = "http://schemas.microsoft.com/ws/2008/06/identity/claims/role"
+    u = _usuario_easyauth(_principal([("oid", "o"), (largo, "finanzas")], largo), SECRETO)
+    assert u.groups == ["finanzas"]
+
+
+@pytest.mark.parametrize(
+    ("principal", "secreto"),
+    [
+        (_principal([("oid", "o"), ("roles", "administrador")]), None),  # no viene del proxy
+        (_principal([("oid", "o"), ("roles", "administrador")]), "otro" * 10),
+        (None, SECRETO),  # sin login
+        ("no-es-base64!!", SECRETO),
+        (_principal([("roles", "administrador")]), SECRETO),  # sin oid
+    ],
+)
+def test_easyauth_rechaza(principal, secreto) -> None:
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as e:
+        _usuario_easyauth(principal, secreto)
+    assert e.value.status_code == 401
+
+
+def test_easyauth_github_sin_roles_en_el_token() -> None:
+    principal = _principal([("urn:github:login", "Ana-Dev"), ("urn:github:id", "123")])
+    import base64
+    import json
+
+    cuerpo = json.loads(base64.b64decode(principal))
+    cuerpo["auth_typ"] = "github"
+    cuerpo["name_typ"] = "urn:github:login"
+    u = _usuario_easyauth(base64.b64encode(json.dumps(cuerpo).encode()).decode(), SECRETO)
+    assert u.id == "github:ana-dev" and u.groups == []

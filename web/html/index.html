@@ -36,7 +36,7 @@
       <span class="brand-mark" aria-hidden="true"><svg class="icon"><use href="#i-file"/></svg></span>
       <div>
         <h1>Asistente de documentación</h1>
-        <p class="env">Entorno local · selección de rol libre (modo demo)</p>
+        <p class="env"></p>
       </div>
     </div>
     <div class="header-actions" id="header-actions"></div>
@@ -60,6 +60,14 @@
     </section>
 
     <aside class="side" aria-label="Conversaciones, documentos y roles">
+      <section class="panel" aria-labelledby="aprob-title" id="aprob-panel" hidden>
+        <div class="panel-head">
+          <h2 id="aprob-title">Aprobaciones pendientes</h2>
+          <p class="panel-sub">Acciones de otras personas que tu rol debe aprobar.</p>
+        </div>
+        <ul class="conv-list" id="aprob-list"></ul>
+      </section>
+
       <section class="panel" aria-labelledby="hist-title" id="hist-panel" hidden>
         <div class="panel-head">
           <h2 id="hist-title">Tus conversaciones</h2>
@@ -128,6 +136,10 @@
             <p class="form-error" id="role-form-error" role="alert"></p>
             <button class="btn btn-secondary" type="submit">Crear rol</button>
           </form>
+        </details>
+        <details class="new-role" id="personas" hidden>
+          <summary><svg class="icon"><use href="#i-users"/></svg>Personas y sus roles</summary>
+          <div class="stack" id="personas-body"></div>
         </details>
       </section>
     </aside>

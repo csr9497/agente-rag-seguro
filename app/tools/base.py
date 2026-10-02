@@ -1,9 +1,8 @@
-from typing import Annotated, Any, Protocol
+from typing import Annotated, Protocol
 
 from pydantic import AfterValidator, BaseModel, Field
 
-from app.acciones.modelos import PropuestaAccion
-from app.models.schemas import Aclaracion, ChunkRecuperado, Usuario
+from app.models.schemas import ChunkRecuperado, Usuario
 
 PATRON_GRUPO = r"^[a-z0-9][a-z0-9_\-]{0,63}$"
 PATRON_DOC_ID = r"^[a-z0-9][a-z0-9_\-]{0,63}/[\w\-. /]+$"
@@ -30,20 +29,11 @@ class ResultadoHerramienta(BaseModel):
     chunks: list[ChunkRecuperado] = Field(
         default_factory=list, description="Fragmentos citables que pasan al contexto"
     )
-    nota: str | None = Field(default=None, description="Mensaje para el supervisor")
-    acciones: list[PropuestaAccion] = Field(
-        default_factory=list, description="Propuestas pendientes de aprobación humana"
-    )
-    conversacion: str | None = Field(
-        default=None, description="Tipo de respuesta de cortesía (saludo, ayuda…)"
-    )
-    aclaracion: Aclaracion | None = Field(
-        default=None, description="Pregunta al usuario para concretar su consulta"
-    )
+    nota: str | None = Field(default=None, description="Mensaje para el agente")
 
 
 class Herramienta(Protocol):
-    """Herramienta invocable por el supervisor.
+    """Herramienta de lectura (rag_agent la usa a través de app/agents/rag.adaptar_lectura).
 
     El `usuario` lo inyecta el grafo desde el estado autenticado: nunca forma parte de los
     argumentos que elige el LLM (regla 1: permisos en el dato, no en el prompt).
@@ -54,14 +44,3 @@ class Herramienta(Protocol):
     args_model: type[BaseModel]
 
     def ejecutar(self, args: BaseModel, usuario: Usuario, top_k: int) -> ResultadoHerramienta: ...
-
-
-def schema_openai(herramienta: Herramienta) -> dict[str, Any]:
-    return {
-        "type": "function",
-        "function": {
-            "name": herramienta.nombre,
-            "description": herramienta.descripcion,
-            "parameters": herramienta.args_model.model_json_schema(),
-        },
-    }

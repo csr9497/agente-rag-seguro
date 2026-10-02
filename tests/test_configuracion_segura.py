@@ -3,7 +3,10 @@
 import re
 from pathlib import Path
 
+import pytest
 import yaml
+
+from app.config import ConfiguracionInseguraError, Settings, validar_seguridad
 
 RAIZ = Path(__file__).parents[1]
 FLAGS_SOLO_LOCAL = (
@@ -59,13 +62,13 @@ def test_compose_no_contiene_contrasenas() -> None:
 
 def test_cliente_azure_openai_reintenta_429_con_backoff() -> None:
     from app.config import Settings
-    from app.retrieval.azure_openai import _cliente_base
+    from app.modelos.openai_compat import _cliente_base
 
     s = Settings(
         azure_openai_endpoint="https://x.openai.azure.com/",
         azure_openai_api_key="k",
-        azure_openai_max_reintentos=4,
-        azure_openai_timeout_s=30,
+        modelos_max_reintentos=4,
+        modelos_timeout_s=30,
     )
     c = _cliente_base(s)
     assert c.max_retries == 4 and c.timeout == 30
@@ -74,7 +77,7 @@ def test_cliente_azure_openai_reintenta_429_con_backoff() -> None:
 def test_supervisor_azure_obliga_herramienta_solo_si_se_pide() -> None:
     from types import SimpleNamespace
 
-    from app.retrieval.azure_openai import AzureOpenAISupervisor
+    from app.modelos.openai_compat import SupervisorOpenAI
 
     enviados = []
 
@@ -84,7 +87,7 @@ def test_supervisor_azure_obliga_herramienta_solo_si_se_pide() -> None:
         return SimpleNamespace(choices=[SimpleNamespace(message=mensaje)])
 
     cliente = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
-    sup = AzureOpenAISupervisor(cliente, "gpt-4o")
+    sup = SupervisorOpenAI(cliente, "gpt-4o")
     sup.decidir([], [{"type": "function"}], obligar_herramienta=True)
     sup.decidir([], [{"type": "function"}])
     assert enviados == ["required", "auto"]
@@ -94,3 +97,54 @@ def test_umbral_de_cache_estricto_para_ada() -> None:
     from app.config import Settings
 
     assert Settings().cache_umbral >= 0.97
+
+
+ENTRA = {"auth_modo": "entra", "entra_tenant_id": "t", "entra_audiencia": "api://x"}
+
+
+EASYAUTH = {"auth_modo": "easyauth", "proxy_secreto": "x" * 48}
+
+
+@pytest.mark.parametrize(
+    "kw",
+    [
+        {},  # stub por defecto: la web es pública y todos serían «anonimo»
+        {"auth_modo": "entra"},  # sin tenant ni audiencia
+        {"auth_modo": "easyauth"},  # sin secreto de proxy
+        {"auth_modo": "easyauth", "proxy_secreto": "corto"},
+        {**ENTRA, "identidad_debug": True},
+        {**ENTRA, "seleccion_libre_de_rol": True},
+        {**EASYAUTH, "identidad_debug": True},
+    ],
+)
+def test_prod_falla_cerrada(kw) -> None:
+    with pytest.raises(ConfiguracionInseguraError):
+        validar_seguridad(Settings(entorno="prod", **kw))
+
+
+def test_prod_con_entra_y_local_sin_restricciones() -> None:
+    validar_seguridad(Settings(entorno="prod", **ENTRA))
+    validar_seguridad(Settings(entorno="prod", **EASYAUTH))
+    validar_seguridad(Settings(entorno="local", identidad_debug=True, seleccion_libre_de_rol=True))
+
+
+def test_terraform_exige_login() -> None:
+    """La web pública con Easy Auth y el backend en modo easyauth; sin login (modo «ip»), solo
+    desde IPs concretas y fuera de prod."""
+    apps = (RAIZ / "infra" / "apps" / "main.tf").read_text(encoding="utf-8")
+    assert re.search(r'AUTH_MODO\s*=\s*local\.con_login \? "easyauth" : "stub"', apps)
+    assert re.search(r'ENTORNO\s*=\s*local\.con_login \? "prod" : "dev"', apps)
+    assert "length(var.ips_permitidas) > 0" in apps and "ip_security_restriction" in apps
+    assert '"RedirectToLoginPage"' in apps and "Microsoft.App/containerApps/authConfigs" in apps
+    identidad = (RAIZ / "infra" / "identidad" / "main.tf").read_text(encoding="utf-8")
+    assert "app_role_assignment_required = true" in identidad  # solo usuarios con rol
+
+
+@pytest.mark.parametrize("entorno", ["dev", "staging", "main"])
+def test_los_entornos_del_pipeline_son_validos_y_no_de_produccion(entorno, monkeypatch) -> None:
+    """El runner exporta ENTORNO=<entorno> y scripts como evals o publicar prompts leen la
+    configuración (con staging fallaban al arrancar)."""
+    monkeypatch.setenv("ENTORNO", entorno)
+    s = Settings()
+    assert s.entorno == entorno
+    validar_seguridad(s)  # no exige la configuración de producción

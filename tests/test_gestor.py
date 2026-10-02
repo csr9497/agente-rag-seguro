@@ -186,3 +186,23 @@ def test_eliminar_borra_tambien_el_registro(gestor_registrado, repos) -> None:
     assert registro.obtener("public/a.md").roles == ["public"]
     gestor_registrado.eliminar("public/a.md")
     assert registro.obtener("public/a.md") is None
+
+
+def test_indexado_sin_registrar_se_registra_sin_reindexar(retriever, repos) -> None:
+    """La app local contra el índice de la nube (otro registro): lo ya indexado se registra
+    sin volver a generar embeddings, y deja de descartarse como «no registrado»."""
+    registro, roles = repos
+    sin_registro = GestorDocumentos(FakeEmbedder(), retriever)
+    assert sin_registro.indexar("rrhh/a.md", TEXTO).estado == "indexado"
+    assert registro.obtener("rrhh/a.md") is None
+
+    class SinEmbeddings(FakeEmbedder):
+        def embed(self, textos):
+            raise AssertionError("no debe recalcular embeddings")
+
+    local = GestorDocumentos(SinEmbeddings(), retriever, registro=registro, roles=roles)
+    r = local.indexar("rrhh/a.md", TEXTO)
+    assert r.estado == "sin_cambios" and "registrado" in r.avisos[-1]
+    doc = registro.obtener("rrhh/a.md")
+    assert doc.roles == ["rrhh"] and doc.chunks == 1 and doc.doc_hash
+    assert local.indexar("rrhh/a.md", TEXTO).avisos == []  # ya registrado: nada que hacer

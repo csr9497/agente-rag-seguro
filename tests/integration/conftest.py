@@ -27,7 +27,9 @@ def base_url() -> str:
 
 @pytest.fixture(scope="session")
 def http(base_url: str) -> Iterator[httpx.Client]:
-    with httpx.Client(base_url=base_url, timeout=60) as client:
+    # 180 s como las evaluaciones: con Azure OpenAI limitado por tokens/minuto, una llamada
+    # puede tardar ~60 s entre reintentos del SDK.
+    with httpx.Client(base_url=base_url, timeout=180) as client:
         yield client
 
 
