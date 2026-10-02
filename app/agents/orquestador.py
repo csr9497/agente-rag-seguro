@@ -27,8 +27,10 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Annotated, Any, Protocol
 
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
+from langgraph.graph.message import add_messages
 from langgraph.types import Command, Send, interrupt
 from pydantic import BaseModel, Field, ValidationError
 
@@ -73,6 +75,9 @@ MENSAJE_ESCALADO = (
     "que te responderá aquí."
 )
 _CITA = re.compile(r"\[([a-z0-9][\w\-./]*/[\w\-./]+)\]")
+# Enlace Markdown a un documento («[Título](public/x.md)»): se normaliza a «Título [public/x.md]»
+# para que el verifier lo compruebe y se numere como cualquier otra cita.
+_ENLACE_DOC = re.compile(r"\[([^\]]+)\]\(([a-z0-9][\w\-./]*/[\w\-./]+)\)")
 _UUID = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b")
 
 
@@ -128,8 +133,8 @@ def acumular_o_reiniciar(
 
 
 class EstadoOrquestador(BaseModel):
-    pregunta: Privado
-    usuario: Usuario  # identidad autenticada de entrada: solo la lee authorize
+    pregunta: Privado | None = None  # la API la envía; en el chat de Studio sale de `messages`
+    usuario: Usuario | None = None  # identidad autenticada de entrada (sin ella: denegado)
     user: UserContext | None = None  # la escribe solo authorize
     trace_id: str = ""
     conversacion_id: str | None = None
@@ -144,6 +149,9 @@ class EstadoOrquestador(BaseModel):
     verificado: bool = False
     respuesta: RespuestaConsulta | None = None
     desde_cache: bool = False
+    # Modo chat de LangGraph Studio: el mensaje del usuario entra aquí y la respuesta vuelve
+    # como mensaje del asistente (lista: va al almacén cifrado del checkpointer).
+    messages: Annotated[list[AnyMessage], add_messages] = Field(default_factory=list)
 
 
 # Campos de una ejecución y su valor inicial (`resultados: None` reinicia su reductor).
@@ -280,14 +288,22 @@ class Orquestador:
         return [_pendiente(i) for i in _interrupts(estado)]
 
     # ------------------------------------------------------------------------- grafo
-    def _compilar(self, checkpointer: Any) -> Any:
+    def grafo_studio(self, usuario_de_prueba: Usuario) -> Any:
+        """Mismo grafo para LangGraph Studio (servidor de desarrollo, nunca la API): sin
+        checkpointer (lo pone el servidor) y, si la entrada no trae usuario (el modo chat solo
+        envía mensajes), uno de prueba."""
+        return self._compilar(None, usuario_de_prueba)
+
+    def _compilar(self, checkpointer: Any, usuario_de_prueba: Usuario | None = None) -> Any:
         g = StateGraph(EstadoOrquestador)
         for nombre, nodo in [
+            ("inicio", self._inicio),
             ("authorize", self._authorize),
             ("input_guardrail", self._input_guardrail),
             ("cache_lookup", self._cache_lookup),
             ("supervisor", self._supervisor_node),
-            ("ejecutar_agente", self._ejecutar_agente),
+            # Un nodo por agente del registro (se ven en Studio); agregar uno no cambia esto.
+            *((nombre, self._nodo_agente(nombre)) for nombre in self._registro),
             ("sintetizar", self._sintetizar),
             ("verifier", self._verifier),
             ("escalate_human", self._escalate_human),
@@ -299,14 +315,25 @@ class Orquestador:
                 g.add_node(nombre, nodo)  # el único que escribe user
             else:
                 g.add_node(nombre, sin_tocar_usuario(nodo))
-        g.add_edge(START, "authorize")
+        if usuario_de_prueba is not None:  # solo Studio
+
+            def usuario_studio(estado: EstadoOrquestador) -> dict[str, Any]:
+                return {} if estado.usuario else {"usuario": usuario_de_prueba}
+
+            g.add_node("usuario_studio", usuario_studio)
+            g.add_edge(START, "usuario_studio")
+            g.add_edge("usuario_studio", "inicio")
+        else:
+            g.add_edge(START, "inicio")
+        g.add_edge("inicio", "authorize")
         g.add_conditional_edges("authorize", _si_respondida("input_guardrail"))
         g.add_conditional_edges("input_guardrail", _si_respondida("cache_lookup"))
         g.add_conditional_edges("cache_lookup", _si_respondida("supervisor", "output_guardrail"))
         g.add_conditional_edges(
-            "supervisor", self._despachar, ["ejecutar_agente", "output_guardrail"]
+            "supervisor", self._despachar, [*self._registro, "output_guardrail"]
         )
-        g.add_edge("ejecutar_agente", "sintetizar")
+        for nombre in self._registro:
+            g.add_edge(nombre, "sintetizar")
         g.add_edge("sintetizar", "verifier")
         g.add_conditional_edges("verifier", self._tras_verifier)
         g.add_edge("escalate_human", "output_guardrail")
@@ -316,7 +343,23 @@ class Orquestador:
         return g.compile(checkpointer=checkpointer)
 
     # ------------------------------------------------------------------------- nodos
+    def _inicio(self, estado: EstadoOrquestador) -> dict[str, Any]:
+        """Estado limpio para cada ejecución (también en un hilo reutilizado, como el chat de
+        Studio). En modo chat, la pregunta es el último mensaje del usuario y los turnos
+        anteriores son el historial."""
+        cambios: dict[str, Any] = {k: v for k, v in REINICIO.items() if k != "user"}
+        cambios["trace_id"] = estado.trace_id or str(uuid.uuid4())
+        if estado.messages and isinstance(estado.messages[-1], HumanMessage):
+            cambios["pregunta"] = TextoPrivado(valor=str(estado.messages[-1].content))
+            if not estado.historial:
+                cambios["historial"] = _turnos(estado.messages[:-1])
+        elif estado.pregunta is None:
+            cambios["pregunta"] = TextoPrivado(valor="")
+        return cambios
+
     def _authorize(self, estado: EstadoOrquestador) -> dict[str, Any]:
+        if estado.usuario is None:  # sin identidad: denegado
+            return {"respuesta": _sin_contexto(SIN_CONTEXTO)}
         grupos = estado.usuario.groups
         roles = [g for g in grupos if es_rol(g)]
         if not roles:  # deny by default: sin rol no hay contexto ni llamadas a modelos
@@ -386,11 +429,18 @@ class Orquestador:
         user = _requerido(estado.user)
         return [
             Send(
-                "ejecutar_agente",
+                nombre,  # el nodo del agente
                 EnvioAgente(agente=nombre, tarea=tarea, user=user, trace_id=estado.trace_id),
             )  # fmt: skip
             for nombre, tarea in estado.tareas.items()
         ]
+
+    def _nodo_agente(self, nombre: str) -> Callable[..., dict[str, Any]]:
+        def nodo(envio: EnvioAgente, config: RunnableConfig) -> dict[str, Any]:
+            return self._ejecutar_agente(envio, config)
+
+        nodo.__name__ = nombre
+        return nodo
 
     def _ejecutar_agente(self, envio: EnvioAgente, config: RunnableConfig) -> dict[str, Any]:
         salida = self._subgrafos[envio.agente].invoke(
@@ -416,7 +466,7 @@ class Orquestador:
         return {"texto": TextoPrivado(valor=salida.respuesta.strip())}
 
     def _verifier(self, estado: EstadoOrquestador) -> dict[str, Any]:
-        texto = str(estado.texto or "")
+        texto = _ENLACE_DOC.sub(r"\1 [\2]", str(estado.texto or ""))
         problemas = []
         if len(estado.resultados) < len(estado.tareas):
             problemas.append("Falta el resultado de alguno de los agentes.")
@@ -501,12 +551,15 @@ class Orquestador:
         return {}
 
     def _audit(self, estado: EstadoOrquestador) -> dict[str, Any]:
+        respuesta = estado.respuesta or _sin_contexto(SIN_CONTEXTO)
         registrar_consulta(
-            estado.usuario, str(estado.pregunta), estado.respuesta or _sin_contexto(SIN_CONTEXTO),
-            estado.hallazgos, traza_id=estado.trace_id, conversacion_id=estado.conversacion_id,
+            estado.usuario or Usuario(id="sin_identidad", groups=[]),
+            str(estado.pregunta or ""), respuesta, estado.hallazgos,
+            traza_id=estado.trace_id, conversacion_id=estado.conversacion_id,
             documentos_consultados=_documentos(estado), desde_cache=estado.desde_cache,
         )  # fmt: skip
-        return {}
+        # Modo chat: la respuesta vuelve como mensaje del asistente.
+        return {"messages": [AIMessage(content=respuesta.respuesta)]}
 
     # ------------------------------------------------------------------------- apoyo
     def _herramientas_de_enrutado(self) -> list[dict[str, Any]]:
@@ -618,6 +671,15 @@ def _si_respondida(siguiente: str, si_no: str = "audit") -> Callable[[EstadoOrqu
         return si_no if estado.respuesta is not None else siguiente
 
     return ruta
+
+
+def _turnos(mensajes: list[AnyMessage], maximo: int = 3) -> list[Turno]:
+    """Pares (usuario, asistente) previos del chat como historial (solo referencias)."""
+    turnos: list[Turno] = []
+    for previo, siguiente in zip(mensajes, mensajes[1:], strict=False):
+        if isinstance(previo, HumanMessage) and isinstance(siguiente, AIMessage):
+            turnos.append(Turno(pregunta=str(previo.content), respuesta=str(siguiente.content)))
+    return turnos[-maximo:]
 
 
 def _sin_contexto(texto: str) -> RespuestaConsulta:

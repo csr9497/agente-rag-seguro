@@ -5,7 +5,8 @@
     "."
   ],
   "graphs": {
-    "agente_rag": "./app/graph/studio.py:graph"
+    "agente_rag": "./app/graph/studio.py:graph",
+    "multiagente": "./app/graph/studio_multiagente.py:graph"
   },
   "env": ".env"
 }

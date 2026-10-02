@@ -11,6 +11,7 @@ from app.persistencia.repositorios import (
     crear_motor,
     inicializar,
 )
+from tests.conftest import ROLES_SEMILLA
 
 
 @pytest.fixture
@@ -29,7 +30,7 @@ def _doc(doc_id="public/a.md", roles=("public",), **kw) -> DocumentoRegistrado:
 # ------------------------------------------------------------------ roles
 def test_semilla_de_roles(motor) -> None:
     roles = {r.id: r for r in SqlRepositorioRoles(motor).listar()}
-    assert set(roles) == {"administrador", "rrhh", "finanzas", "public"}
+    assert set(roles) == ROLES_SEMILLA
     assert roles["administrador"].puede("administrar_roles")
     assert roles["rrhh"].puede("gestionar_documentos")
     assert roles["rrhh"].publica_para == ["public", "rrhh"]
@@ -38,7 +39,7 @@ def test_semilla_de_roles(motor) -> None:
 
 def test_inicializar_es_idempotente(motor) -> None:
     inicializar(motor)
-    assert len(SqlRepositorioRoles(motor).listar()) == 4
+    assert len(SqlRepositorioRoles(motor).listar()) == len(ROLES_SEMILLA)
 
 
 def test_guardar_actualiza_permisos_y_publicacion(motor) -> None:
@@ -154,7 +155,7 @@ def test_sqlite_en_disco(tmp_path) -> None:
     url = f"sqlite:///{tmp_path}/sub/app.db"
     inicializar(crear_motor(url))
     assert (tmp_path / "sub" / "app.db").exists()
-    assert len(SqlRepositorioRoles(crear_motor(url)).listar()) == 4
+    assert len(SqlRepositorioRoles(crear_motor(url)).listar()) == len(ROLES_SEMILLA)
 
 
 def test_sqlite_en_archivo_admite_peticiones_concurrentes(tmp_path) -> None:
@@ -169,7 +170,7 @@ def test_sqlite_en_archivo_admite_peticiones_concurrentes(tmp_path) -> None:
     roles = SqlRepositorioRoles(motor)
     with ThreadPoolExecutor(max_workers=8) as pool:
         resultados = list(pool.map(lambda _: len(roles.listar()), range(200)))
-    assert set(resultados) == {4}
+    assert set(resultados) == {len(ROLES_SEMILLA)}
 
 
 def test_inicializar_crea_los_roles_que_faltan_sin_tocar_los_existentes(tmp_path) -> None:

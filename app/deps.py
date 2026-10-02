@@ -3,6 +3,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from azure.identity import DefaultAzureCredential
 from langsmith import Client as LangSmithClient
@@ -10,9 +11,12 @@ from qdrant_client import QdrantClient
 from sqlalchemy import Engine
 
 from app.acciones.servicio import ServicioAcciones
+from app.agents.aprobaciones import SqlRepositorioAprobaciones
 from app.agents.hr import HerramientasHR, SqlRepositorioCasosRRHH, crear_hr_agent
+from app.agents.orquestador import Orquestador
 from app.agents.rag import HerramientasRag, crear_rag_agent
 from app.agents.registry import RegistroAgentes
+from app.agents.subgraph import AuditoriaSql
 from app.agents.support import HerramientasSoporte, SqlRepositorioTickets, crear_support_agent
 from app.cache.semantica import CacheMemoria, CacheRedis, CacheSemantica, alcance_de_permisos
 from app.config import Settings
@@ -184,14 +188,7 @@ def build_servicios(
         def alcance(roles: list[str]) -> str:
             return alcance_de_permisos(registro, roles, version)
 
-    def catalogo(grupos: list[str]) -> CatalogoRol:
-        """Lo que el usuario puede consultar, desde la fuente de verdad de los permisos."""
-        return construir_catalogo(
-            grupos,
-            [(d.doc_id, d.titulo, d.roles) for d in registro.listar(estado="activo")],
-            {r.id: (r.nombre, r.descripcion) for r in repo_roles.listar(incluir_inactivos=False)},
-            [(c.descripcion, list(c.roles)) for c in CONSULTAS.values()],
-        )
+    catalogo = catalogo_de(registro, repo_roles)
 
     agente = _agente(
         settings, embedder, llm, supervisor, retriever, registro,
@@ -229,6 +226,47 @@ def build_servicios(
         settings=settings,
         motor=motor,
     )
+
+
+def catalogo_de(
+    registro: RepositorioDocumentos, repo_roles: RepositorioRoles
+) -> Callable[[list[str]], CatalogoRol]:
+    def catalogo(grupos: list[str]) -> CatalogoRol:
+        """Lo que el usuario puede consultar, desde la fuente de verdad de los permisos."""
+        return construir_catalogo(
+            grupos,
+            [(d.doc_id, d.titulo, d.roles) for d in registro.listar(estado="activo")],
+            {r.id: (r.nombre, r.descripcion) for r in repo_roles.listar(incluir_inactivos=False)},
+            [(c.descripcion, list(c.roles)) for c in CONSULTAS.values()],
+        )
+
+    return catalogo
+
+
+def build_orquestador(
+    servicios: Servicios,
+    checkpointer: Any = None,
+    modelos: tuple[Embedder, LLM, Supervisor] | None = None,
+) -> Orquestador:
+    """Orquestador multiagente con la composición real (fase 5). `checkpointer=None` en
+    LangGraph Studio (lo pone el servidor de desarrollo)."""
+    settings = servicios.settings
+    _, llm, supervisor = modelos or build_modelos(settings)
+    shields = build_shields(settings)
+    entrada = catalogo_entrada(settings, shields)[version_por_defecto(settings, shields)]
+    salida = catalogo_salida(settings)[settings.guardrail_salida]
+    version = f"{settings.modelos_proveedor}:{settings.modelo_chat}:{settings.app_version}"
+    registro = servicios.registro
+    return Orquestador(
+        registro=build_registro_agentes(servicios), supervisor=supervisor,
+        llm_de_agente=lambda _nombre: supervisor, llm_sintesis=llm,
+        guardrail_entrada=entrada, guardrail_salida=salida,
+        roles_de=lambda uid: set(servicios.repo_roles.roles_de_usuario(uid)),
+        checkpointer=checkpointer, auditoria=AuditoriaSql(servicios.motor),
+        aprobaciones=SqlRepositorioAprobaciones(servicios.motor),
+        alcance=lambda user: alcance_de_permisos(registro, list(user.acl), version),
+        catalogo=catalogo_de(registro, servicios.repo_roles),
+    )  # fmt: skip
 
 
 def build_registro_agentes(servicios: Servicios) -> RegistroAgentes:

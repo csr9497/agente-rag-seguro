@@ -23,6 +23,10 @@ from ingestor.sources import LocalFolderSource  # noqa: E402
 from tests.fakes import DIM, FakeEmbedder, FakeLLM, FakeSupervisor  # noqa: E402
 
 SAMPLE_DOCS = Path(__file__).parents[1] / "ingestor" / "sample_docs"
+ROLES_SEMILLA = {
+    "administrador", "rrhh", "finanzas", "public",
+    "hr_staff", "hr_specialist", "it_support", "auditor",
+}  # fmt: skip
 
 
 @pytest.fixture

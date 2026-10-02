@@ -139,7 +139,16 @@ ROLES_INICIALES = [
         nombre="Empleado general",
         descripcion="Políticas de la empresa: vacaciones, teletrabajo, conducta, beneficios.",
     ),
-]
+    # Roles de la orquestación multiagente (sus scopes: app/agents/scopes.py).
+    Rol(id="hr_staff", nombre="Personal de RR.HH.",
+        descripcion="Cola de casos de RR.HH. de sensibilidad normal."),
+    Rol(id="hr_specialist", nombre="Especialista de RR.HH.",
+        descripcion="Todos los casos de RR.HH., también los confidenciales."),
+    Rol(id="it_support", nombre="Soporte IT",
+        descripcion="Cola de tickets de soporte; aprueba los P1."),
+    Rol(id="auditor", nombre="Auditor",
+        descripcion="Lectura del registro de auditoría de los agentes."),
+]  # fmt: skip
 
 
 def _auditoria_solo_insercion(motor: Engine) -> None:

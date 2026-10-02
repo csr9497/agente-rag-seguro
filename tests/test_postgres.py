@@ -23,6 +23,7 @@ from app.persistencia.repositorios import (
     crear_motor,
     inicializar,
 )
+from tests.conftest import ROLES_SEMILLA
 from tests.fakes import FakeEmbedder, FakeLLM, FakeSupervisor
 
 URL = os.environ.get("TEST_DATABASE_URL", "")
@@ -51,7 +52,7 @@ def test_es_postgres(motor) -> None:
 
 def test_roles_documentos_y_conversaciones(motor) -> None:
     roles = SqlRepositorioRoles(motor)
-    assert {r.id for r in roles.listar()} == {"administrador", "rrhh", "finanzas", "public"}
+    assert {r.id for r in roles.listar()} == ROLES_SEMILLA
     roles.guardar(Rol(id="compras", nombre="Compras", publica_para=["public"]))
     assert roles.obtener("compras").publica_para == ["public"]
 

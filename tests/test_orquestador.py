@@ -275,3 +275,62 @@ def test_el_estado_no_guarda_texto_del_usuario_en_claro() -> None:
         n for n, c in EstadoOrquestador.model_fields.items() if c.annotation in (str, str | None)
     }
     assert texto_plano <= CAMPOS_TEXTO_INOCUOS, texto_plano - CAMPOS_TEXTO_INOCUOS
+
+
+# ------------------------------------------------------------------- Studio (grafo y chat)
+def test_cada_agente_es_un_nodo_del_grafo() -> None:
+    o = _orquestador(Mundo(), GuionLLM([]), {})
+    nodos = set(o.grafo.get_graph().nodes)
+    assert {"inicio", "supervisor", "rag_agent", "hr_agent", "support_agent", "verifier",
+            "escalate_human"} <= nodos  # fmt: skip
+
+
+def test_modo_chat_con_messages_y_varios_turnos_en_el_mismo_hilo() -> None:
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    m = Mundo()
+    rag = GuionLLM(
+        [[("search_documents", {"consulta": "v"})]] * 2, final="23 [public/vacaciones.md]."
+    )
+    sup = GuionLLM([[("delegar_rag_agent", {"tarea": "vacaciones"})]] * 2)
+    o = _orquestador(m, sup, {"rag_agent": rag})
+    cfg = o.config("chat")
+    salida = o.grafo.invoke({"messages": [HumanMessage("¿Vacaciones?")], "usuario": ANA}, cfg)
+    assert isinstance(salida["messages"][-1], AIMessage)
+    assert salida["messages"][-1].content == "23 [1]."
+    salida = o.grafo.invoke({"messages": [HumanMessage("¿Y cuántos traslado?")]}, cfg)
+    assert len(sup.llamadas) == 2  # el segundo mensaje se procesa
+    assert "¿Vacaciones?" in sup.llamadas[1][1]["content"]  # con el turno anterior de historial
+    assert [type(x).__name__ for x in salida["messages"]] == [
+        "HumanMessage", "AIMessage", "HumanMessage", "AIMessage",
+    ]  # fmt: skip
+
+
+def test_sin_usuario_se_deniega_y_studio_pone_uno_de_prueba() -> None:
+    from langchain_core.messages import HumanMessage
+
+    m = Mundo()
+    sup = GuionLLM([[("conversacion", {"tipo": "saludo"})]])
+    o = _orquestador(m, sup, {})
+    salida = o.grafo.invoke({"messages": [HumanMessage("hola")]}, o.config("sin-usuario"))
+    assert salida["respuesta"].sin_contexto and sup.llamadas == []  # API: nunca se inventa
+    studio = o.grafo_studio(Usuario(id="studio", groups=["public"]))
+    salida = studio.invoke({"messages": [HumanMessage("hola")]})
+    assert salida["respuesta"].conversacional  # Studio: usuario de prueba
+
+
+def test_los_enlaces_markdown_a_documentos_se_verifican_y_numeran() -> None:
+    m = Mundo()
+    rag = GuionLLM([[("search_documents", {"consulta": "v"})]],
+                   final="Según la [Política](public/vacaciones.md), son 23 días.")  # fmt: skip
+    r = _orquestador(m, _delegar(("rag_agent", "v")), {"rag_agent": rag}).consultar("v", ANA)
+    assert r.respuesta.respuesta == "Según la Política [1], son 23 días."
+    assert [c.doc_id for c in r.respuesta.citas] == ["public/vacaciones.md"]
+    inventado = GuionLLM([[("search_documents", {"consulta": "v"})]],
+                         final="Ver [Secreto](rrhh/bandas.md).")  # fmt: skip
+    sintesis = FakeLLM(RespuestaLLM(respuesta="Son 23 días [public/vacaciones.md].",
+                                    citas_usadas=[], encontrado=True))  # fmt: skip
+    r = _orquestador(m, _delegar(("rag_agent", "v")), {"rag_agent": inventado},
+                     sintesis=sintesis).consultar("v", ANA)  # fmt: skip
+    assert "rrhh/bandas.md" in sintesis.llamadas[0][1]  # el verifier lo detectó y se corrigió
+    assert "Secreto" not in r.respuesta.respuesta
