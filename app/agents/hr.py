@@ -151,6 +151,10 @@ def crear_hr_agent(h: HerramientasHR) -> AgentSpec:
         ),
         system_prompt=HR_PROMPT,
         returns="id_only",
+        mensaje_id_only=(
+            "He registrado tu caso para RR.HH. con la referencia {ids}. El equipo de RR.HH. lo "
+            "revisará; puedes consultar su estado preguntándome por tus casos."
+        ),
         tools={
             "search_hr_policies": ToolPolicy(
                 h.search_hr_policies, BuscarDocumentosArgs, scope="docs:read", mode="auto",

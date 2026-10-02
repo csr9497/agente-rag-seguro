@@ -42,6 +42,13 @@ from app.security.deteccion import TIPOS_PII, enmascarar_pii
 logger = logging.getLogger("audit")
 
 VIGENCIA_APROBACION = timedelta(hours=24)
+# Límites: ningún bucle del agente depende solo del LLM para terminar.
+MAX_LLAMADAS_POR_TURNO = 5  # tools por respuesta del LLM; las demás se deniegan con motivo
+MAX_RESPUESTAS_INVALIDAS = 3  # a una aprobación (vacías, de quien no puede aprobar…)
+LIMITE_ABSOLUTO = 400  # pasos de un subgrafo, sea cual sea su presupuesto
+_SI = frozenset({"si", "sí", "yes", "ok", "vale", "aprobar", "apruebo", "aprobado", "confirmar",
+                 "confirmo", "confirmado", "adelante", "true"})  # fmt: skip
+_NO = frozenset({"no", "rechazar", "rechazo", "rechazado", "cancelar", "cancelo", "false"})
 MAX_DATO = 4000  # caracteres de salida de una tool que llegan al LLM
 _NIVEL: dict[Mode, int] = {"auto": 0, "confirm_user": 1, "approve_staff": 2, "deny": 3}
 _ETIQUETA_DATO = re.compile(r"</?\s*dato_herramienta\b[^>]*>", re.IGNORECASE)
@@ -151,6 +158,7 @@ class EstadoSubagente(BaseModel):
     aprobacion_id: str | None = None  # fila de approvals de la pausa en curso
     resultado: Any = None
     iteraciones: int = 0
+    llamadas_turno: int = 0  # tools ya evaluadas en el turno actual del LLM
     inicio: float | None = None
     limite_s: float = 120.0
     ids: list[str] = Field(default_factory=list)
@@ -189,7 +197,14 @@ def construir_subgrafo(
     `checkpointer`: necesario para `interrupt` (en producción, Postgres cifrado).
     `aprobaciones`: tabla approvals (app/agents/aprobaciones.py); sin ella, solo el interrupt."""
     subgrafo = _Subgrafo(spec, llm, auditoria, roles_de, ahora, aprobaciones)
-    return SubgrafoPrivado(subgrafo.compilar(checkpointer))
+    return SubgrafoPrivado(subgrafo.compilar(checkpointer), limite_pasos(spec))
+
+
+def limite_pasos(spec: AgentSpec) -> int:
+    """Segunda barrera contra bucles (la primera es el presupuesto): pasos del subgrafo. Por
+    iteración: agent + por cada tool (policy_gate, human_approval, execute_tool,
+    sanitize_output). Con tope absoluto: un presupuesto mal configurado tampoco itera sin fin."""
+    return min(spec.max_iterations * (1 + 4 * MAX_LLAMADAS_POR_TURNO) + 10, LIMITE_ABSOLUTO)
 
 
 class SubgrafoPrivado:
@@ -197,14 +212,20 @@ class SubgrafoPrivado:
     canales antes de validarla con el modelo, así que la tarea (texto del usuario) se envuelve
     en TextoPrivado aquí, antes de que el checkpointer la vea. Lo demás se delega."""
 
-    def __init__(self, grafo: Any) -> None:
+    def __init__(self, grafo: Any, limite: int) -> None:
         self._grafo = grafo
+        self.limite = limite
 
-    def invoke(self, entrada: Any, *args: Any, **kwargs: Any) -> Any:
-        return self._grafo.invoke(_entrada_privada(entrada), *args, **kwargs)
+    def invoke(self, entrada: Any, config: Any = None, **kwargs: Any) -> Any:
+        return self._grafo.invoke(_entrada_privada(entrada), self._con_limite(config), **kwargs)
 
-    def stream(self, entrada: Any, *args: Any, **kwargs: Any) -> Any:
-        return self._grafo.stream(_entrada_privada(entrada), *args, **kwargs)
+    def stream(self, entrada: Any, config: Any = None, **kwargs: Any) -> Any:
+        return self._grafo.stream(_entrada_privada(entrada), self._con_limite(config), **kwargs)
+
+    def _con_limite(self, config: Any) -> dict[str, Any]:
+        """El límite de pasos propio del agente (dentro del orquestador, el config del padre
+        traería el suyo)."""
+        return {**(config or {}), "recursion_limit": self.limite}
 
     def __getattr__(self, nombre: str) -> Any:
         return getattr(self._grafo, nombre)
@@ -214,7 +235,8 @@ class SubgrafoPrivado:
 # arrastra nada de la anterior (si no, un `summary` viejo terminaría el grafo sin trabajar).
 REINICIO_SUBAGENTE: dict[str, Any] = {
     "mensajes": [], "pendientes": [], "actual": None, "gate": None, "expira": None,
-    "aprobacion_id": None, "resultado": None, "iteraciones": 0, "inicio": None, "ids": [],
+    "aprobacion_id": None, "resultado": None, "iteraciones": 0, "llamadas_turno": 0,
+    "inicio": None, "ids": [],
     "fuentes": [], "summary": None,
 }  # fmt: skip
 
@@ -285,6 +307,7 @@ class _Subgrafo:
             "inicio": inicio,
             "mensajes": [*mensajes, decision.mensaje_asistente],
             "pendientes": decision.tool_calls,
+            "llamadas_turno": 0,
             "iteraciones": estado.iteraciones + 1,
         }
         if not decision.tool_calls:
@@ -296,7 +319,13 @@ class _Subgrafo:
         llamada, resto = estado.pendientes[0], estado.pendientes[1:]
         # La iteración de esta llamada ya se contó al decidirla el agente.
         gate = evaluar(self._spec, llamada, estado.user, max(estado.iteraciones - 1, 0))
-        cambios: dict[str, Any] = {"pendientes": resto, "actual": llamada, "gate": gate}
+        if estado.llamadas_turno >= MAX_LLAMADAS_POR_TURNO and gate.decision != "deny":
+            motivo = f"Se superó el límite de {MAX_LLAMADAS_POR_TURNO} herramientas por turno."
+            gate = gate.model_copy(update={"decision": "deny", "mode": "deny", "reason": motivo})
+        cambios: dict[str, Any] = {
+            "pendientes": resto, "actual": llamada, "gate": gate,
+            "llamadas_turno": estado.llamadas_turno + 1,
+        }  # fmt: skip
         if gate.decision == "deny":
             self._auditar(estado, gate.tool, gate.args or llamada.argumentos, "deny", gate.reason)
             cambios["mensajes"] = [
@@ -333,19 +362,25 @@ class _Subgrafo:
         la decisión final, porque LangGraph re-ejecuta el nodo al reanudar."""
         gate, expira = _requerido(estado.gate), _requerido(estado.expira)
         politica = self._spec.tools[gate.tool]
-        tipo, args, aviso = gate.mode, gate.args or {}, None
+        user = _requerido(estado.user)
+        tipo, args, aviso, invalidas = gate.mode, gate.args or {}, None, 0
         while True:
+            if invalidas >= MAX_RESPUESTAS_INVALIDAS:  # nunca se re-pregunta sin fin
+                sistema = RespuestaAprobacion(approved=False, approver_id="sistema")
+                motivo = "Demasiadas respuestas no válidas: la acción se cancela."
+                return self._rechazar(estado, args, sistema, motivo)
             carga = {
                 "type": tipo, "agent": self._spec.name, "tool": gate.tool,
                 "args_preview": _vista(args), "risk": _riesgo(tipo), "expires_at": expira,
                 "aprobacion_id": estado.aprobacion_id,
+                "como_responder": _como_responder(tipo, politica.approver_role),
             }  # fmt: skip
             if aviso:
                 carga["aviso"] = aviso
-            try:
-                respuesta = RespuestaAprobacion.model_validate(interrupt(carga))
-            except ValidationError:
-                aviso = "Respuesta de aprobación no válida."
+            respuesta = interpretar_respuesta(interrupt(carga), user.id)
+            if respuesta is None:
+                invalidas += 1
+                aviso = "Respuesta no válida. " + _como_responder(tipo, politica.approver_role)
                 continue
             if datetime.fromtimestamp(self._ahora(), UTC) > datetime.fromisoformat(expira):
                 return self._rechazar(estado, args, respuesta, "La aprobación está vencida (24 h).")
@@ -354,7 +389,10 @@ class _Subgrafo:
                 motivo = f"La aprobación ya no está pendiente ({registrada.estado})."
                 return self._rechazar(estado, args, respuesta, motivo, registrar=False)
             if not self._puede_aprobar(tipo, respuesta.approver_id, estado.user, politica):
-                aviso = "Quien responde no puede aprobar esta acción."
+                invalidas += 1
+                aviso = "Quien responde no puede aprobar esta acción. " + _como_responder(
+                    tipo, politica.approver_role
+                )
                 continue
             if not respuesta.approved:
                 return self._rechazar(estado, args, respuesta, respuesta.reason or "Sin motivo.")
@@ -362,6 +400,7 @@ class _Subgrafo:
                 try:
                     editados = politica.args_model.model_validate(respuesta.edited_args)
                 except ValidationError:
+                    invalidas += 1
                     aviso = "Los argumentos editados no son válidos."
                     continue
                 modo = resolve_mode(politica, editados, estado.user)
@@ -514,6 +553,35 @@ def _como_dato(tool: str, resultado: Any) -> str:
     if len(texto) > MAX_DATO:
         texto = texto[:MAX_DATO] + " …[truncado]"
     return f'<dato_herramienta tool="{tool}">\n{texto}\n</dato_herramienta>'
+
+
+def interpretar_respuesta(valor: Any, usuario_id: str) -> RespuestaAprobacion | None:
+    """Respuesta a una aprobación: el JSON completo o, en el chat, un «sí»/«no» del propio
+    usuario de la ejecución (quien aprueba es él: vale para confirm_user, nunca para
+    approve_staff, donde el solicitante no puede aprobar). None si no se entiende."""
+    if isinstance(valor, dict):
+        try:
+            return RespuestaAprobacion.model_validate(valor)
+        except ValidationError:
+            return None
+    if isinstance(valor, bool):
+        return RespuestaAprobacion(approved=valor, approver_id=usuario_id)
+    if isinstance(valor, str):
+        palabra = valor.strip().strip(".!¡¿?«»\"'").casefold()
+        if palabra in _SI:
+            return RespuestaAprobacion(approved=True, approver_id=usuario_id)
+        if palabra in _NO:
+            return RespuestaAprobacion(approved=False, approver_id=usuario_id, reason=valor.strip())
+    return None
+
+
+def _como_responder(tipo: str, rol: str | None) -> str:
+    if tipo == "approve_staff":
+        return (
+            f"La debe aprobar alguien con el rol {rol} que no sea quien la pidió: "
+            '{"approved": true, "approver_id": "<su usuario>"}.'
+        )
+    return "Responde «sí» para confirmar o «no» para cancelar."
 
 
 def _riesgo(modo: str) -> str:

@@ -351,3 +351,37 @@ def test_el_grafo_dibujado_conecta_todos_los_nodos() -> None:
         assert esperado in aristas, esperado
     conectados = {n for arista in aristas for n in arista}
     assert set(dibujo.nodes) <= conectados, set(dibujo.nodes) - conectados
+
+
+def test_el_escalado_no_se_re_pregunta_sin_fin() -> None:
+    from app.agents.orquestador import MENSAJE_ESCALADO
+    from app.agents.subgraph import MAX_RESPUESTAS_INVALIDAS
+
+    m = Mundo()
+    rag = GuionLLM([[("search_documents", {"consulta": "v"})]], final="23 [public/inventado.md].")
+    sintesis = FakeLLM(
+        RespuestaLLM(respuesta="[public/inventado.md]", citas_usadas=[], encontrado=True)
+    )
+    o = _orquestador(m, _delegar(("rag_agent", "v")), {"rag_agent": rag}, sintesis=sintesis)
+    r = o.consultar("vacaciones", ANA)
+    for _ in range(MAX_RESPUESTAS_INVALIDAS):  # el solicitante insiste (no puede resolverlo)
+        r = o.decidir(r.thread_id, r.aprobaciones[0].interrupt_id, aprobado=True, aprobador=ANA.id)
+        if not r.aprobaciones:
+            break
+    assert r.aprobaciones == [] and r.respuesta.respuesta == MENSAJE_ESCALADO
+
+
+def test_el_orquestador_tiene_limite_de_pasos_explicito() -> None:
+    from app.agents.orquestador import LIMITE_PASOS
+
+    o = _orquestador(Mundo(), GuionLLM([]), {})
+    assert o.grafo.config["recursion_limit"] == LIMITE_PASOS
+
+
+def test_un_agente_id_only_da_un_mensaje_legible_con_la_referencia() -> None:
+    m = Mundo()
+    rrhh = GuionLLM([[("create_hr_case", {"resumen": "Horas extra"})]], final="Caso de ana@x.com")
+    o = _orquestador(m, _delegar(("hr_agent", "horas extra")), {"hr_agent": rrhh})
+    r = o.consultar("No me pagaron las horas extra", ANA)
+    r = o.decidir(r.thread_id, r.aprobaciones[0].interrupt_id, aprobado=True, aprobador=ANA.id)
+    assert r.respuesta.respuesta == "He registrado tu solicitud con la referencia CASO-1."

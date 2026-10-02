@@ -326,3 +326,75 @@ def test_un_hilo_reutilizado_procesa_la_nueva_tarea() -> None:
     grafo.invoke({**ENTRADA, "task": "Otra cosa"}, CFG)
     assert len(llm.llamadas) == 3  # la segunda tarea llega al LLM (no devuelve el resumen viejo)
     assert "Otra cosa" in llm.llamadas[2][1]["content"]
+
+
+# ---------------------------------------------------- límites: nada itera sin fin
+def test_un_agente_insistente_termina_por_presupuesto_y_no_por_error() -> None:
+    """Con el presupuesto por defecto y varias tools por turno, el grafo termina ordenado
+    (resumen de presupuesto agotado), nunca con GraphRecursionError."""
+    turno = [("search_it_kb", {"consulta": f"q{j}"}) for j in range(4)]
+    grafo, h, _, llm, _ = _montar([turno] * 50)  # max_iterations por defecto (6)
+    salida = grafo.invoke(ENTRADA, CFG)
+    assert "presupuesto" in resumen(salida) and len(llm.llamadas) == 6
+
+
+def test_las_llamadas_a_tools_por_turno_estan_limitadas() -> None:
+    from app.agents.subgraph import MAX_LLAMADAS_POR_TURNO
+
+    turno = [("search_it_kb", {"consulta": f"q{j}"}) for j in range(MAX_LLAMADAS_POR_TURNO + 7)]
+    grafo, h, audit, llm, _ = _montar([turno])
+    grafo.invoke(ENTRADA, CFG)
+    assert len(h.ejecutadas) == MAX_LLAMADAS_POR_TURNO
+    denegadas = [r for r in audit.filas if r.decision == "deny"]
+    assert len(denegadas) == 7 and all("límite" in (r.reason or "") for r in denegadas)
+
+
+def test_respuestas_no_validas_a_una_aprobacion_tienen_limite() -> None:
+    from app.agents.subgraph import MAX_RESPUESTAS_INVALIDAS
+
+    grafo, h, audit, _, _ = _montar([[("create_ticket", {"asunto": "VPN"})]])
+    grafo.invoke(ENTRADA, CFG)
+    for _ in range(MAX_RESPUESTAS_INVALIDAS - 1):
+        assert "__interrupt__" in grafo.invoke(Command(resume=""), CFG)
+    salida = grafo.invoke(Command(resume=""), CFG)
+    assert "__interrupt__" not in salida and h.ejecutadas == []
+    assert [r.decision for r in audit.filas] == ["rejected"]
+
+
+@pytest.mark.parametrize("respuesta", ["sí", "Si", "ok", "aprobar", True, "confirmo"])
+def test_el_solicitante_puede_confirmar_con_un_si(respuesta) -> None:
+    """Studio (chat) reanuda con texto: un «sí» del propio usuario confirma su acción."""
+    grafo, h, audit, _, _ = _montar([[("create_ticket", {"asunto": "VPN"})]])
+    pausa = grafo.invoke(ENTRADA, CFG)["__interrupt__"][0].value
+    assert "sí" in pausa["como_responder"]
+    grafo.invoke(Command(resume=respuesta), CFG)
+    assert len(h.ejecutadas) == 1 and audit.filas[0].approver_id == "u1"
+
+
+@pytest.mark.parametrize("respuesta", ["no", "No", "cancelar", False])
+def test_el_solicitante_puede_rechazar_con_un_no(respuesta) -> None:
+    grafo, h, audit, _, _ = _montar([[("create_ticket", {"asunto": "VPN"})]])
+    grafo.invoke(ENTRADA, CFG)
+    grafo.invoke(Command(resume=respuesta), CFG)
+    assert h.ejecutadas == [] and audit.filas[0].decision == "rejected"
+
+
+def test_un_si_del_solicitante_no_aprueba_un_p1() -> None:
+    grafo, h, _, _, _ = _montar([[("create_ticket", {"asunto": "Caído", "priority": "P1"})]])
+    grafo.invoke(ENTRADA, CFG)
+    salida = grafo.invoke(Command(resume="sí"), CFG)
+    assert "__interrupt__" in salida and h.ejecutadas == []
+
+
+def test_si_el_presupuesto_falla_el_limite_de_pasos_corta_igual() -> None:
+    """Segunda barrera: con un presupuesto absurdo, el grafo se corta por pasos (acotado)."""
+    from langgraph.errors import GraphRecursionError
+
+    from app.agents.subgraph import LIMITE_ABSOLUTO
+
+    grafo, _, _, llm, _ = _montar([[("search_it_kb", {"consulta": "q"})]] * 10_000,
+                                  max_iterations=10_000)  # fmt: skip
+    assert grafo.limite == LIMITE_ABSOLUTO
+    with pytest.raises(GraphRecursionError):
+        grafo.invoke(ENTRADA, CFG)
+    assert len(llm.llamadas) < LIMITE_ABSOLUTO

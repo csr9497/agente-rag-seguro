@@ -37,6 +37,7 @@ from pydantic import BaseModel, Field, ValidationError
 from app.agents.registry import RegistroAgentes
 from app.agents.scopes import UserContext, contexto_de_usuario
 from app.agents.subgraph import (
+    MAX_RESPUESTAS_INVALIDAS,
     VIGENCIA_APROBACION,
     Auditoria,
     AuditoriaMemoria,
@@ -69,6 +70,9 @@ from app.tools.conversacion import ORIENTADAS, PLANTILLAS
 PROMPT_ORQUESTADOR = local("orquestador")
 PROMPT_SINTESIS = local("sintesis")
 MAX_REINTENTOS = 3
+# Segunda barrera contra bucles (la primera son los presupuestos): pasos del grafo principal.
+# Camino más largo: ~10 nodos + (sintetizar + verifier) × (1 + MAX_REINTENTOS) + escalado.
+LIMITE_PASOS = 40
 ROL_ESCALADO = "administrador"
 MENSAJE_ESCALADO = (
     "No he podido darte una respuesta fiable. He pasado tu consulta a una persona del equipo, "
@@ -351,7 +355,7 @@ class Orquestador:
         g.add_edge("output_guardrail", "cache_store")
         g.add_edge("cache_store", "audit")
         g.add_edge("audit", END)
-        return g.compile(checkpointer=checkpointer)
+        return g.compile(checkpointer=checkpointer).with_config(recursion_limit=LIMITE_PASOS)
 
     # ------------------------------------------------------------------------- nodos
     def _inicio(self, estado: EstadoOrquestador) -> dict[str, Any]:
@@ -457,6 +461,14 @@ class Orquestador:
         salida = self._subgrafos[envio.agente].invoke(
             {"task": envio.tarea, "user": envio.user, "trace_id": envio.trace_id}, config
         )
+        spec = self._registro[envio.agente]
+        ids = list(salida.get("ids") or [])
+        if spec.returns == "id_only" and ids:  # el usuario ve la plantilla, no un UUID suelto
+            texto = spec.mensaje_id_only.format(ids=", ".join(ids))
+            return {"resultados": [ResultadoSub(
+                agente=envio.agente, resumen=TextoPrivado(valor=texto), ids=ids,
+                fuentes=list(salida.get("fuentes") or []),
+            )]}  # fmt: skip
         return {"resultados": [ResultadoSub(
             agente=envio.agente, resumen=TextoPrivado(valor=resumen(salida)),
             ids=list(salida.get("ids") or []), fuentes=list(salida.get("fuentes") or []),
@@ -515,19 +527,28 @@ class Orquestador:
         if self._aprobaciones is not None:
             # Una sola fila aunque el nodo se re-ejecute al reanudar: id determinista por hilo.
             aprobacion_id = self._registrar_escalado(estado, user, config, expira.isoformat())
-        aviso = None
+        aviso, invalidas = None, 0
         while True:
+            if invalidas >= MAX_RESPUESTAS_INVALIDAS:
+                # Lo resuelve el administrador, no el solicitante: la ejecución termina con el
+                # aviso de escalado y la aprobación sigue pendiente (nunca se re-pregunta sin fin).
+                return {"respuesta": _sin_contexto(MENSAJE_ESCALADO)}
             carga = {
                 "type": "escalate_human", "agent": "supervisor", "tool": "escalate_human",
                 "args_preview": "; ".join(estado.correcciones)[:300], "risk": "alto",
                 "expires_at": expira.isoformat(), "aprobacion_id": aprobacion_id,
                 "approver_role": ROL_ESCALADO,
+                "como_responder": (
+                    f"Lo resuelve alguien con el rol {ROL_ESCALADO}: "
+                    '{"approved": true, "approver_id": "<su usuario>", "respuesta": "<texto>"}.'
+                ),
             }  # fmt: skip
             if aviso:
                 carga["aviso"] = aviso
             valor = interrupt(carga)
             aprobador = str(valor.get("approver_id", "")) if isinstance(valor, dict) else ""
             if aprobador == user.id or ROL_ESCALADO not in self._roles_de(aprobador):
+                invalidas += 1
                 aviso = "Quien responde no puede resolver este escalado."
                 continue
             break

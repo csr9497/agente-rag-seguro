@@ -43,6 +43,8 @@ class AgentSpec:
     tools: Mapping[str, ToolPolicy] = field(default_factory=dict)
     max_iterations: int = 6
     returns: Literal["summary", "id_only"] = "summary"
+    # Con id_only, lo que ve el usuario (plantilla, sin LLM: no puede colarse nada del caso).
+    mensaje_id_only: str = "He registrado tu solicitud con la referencia {ids}."
 
 
 class RegistroAgentes(Mapping[str, AgentSpec]):
