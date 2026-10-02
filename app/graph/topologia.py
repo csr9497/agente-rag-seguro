@@ -2,27 +2,30 @@
 
 import html
 
-from app.graph.agente import Agente
+from app.agents.orquestador import Orquestador
 
 DESCRIPCIONES = {
-    "authorize": "Deny by default: sin grupos no hay contexto visible",
-    "input_guardrail": "Bloquea inyección/texto oculto; enmascara PII",
-    "cache_lookup": "Caché semántica; clave = rol + huella de sus documentos visibles",
-    "supervisor": "gpt-4o con tool-calling: decide qué buscar",
-    "tools": "rag_retrieve, documentos, data_query, proponer_accion (grupos del estado)",
-    "access_guardrail": "Contrasta cada fragmento con el registro de permisos; descarta el resto",
-    "generate": "Respuesta con citas [n] y salida estructurada",
-    "output_guardrail": "Bloquea fuga del prompt; enmascara PII sensible",
-    "cache_store": "Guarda la respuesta (no bloqueadas ni con historial)",
+    "authorize": "Deny by default: sin rol no hay contexto ni llamadas a modelos",
+    "input_guardrail": "Inyección, texto oculto y políticas de uso (+ Shields); enmascara PII",
+    "cache_lookup": "Caché semántica; clave = consulta + alcance de permisos del usuario",
+    "supervisor": "Tool-calling: delega en uno o varios agentes, conversa o pide aclaración",
+    "rag_agent": "Documentos que el usuario puede leer (filtro ACL + re-chequeo del registro)",
+    "hr_agent": "Casos de RR.HH. (RLS); crear o anotar requiere confirmación",
+    "support_agent": "Tickets de soporte (RLS); P1 lo aprueba it_support",
+    "sintetizar": "Integra los resultados de los agentes",
+    "verifier": "Citas, identificadores y PII deterministas; máx. 3 reescrituras",
+    "escalate_human": "Pausa para el administrador si el verifier se agota",
+    "output_guardrail": "Bloquea fuga de prompts; enmascara PII sensible",
+    "cache_store": "Solo respuestas verificadas, con fuentes y solo de rag_agent",
     "audit": "Registra usuario, pregunta, fuentes y respuesta",
 }
 
 
-def mermaid(agente: Agente) -> str:
-    return agente.grafo.get_graph().draw_mermaid()
+def mermaid(orquestador: Orquestador) -> str:
+    return orquestador.grafo.get_graph().draw_mermaid()
 
 
-def pagina_html(agente: Agente) -> str:
+def pagina_html(orquestador: Orquestador) -> str:
     filas = "".join(
         f"<tr><td><code>{n}</code></td><td>{html.escape(d)}</td></tr>"
         for n, d in DESCRIPCIONES.items()
@@ -30,7 +33,7 @@ def pagina_html(agente: Agente) -> str:
     return f"""<!doctype html>
 <html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Topología del agente</title>
+<title>Topología del orquestador</title>
 <style>
   :root {{ --bg:#f7f7f8; --fg:#1d1d1f; --muted:#6b6b73; --card:#fff; --border:#e2e2e6; }}
   @media (prefers-color-scheme: dark) {{
@@ -44,10 +47,10 @@ def pagina_html(agente: Agente) -> str:
   td {{ padding:6px 8px; border-top:1px solid var(--border); vertical-align:top; }}
 </style></head>
 <body><main>
-  <h1>Topología del agente (LangGraph)</h1>
+  <h1>Topología del orquestador multiagente (LangGraph)</h1>
   <p>Generada del grafo compilado en ejecución. Línea discontinua = arista condicional.
      Fuente Mermaid: <a href="grafo.mmd">grafo.mmd</a></p>
-  <div class="card"><pre class="mermaid">{html.escape(mermaid(agente))}</pre></div>
+  <div class="card"><pre class="mermaid">{html.escape(mermaid(orquestador))}</pre></div>
   <div class="card"><table>{filas}</table></div>
 </main>
 <script type="module">

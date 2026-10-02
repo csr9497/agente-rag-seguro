@@ -64,13 +64,13 @@ def _registro(m: Mundo) -> RegistroAgentes:
     return r
 
 
-def _orquestador(m, supervisor, agentes, sintesis=None, guardrail_entrada=None, **kw):  # noqa: ANN001, ANN202
+def _orquestador(m, supervisor, agentes, sintesis=None, guardrail_entrada=None, salida=None, **kw):  # noqa: ANN001, ANN202, E501
     return Orquestador(
         registro=_registro(m), supervisor=supervisor,
         llm_de_agente=lambda nombre: agentes.get(nombre) or GuionLLM([]),
         llm_sintesis=sintesis or FakeLLM(),
         guardrail_entrada=guardrail_entrada or GuardrailPermisivo(),
-        guardrail_salida=GuardrailPermisivo(),
+        guardrail_salida=salida or GuardrailPermisivo(),
         roles_de=lambda u: {"administrador"} if u == ADMIN else {"public"},
         checkpointer=InMemorySaver(), **kw,
     )  # fmt: skip
@@ -492,3 +492,16 @@ def test_dos_tareas_para_el_mismo_agente_no_se_pisan() -> None:
     o.consultar("¿Vacaciones y teletrabajo?", ANA)
     tarea = next(x["content"] for x in rag.llamadas[0] if x["role"] == "user")
     assert "vacaciones" in tarea and "teletrabajo" in tarea
+
+
+def test_documentos_consultados_en_orden_y_tambien_desde_la_cache() -> None:
+    m = Mundo()
+    rag = BuscarYResponder("Son 23 días [public/vacaciones.md].")
+    sup = GuionLLM([[("delegar_rag_agent", {"tarea": "vacaciones"})]] * 2)
+    o = _orquestador(m, sup, {"rag_agent": rag}, alcance=lambda user: "A")
+    primera = o.consultar("¿Vacaciones?", ANA)
+    segunda = o.consultar("¿Vacaciones?", ANA)
+    assert segunda.desde_cache
+    assert (
+        primera.documentos_consultados == segunda.documentos_consultados == ["public/vacaciones.md"]
+    )

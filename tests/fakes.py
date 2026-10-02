@@ -139,3 +139,32 @@ class GuionLLM:
                 ],
             },
         )  # fmt: skip
+
+
+class RagEco(GuionLLM):
+    """Supervisor y rag_agent a la vez, sin guion fijo: el supervisor delega la pregunta en
+    rag_agent; el agente busca y responde citando el primer documento que le devolvió la
+    búsqueda (o dice que no lo encuentra). Sirve para varias consultas seguidas."""
+
+    _DOC = re.compile(r'"doc_id": "([^"]+)"')
+
+    def __init__(self) -> None:
+        super().__init__([])
+        self.vistos: list[dict[str, Any]] = []  # todo lo que recibieron supervisor y agente
+
+    def decidir(self, mensajes, herramientas, obligar_herramienta=False) -> DecisionSupervisor:  # noqa: ANN001
+        self.vistos += [dict(m) for m in mensajes]
+        nombres = {h["function"]["name"] for h in herramientas}
+        pregunta = next(m["content"] for m in mensajes if m["role"] == "user")
+        tool = [m["content"] for m in mensajes if m["role"] == "tool"]
+        if "delegar_rag_agent" in nombres:
+            tarea = re.sub(r"(?s).*<pregunta>\s*(.*?)\s*</pregunta>.*", r"\1", pregunta)
+            self.turnos = [[("delegar_rag_agent", {"tarea": tarea})]]
+        elif not tool:
+            self.turnos = [[("search_documents", {"consulta": pregunta})]]
+        else:
+            self.turnos = []
+            docs = self._DOC.findall(tool[-1])
+            self.final = f"Según el documento [{docs[0]}]." if docs else "No lo encuentro."
+        self.llamadas = []
+        return super().decidir(mensajes, herramientas, obligar_herramienta)

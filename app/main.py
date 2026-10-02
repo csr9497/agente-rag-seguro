@@ -12,12 +12,12 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
 from app.agents.aprobaciones import Aprobacion, SqlRepositorioAprobaciones
 from app.agents.checkpointer import crear_checkpointer
-from app.api import acciones, admin, aprobaciones, conversaciones, documentos, roles
+from app.agents.orquestador import Orquestador
+from app.api import admin, aprobaciones, conversaciones, documentos, roles
 from app.api.dependencias import ServiciosDep
 from app.config import Settings, get_settings, validar_seguridad
 from app.deps import build_orquestador, build_servicios
 from app.graph import topologia
-from app.graph.agente import Agente
 from app.modelos.errores import ModeloError, clasificar
 from app.models.schemas import ConsultaRequest, RespuestaConsulta, Usuario
 from app.retrieval.no_configurado import ProveedorNoConfiguradoError
@@ -41,20 +41,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         len(informe.problemas),
     )
     app.state.servicios = servicios
-    app.state.agente = servicios.agente
     app.state.gestor = servicios.gestor
-    cerrar_checkpointer, tarea_vencimiento = lambda: None, None
-    if settings.multiagente:
-        clave = settings.checkpoint_clave.get_secret_value() if settings.checkpoint_clave else None
-        checkpointer, cerrar_checkpointer = crear_checkpointer(settings.database_url, clave)
-        aprobaciones = SqlRepositorioAprobaciones(servicios.motor, notificar=_aviso_vencida)
-        servicios.conversaciones.usar_orquestador(
-            build_orquestador(servicios, checkpointer), aprobaciones
-        )
-        tarea_vencimiento = asyncio.create_task(_vencer_periodicamente(aprobaciones))
+    # Estado de los hilos cifrado en Postgres (falla cerrado sin CHECKPOINT_CLAVE).
+    clave = settings.checkpoint_clave.get_secret_value() if settings.checkpoint_clave else None
+    checkpointer, cerrar_checkpointer = crear_checkpointer(settings.database_url, clave)
+    aprobaciones = SqlRepositorioAprobaciones(servicios.motor, notificar=_aviso_vencida)
+    orquestador = build_orquestador(servicios, checkpointer)
+    servicios.conversaciones.usar_orquestador(orquestador, aprobaciones)
+    app.state.orquestador = orquestador
+    tarea_vencimiento = asyncio.create_task(_vencer_periodicamente(aprobaciones))
     yield
-    if tarea_vencimiento is not None:
-        tarea_vencimiento.cancel()
+    tarea_vencimiento.cancel()
     cerrar_checkpointer()
 
 
@@ -80,7 +77,6 @@ for router in (
     documentos.router,
     roles.router,
     conversaciones.router,
-    acciones.router,
     aprobaciones.router,
     admin.router,
 ):
@@ -119,8 +115,8 @@ def _error_openai(request: Request, exc: openai.APIError) -> JSONResponse:
     return _error_modelo(request, clasificar(exc, settings.modelos_proveedor, settings.modelo_chat))
 
 
-def get_agente(request: Request) -> Agente:
-    return request.app.state.agente
+def get_orquestador(request: Request) -> Orquestador:
+    return request.app.state.orquestador
 
 
 @app.get("/health")
@@ -178,9 +174,11 @@ def yo(
 def consultar(
     body: ConsultaRequest,
     usuario: Annotated[Usuario, Depends(get_usuario)],
-    agente: Annotated[Agente, Depends(get_agente)],
+    orquestador: Annotated[Orquestador, Depends(get_orquestador)],
     servicios: ServiciosDep,
 ) -> RespuestaConsulta:
+    """Consulta sin conversación (un hilo nuevo por petición). Si algo requiere aprobación,
+    la respuesta lo indica y se resuelve en /aprobaciones."""
     # Solo los roles del usuario que siguen activos en el registro: un rol desactivado desde
     # la interfaz deja de dar acceso también aquí. La auditoría la hace el grafo (nodo audit).
     usuario = servicios.roles.solo_activos(usuario)
@@ -192,7 +190,7 @@ def consultar(
         }
     )
     try:
-        return agente.consultar(body.pregunta, usuario, top_k=body.top_k)
+        return orquestador.consultar(body.pregunta, usuario).respuesta
     except ProveedorNoConfiguradoError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except AzureError as exc:
@@ -209,12 +207,12 @@ def _topologia_habilitada(settings: Annotated[Settings, Depends(get_settings)]) 
 
 
 @app.get("/grafo", response_class=HTMLResponse, dependencies=[Depends(_topologia_habilitada)])
-def grafo(agente: Annotated[Agente, Depends(get_agente)]) -> str:
-    return topologia.pagina_html(agente)
+def grafo(orquestador: Annotated[Orquestador, Depends(get_orquestador)]) -> str:
+    return topologia.pagina_html(orquestador)
 
 
 @app.get(
     "/grafo.mmd", response_class=PlainTextResponse, dependencies=[Depends(_topologia_habilitada)]
 )
-def grafo_mermaid(agente: Annotated[Agente, Depends(get_agente)]) -> str:
-    return topologia.mermaid(agente)
+def grafo_mermaid(orquestador: Annotated[Orquestador, Depends(get_orquestador)]) -> str:
+    return topologia.mermaid(orquestador)

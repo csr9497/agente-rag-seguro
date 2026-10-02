@@ -4,7 +4,6 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.acciones.modelos import PropuestaAccion
 from app.models.schemas import Aclaracion, AprobacionPendiente, Cita, Hallazgo
 
 PATRON_ROL = r"^[a-z0-9][a-z0-9_\-]{0,63}$"
@@ -89,7 +88,6 @@ class MensajeGuardado(BaseModel):
     aclaracion: Aclaracion | None = None
     consultas: list[str] = Field(default_factory=list, description="Consultas curadas enviadas")
     feedback: Feedback | None = None
-    acciones: list[PropuestaAccion] = Field(default_factory=list)
     # Orquestador multiagente: pausas pendientes, hilo del checkpointer y agentes que actuaron.
     aprobaciones: list[AprobacionPendiente] = Field(default_factory=list)
     thread_id: str | None = None

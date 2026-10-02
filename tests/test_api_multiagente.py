@@ -42,7 +42,6 @@ def _cliente(servicios, guion, identidad, tmp_path):  # noqa: ANN001, ANN202
         orquestador, SqlRepositorioAprobaciones(servicios.motor)
     )
     app.state.servicios = servicios
-    app.state.agente = servicios.agente
     settings = Settings(database_url="sqlite://", seleccion_libre_de_rol=True,
                         almacen_local_dir=str(tmp_path))  # fmt: skip
     app.dependency_overrides[get_settings] = lambda: settings

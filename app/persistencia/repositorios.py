@@ -47,7 +47,6 @@ _CAMPOS_DATOS = {
     "conversacional",
     "aclaracion",
     "consultas",
-    "acciones",
     "aprobaciones",
     "thread_id",
     "agentes",

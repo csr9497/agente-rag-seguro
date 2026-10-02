@@ -10,7 +10,8 @@ from app.deps import build_servicios
 from app.models.schemas import Usuario
 from app.rag.catalogo import construir_catalogo
 from ingestor.sources import LocalFolderSource
-from tests.fakes import FakeEmbedder, FakeLLM, FakeSupervisor
+from tests.conftest import conectar_orquestador
+from tests.fakes import FakeEmbedder, FakeLLM, RagEco
 
 TEXTO = "# Guía VPN interna\n\nLa VPN interna de TI usa el puerto 4433 y el perfil corporativo.\n"
 
@@ -32,11 +33,12 @@ def servicios(retriever, tmp_path):
             seleccion_libre_de_rol=True, cache_semantica=False,
             departamentos_iniciales={"github:ana": ["it"], "github:luis": ["ventas"]},
         ),
-        modelos=(FakeEmbedder(), FakeLLM(), FakeSupervisor()),
+        modelos=(FakeEmbedder(), FakeLLM(), RagEco()),
         retriever=retriever,
     )  # fmt: skip
     informe = s.gestor.sincronizar(LocalFolderSource(docs))
     assert informe.por_estado() == {"indexado": 2}
+    conectar_orquestador(s)
     return s
 
 

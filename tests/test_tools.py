@@ -1,5 +1,5 @@
-"""Tools del agente: permisos (grupos del estado, no del LLM), validación de argumentos y
-respuesta indistinguible entre 'no existe' y 'sin acceso'."""
+"""Tools de lectura de rag_agent: permisos (grupos del estado, no del LLM), validación de
+argumentos y respuesta indistinguible entre «no existe» y «sin acceso»."""
 
 import json
 
@@ -7,7 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.models.schemas import Usuario
-from app.tools.base import SIN_ACCESO, schema_openai
+from app.tools.base import SIN_ACCESO
 from app.tools.documentos import (
     BuscarEnDocumento,
     BuscarEnDocumentoArgs,
@@ -16,32 +16,13 @@ from app.tools.documentos import (
     ListarDocumentos,
     ListarDocumentosArgs,
 )
-from app.tools.rag_retrieve import RagRetrieve, RagRetrieveArgs
 from ingestor.gestor import GestorDocumentos
 from tests.fakes import FakeEmbedder
 
 PUBLIC = Usuario(id="a", groups=["public"])
 RRHH = Usuario(id="b", groups=["rrhh"])
 AMBOS = Usuario(id="c", groups=["public", "rrhh"])
-TODAS = [RagRetrieve, ListarDocumentos, LeerDocumento, BuscarEnDocumento]
-
-
-# -------------------------------------------------------------------- rag_retrieve
-def test_rag_retrieve_filtra_por_grupos_del_usuario(retriever_con_docs, embedder) -> None:
-    tool = RagRetrieve(embedder, retriever_con_docs)
-    args = RagRetrieveArgs(consulta="bandas salariales")
-    public = tool.ejecutar(args, PUBLIC, top_k=10).chunks
-    rrhh = tool.ejecutar(args, RRHH, top_k=10).chunks
-    assert public and all(r.chunk.doc_id.startswith("public/") for r in public)
-    assert {r.chunk.doc_id for r in rrhh} == {
-        "rrhh/bandas-salariales.md",
-        "rrhh/proceso-contratacion.md",
-    }
-
-
-def test_rag_retrieve_respeta_top_k(retriever_con_docs, embedder) -> None:
-    tool = RagRetrieve(embedder, retriever_con_docs)
-    assert len(tool.ejecutar(RagRetrieveArgs(consulta="política"), PUBLIC, 1).chunks) == 1
+TODAS = [ListarDocumentos, LeerDocumento, BuscarEnDocumento]
 
 
 # --------------------------------------------------------------- listar_documentos
@@ -111,8 +92,6 @@ def test_buscar_en_documento_ajeno(retriever_con_docs, embedder) -> None:
 @pytest.mark.parametrize(
     ("modelo", "payload"),
     [
-        (RagRetrieveArgs, {"consulta": ""}),
-        (RagRetrieveArgs, {"consulta": "x", "groups": ["rrhh"]}),
         (ListarDocumentosArgs, {"grupo": "RRHH"}),
         (ListarDocumentosArgs, {"groups": ["rrhh"]}),
         (LeerDocumentoArgs, {"doc_id": "public/../rrhh/x.md"}),
@@ -130,6 +109,6 @@ def test_argumentos_invalidos(modelo, payload) -> None:
 
 @pytest.mark.parametrize("tool", TODAS, ids=lambda t: t.nombre)
 def test_ningun_esquema_expone_grupos_ni_usuario(tool) -> None:
-    params = schema_openai(tool)["function"]["parameters"]
+    params = tool.args_model.model_json_schema()
     assert params["additionalProperties"] is False
     assert not {"groups", "grupos", "usuario", "user", "acl_groups"} & set(params["properties"])

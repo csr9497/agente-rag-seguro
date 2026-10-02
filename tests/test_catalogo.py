@@ -65,24 +65,25 @@ def test_rol_sin_descripcion_usa_el_nombre() -> None:
 def test_composicion_real_public_no_ve_titulos_de_otros_roles(retriever, tmp_path) -> None:
     """Registro, roles y documentos de ejemplo reales: la orientación de un empleado general
     (el FakeLLM repite el catálogo que recibe) no nombra nada de RRHH ni de Finanzas."""
-    import json
 
     from app.config import Settings
     from app.deps import build_servicios
     from app.models.schemas import Usuario
     from ingestor.sources import LocalFolderSource
-    from tests.conftest import SAMPLE_DOCS
-    from tests.fakes import FakeEmbedder, FakeLLM, FakeSupervisor
+    from tests.conftest import SAMPLE_DOCS, conectar_orquestador
+    from tests.fakes import FakeEmbedder, FakeLLM, GuionLLM
 
     llm = FakeLLM()
-    sup = FakeSupervisor([[("conversacion", json.dumps({"tipo": "fuera_de_ambito"}))]])
+    sup = GuionLLM([[("conversacion", {"tipo": "fuera_de_ambito"})]])
     s = build_servicios(
         Settings(database_url="sqlite://", almacen_local_dir=str(tmp_path)),
         modelos=(FakeEmbedder(), llm, sup),
         retriever=retriever,
     )
     s.gestor.sincronizar(LocalFolderSource(SAMPLE_DOCS))
-    r = s.agente.consultar("dame una receta de pasta", Usuario(id="u", groups=["public"]))
+    o = conectar_orquestador(s, (FakeEmbedder(), llm, sup))
+    usuario = Usuario(id="u", groups=["public"])
+    r = o.consultar("dame una receta de pasta", usuario).respuesta
     assert "Política de vacaciones" in r.respuesta or "vacaciones" in r.respuesta.lower()
     for ajeno in (
         "Bandas", "contratación", "Nómina", "Presupuesto", "Recursos Humanos", "personas por",

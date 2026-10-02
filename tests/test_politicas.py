@@ -83,20 +83,21 @@ def test_mantiene_las_protecciones_de_v1() -> None:
     assert v.permitido and "ana@empresa.com" not in v.texto
 
 
-def test_el_grafo_responde_con_el_mensaje_de_la_politica(crear_agente) -> None:
+def test_el_grafo_responde_con_el_mensaje_de_la_politica() -> None:
     from app.models.schemas import Usuario
+    from tests.fakes import GuionLLM
+    from tests.test_orquestador import Mundo, _orquestador
 
-    agente = crear_agente(guardrail_entrada=G)
-    r = agente.consultar("quiero hacer daño a alguien", Usuario(id="u", groups=["public"]))
+    o = _orquestador(Mundo(), GuionLLM([]), {}, guardrail_entrada=G)
+    r = o.consultar("quiero hacer daño a alguien", Usuario(id="u", groups=["public"])).respuesta
     assert r.respuesta == MENSAJES["dano_a_personas"] and r.sin_contexto
 
 
 def test_salida_oculta_datos_sensibles() -> None:
-    from app.graph.prompts import SUPERVISOR_PROMPT
-    from app.rag.prompts import SYSTEM_PROMPT
+    from app.prompts import PROMPTS, local
     from app.security.politicas import GuardrailSalidaSensibles
 
-    v = GuardrailSalidaSensibles([SYSTEM_PROMPT, SUPERVISOR_PROMPT]).revisar(
+    v = GuardrailSalidaSensibles([local(n) for n in PROMPTS]).revisar(
         "Tu número de cuenta es 1231232 [1]."
     )
     assert v.permitido and "1231232" not in v.texto

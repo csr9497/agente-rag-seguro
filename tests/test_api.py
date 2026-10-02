@@ -1,32 +1,39 @@
 import logging
-from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
+from langgraph.checkpoint.memory import InMemorySaver
 
 from app.api.dependencias import get_servicios
 from app.config import Settings, get_settings
-from app.deps import build_agente
-from app.main import app, get_agente
-from app.persistencia.repositorios import SqlRepositorioRoles, crear_motor, inicializar
-from app.servicios.roles import ServicioRoles
+from app.deps import build_orquestador, build_servicios
+from app.main import app, get_orquestador
+from ingestor.sources import LocalFolderSource
+from tests.conftest import SAMPLE_DOCS
+from tests.fakes import FakeEmbedder, FakeLLM, RagEco
 
 
 @pytest.fixture
-def repo_roles() -> SqlRepositorioRoles:
-    motor = crear_motor("sqlite://")
-    inicializar(motor)  # roles iniciales: administrador, rrhh, finanzas, public
-    return SqlRepositorioRoles(motor)
+def servicios(retriever, tmp_path):
+    s = build_servicios(
+        Settings(database_url="sqlite://", almacen_local_dir=str(tmp_path), cache_semantica=False),
+        modelos=(FakeEmbedder(), FakeLLM(), RagEco()), retriever=retriever,
+    )  # fmt: skip
+    s.gestor.sincronizar(LocalFolderSource(SAMPLE_DOCS))
+    return s
 
 
 @pytest.fixture
-def client(agente, repo_roles):
-    app.dependency_overrides[get_agente] = lambda: agente
-    # /consultar solo usa los roles activos del registro (sin el resto de servicios).
-    servicios = SimpleNamespace(
-        roles=ServicioRoles(repo_roles, seleccion_libre=False),
-        departamentos=SimpleNamespace(de=lambda _: []),
+def repo_roles(servicios):
+    return servicios.repo_roles
+
+
+@pytest.fixture
+def client(servicios):
+    orquestador = build_orquestador(
+        servicios, InMemorySaver(), (FakeEmbedder(), FakeLLM(), RagEco())
     )
+    app.dependency_overrides[get_orquestador] = lambda: orquestador
     app.dependency_overrides[get_servicios] = lambda: servicios
     yield TestClient(app)  # sin `with`: no se ejecuta el lifespan (no toca Azure)
     app.dependency_overrides.clear()
@@ -96,9 +103,12 @@ def test_roles_inexistentes_del_token_se_ignoran(client) -> None:
     assert all(c["fuente"].startswith("public/") for c in r.json()["citas"])
 
 
-def test_sin_azure_openai_responde_503_indicando_que_falta(client, tmp_path) -> None:
-    settings = Settings(azure_openai_endpoint="", qdrant_path=str(tmp_path / "qdrant"))
-    app.dependency_overrides[get_agente] = lambda: build_agente(settings)
+def test_sin_azure_openai_responde_503_indicando_que_falta(client, servicios, tmp_path) -> None:
+    settings = Settings(azure_openai_endpoint="", database_url="sqlite://",
+                        almacen_local_dir=str(tmp_path), cache_semantica=False)  # fmt: skip
+    sin_modelos = build_servicios(settings, retriever=servicios.retriever)
+    orquestador = build_orquestador(sin_modelos, InMemorySaver())
+    app.dependency_overrides[get_orquestador] = lambda: orquestador
     r = client.post("/consultar", json={"pregunta": "vacaciones"})
     assert r.status_code == 503
     assert "AZURE_OPENAI_ENDPOINT" in r.json()["detail"]
@@ -114,17 +124,12 @@ def test_topologia_muestra_el_grafo(client) -> None:
     app.dependency_overrides[get_settings] = lambda: Settings(exponer_topologia=True)
     mmd = client.get("/grafo.mmd").text
     for arista in [
-        "__start__ --> authorize",
-        "authorize -.-> input_guardrail",
-        "authorize -.-> audit",
-        "supervisor -.-> tools",
-        "tools --> access_guardrail",
-        "access_guardrail -.-> supervisor",
-        "access_guardrail -.-> generate",
-        "supervisor -.-> generate",
-        "input_guardrail -.-> cache_lookup",
-        "cache_lookup -.-> supervisor",
-        "cache_lookup -.-> output_guardrail",
+        "__start__ --> inicio",
+        "inicio --> authorize",
+        "supervisor -.-> rag_agent",
+        "rag_agent --> sintetizar",
+        "sintetizar -.-> verifier",
+        "verifier -.-> escalate_human",
         "output_guardrail --> cache_store",
         "cache_store --> audit",
     ]:

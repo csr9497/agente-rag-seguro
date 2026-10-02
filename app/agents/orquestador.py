@@ -13,8 +13,9 @@
 - `verifier` es determinista: cada tarea con resultado, citas solo a documentos recuperados,
   identificadores solo de los creados y sin PII. Si falla, el supervisor reescribe con el
   motivo; a los 3 reintentos, `escalate_human`.
-- Caché exacta con clave (consulta normalizada, scope_hash), solo para respuestas que salen
-  únicamente de rag_agent y sin aprobaciones (regla 10).
+- Caché con permisos (regla 2): clave = consulta + alcance de permisos del usuario. Semántica
+  (embeddings; Redis o memoria) en la app, exacta en los tests. Solo respuestas con fuentes que
+  salen únicamente de rag_agent, sin aprobaciones y sin historial (regla 10).
 """
 
 import hashlib
@@ -23,11 +24,13 @@ import re
 import time
 import unicodedata
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import Annotated, Any, Protocol
 
+import openai
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
@@ -49,6 +52,9 @@ from app.agents.subgraph import (
     resumen,
     sin_tocar_usuario,
 )
+from app.cache.semantica import CacheSemantica, EntradaCache
+from app.config import Settings
+from app.modelos.errores import ModeloError, es_filtro_de_contenido
 from app.models.schemas import (
     Aclaracion,
     AprobacionPendiente,
@@ -58,12 +64,13 @@ from app.models.schemas import (
     Turno,
     Usuario,
 )
+from app.observabilidad import traza_consulta
 from app.prompts import local
 from app.rag.catalogo import CatalogoRol, construir_catalogo
 from app.rag.orientacion import responder_sin_informacion
 from app.rag.prompts import SIN_CONTEXTO, build_historial, neutralizar
-from app.retrieval.base import LLM, Supervisor
-from app.security.acceso import DOC_CATALOGO
+from app.retrieval.base import LLM, Embedder, Supervisor
+from app.security.acceso import DOC_CATALOGO, PREFIJO_DATOS
 from app.security.acl import es_rol
 from app.security.audit import registrar_consulta
 from app.security.deteccion import TIPOS_PII, enmascarar_pii
@@ -166,20 +173,50 @@ REINICIO: dict[str, Any] = {
 CAMPOS_TEXTO_INOCUOS = frozenset({"trace_id", "conversacion_id"})
 
 
-class CacheExacta(Protocol):
-    def obtener(self, clave: str) -> RespuestaConsulta | None: ...
-    def guardar(self, clave: str, respuesta: RespuestaConsulta) -> None: ...
+class CacheRespuestas(Protocol):
+    """`alcance`: huella de los permisos del usuario; nunca se sirve con otro alcance."""
+
+    def obtener(self, consulta: str, alcance: str) -> RespuestaConsulta | None: ...
+    def guardar(self, consulta: str, alcance: str, respuesta: RespuestaConsulta) -> None: ...
 
 
 class CacheExactaMemoria:
+    """Misma consulta normalizada y mismo alcance (tests y Studio)."""
+
     def __init__(self) -> None:
         self._datos: dict[str, RespuestaConsulta] = {}
 
-    def obtener(self, clave: str) -> RespuestaConsulta | None:
-        return self._datos.get(clave)
+    @staticmethod
+    def _clave(consulta: str, alcance: str) -> str:
+        return hashlib.sha256(f"{normalizar_consulta(consulta)}|{alcance}".encode()).hexdigest()
 
-    def guardar(self, clave: str, respuesta: RespuestaConsulta) -> None:
-        self._datos[clave] = respuesta
+    def obtener(self, consulta: str, alcance: str) -> RespuestaConsulta | None:
+        return self._datos.get(self._clave(consulta, alcance))
+
+    def guardar(self, consulta: str, alcance: str, respuesta: RespuestaConsulta) -> None:
+        self._datos[self._clave(consulta, alcance)] = respuesta
+
+
+class CacheSemanticaRespuestas:
+    """Caché semántica (app/cache: memoria o Redis) por similitud de embeddings, dentro del
+    mismo alcance de permisos."""
+
+    def __init__(self, cache: CacheSemantica, embedder: Embedder) -> None:
+        self._cache, self._embedder = cache, embedder
+
+    def obtener(self, consulta: str, alcance: str) -> RespuestaConsulta | None:
+        [vector] = self._embedder.embed([consulta])
+        entrada = self._cache.buscar(vector, alcance)
+        return entrada.respuesta if entrada else None
+
+    def guardar(self, consulta: str, alcance: str, respuesta: RespuestaConsulta) -> None:
+        [vector] = self._embedder.embed([consulta])
+        documentos = sorted({c.doc_id for c in respuesta.citas})
+        entrada = EntradaCache(
+            alcance=alcance, pregunta=consulta, vector=vector, respuesta=respuesta,
+            documentos_consultados=documentos,
+        )  # fmt: skip
+        self._cache.guardar(entrada)
 
 
 def normalizar_consulta(texto: str) -> str:
@@ -202,10 +239,18 @@ class Orquestador:
         auditoria: Auditoria | None = None,
         aprobaciones: Any = None,
         alcance: Callable[[UserContext], str] | None = None,
-        cache: CacheExacta | None = None,
+        cache: CacheRespuestas | None = None,
         catalogo: Callable[[list[str]], CatalogoRol] | None = None,
         ahora: Callable[[], float] = time.time,
+        trazas: Any = None,  # cliente de LangSmith (app/observabilidad.py)
+        settings: Settings | None = None,
+        prompts: dict[str, str] | None = None,  # versión cargada (LangSmith); si no, la local
+        versiones_guardrails: dict[str, str] | None = None,  # para la auditoría
     ) -> None:
+        self._trazas, self._settings = trazas, settings
+        self._versiones_guardrails = versiones_guardrails or {}
+        self._prompts = {"orquestador": PROMPT_ORQUESTADOR, "sintesis": PROMPT_SINTESIS,
+                         **(prompts or {})}  # fmt: skip
         self._registro, self._supervisor, self._llm = registro, supervisor, llm_sintesis
         self._entrada, self._salida = guardrail_entrada, guardrail_salida
         # Roles de quien decide: los de la fuente de verdad más los que la API conoce en esa
@@ -271,9 +316,15 @@ class Orquestador:
         thread_id: str | None = None,
     ) -> ResultadoOrquestacion:
         thread_id = thread_id or str(uuid.uuid4())
-        salida = self.grafo.invoke(
-            self.entrada(pregunta, usuario, conversacion_id, historial), self.config(thread_id)
-        )
+        entrada = self.entrada(pregunta, usuario, conversacion_id, historial)
+        with self._traza(usuario.groups, conversacion_id) as config:
+            # run_id = trace_id: la valoración del usuario se asocia a esta traza en LangSmith.
+            config = {**config, **self.config(thread_id), "run_id": entrada["trace_id"]}
+            try:
+                salida = self.grafo.invoke(entrada, config)
+            except ModeloError as exc:
+                _auditar_error_modelo(usuario, pregunta, exc, entrada["trace_id"], conversacion_id)
+                raise
         return self._resultado(salida, thread_id)
 
     def decidir(
@@ -305,8 +356,25 @@ class Orquestador:
             "approved": aprobado, "approver_id": aprobador, "edited_args": edited_args,
             "reason": motivo, "respuesta": respuesta,
         }  # fmt: skip
-        salida = self.grafo.invoke(Command(resume={interrupt_id: valor}), self.config(thread_id))
+        with self._traza([], None) as config:
+            config = {**config, **self.config(thread_id), "run_name": "aprobacion"}
+            salida = self.grafo.invoke(Command(resume={interrupt_id: valor}), config)
         return self._resultado(salida, thread_id)
+
+    @property
+    def cliente_trazas(self) -> Any:
+        return self._trazas
+
+    @contextmanager
+    def _traza(self, roles: list[str], conversacion_id: str | None) -> Iterator[dict[str, Any]]:
+        """Contexto de LangSmith (cliente, proyecto y metadata); sin settings, no se traza."""
+        if self._settings is None:
+            yield {}
+            return
+        with traza_consulta(
+            self._trazas, self._settings, roles=roles, conversacion_id=conversacion_id
+        ) as config:
+            yield config
 
     def pendientes(self, thread_id: str) -> list[AprobacionPendiente]:
         estado = self.grafo.get_state(self.config(thread_id), subgraphs=True)
@@ -368,7 +436,11 @@ class Orquestador:
         )
         for nombre in self._registro:
             g.add_edge(nombre, "sintetizar")
-        g.add_edge("sintetizar", "verifier")
+        g.add_conditional_edges(  # el filtro de contenido puede bloquear la síntesis
+            "sintetizar",
+            _si_respondida("verifier", "output_guardrail"),
+            ["verifier", "output_guardrail"],
+        )
         g.add_conditional_edges(
             "verifier", self._tras_verifier, ["output_guardrail", "sintetizar", "escalate_human"]
         )
@@ -414,8 +486,8 @@ class Orquestador:
         return cambios
 
     def _cache_lookup(self, estado: EstadoOrquestador) -> dict[str, Any]:
-        if (clave := self._clave_cache(estado)) and self._cache is not None:
-            if (guardada := self._cache.obtener(clave)) is not None:
+        if (alcance := self._alcance_cache(estado)) and self._cache is not None:
+            if (guardada := self._cache.obtener(str(estado.pregunta), alcance)) is not None:
                 return {"respuesta": guardada, "desde_cache": True, "verificado": True}
         return {}
 
@@ -426,10 +498,15 @@ class Orquestador:
         pregunta = neutralizar(str(estado.pregunta))
         mensajes = [
             {"role": "system",
-             "content": f"{PROMPT_ORQUESTADOR}\n<catalogo>\n{catalogo}\n</catalogo>"},
+             "content": f"{self._prompts['orquestador']}\n<catalogo>\n{catalogo}\n</catalogo>"},
             {"role": "user", "content": f"{historial}<pregunta>\n{pregunta}\n</pregunta>"},
         ]  # fmt: skip
-        decision = self._supervisor.decidir(mensajes, self._schemas, obligar_herramienta=True)
+        try:
+            decision = self._supervisor.decidir(mensajes, self._schemas, obligar_herramienta=True)
+        except (openai.BadRequestError, ModeloError) as exc:
+            if not es_filtro_de_contenido(exc):
+                raise
+            return _bloqueo_por_filtro(estado)
         tareas: dict[str, TextoPrivado] = {}
         for llamada in decision.tool_calls:
             try:
@@ -502,14 +579,20 @@ class Orquestador:
         if len(estado.resultados) == 1 and not estado.correcciones:
             return {"texto": estado.resultados[0].resumen}  # un agente: su respuesta, sin coste
         bloques = "\n".join(
-            f'<resultado agente="{r.agente}">\n{neutralizar(str(r.resumen))}\n</resultado>'
+            f'<resultado agente="{r.agente}">\n{neutralizar(str(r.resumen))}\n'
+            f"Fuentes citables: {_citables(r)}\n</resultado>"
             for r in estado.resultados
         )
         correcciones = "".join(f"- {c}\n" for c in estado.correcciones)
         usuario = f"<pregunta>\n{neutralizar(str(estado.pregunta))}\n</pregunta>\n\n{bloques}" + (
             f"\n\n<correcciones>\n{correcciones}</correcciones>" if correcciones else ""
         )
-        salida = self._llm.responder(PROMPT_SINTESIS, usuario)
+        try:
+            salida = self._llm.responder(self._prompts["sintesis"], usuario)
+        except (openai.BadRequestError, ModeloError) as exc:
+            if not es_filtro_de_contenido(exc):
+                raise
+            return _bloqueo_por_filtro(estado)
         return {"texto": TextoPrivado(valor=salida.respuesta.strip())}
 
     def _verifier(self, estado: EstadoOrquestador) -> dict[str, Any]:
@@ -590,12 +673,17 @@ class Orquestador:
         """Solo respuestas verificadas, con fuentes, que salen únicamente de rag_agent (regla 10).
         Un «no lo encuentro» no se cachea: fijaría un fallo puntual y ocultaría lo nuevo."""
         solo_rag = set(estado.tareas) == {"rag_agent"} and not any(r.ids for r in estado.resultados)
+        # Los datos internos (data_query) cambian en la base sin cambiar el alcance: no se cachean.
+        con_datos = any(
+            f["doc_id"].startswith(PREFIJO_DATOS) for r in estado.resultados for f in r.fuentes
+        )
         if (
-            solo_rag and estado.verificado and not estado.desde_cache and estado.respuesta
+            solo_rag and not con_datos and estado.verificado and not estado.desde_cache
+            and estado.respuesta
             and not estado.respuesta.sin_contexto
-            and (clave := self._clave_cache(estado)) and self._cache is not None
+            and (alcance := self._alcance_cache(estado)) and self._cache is not None
         ):  # fmt: skip
-            self._cache.guardar(clave, estado.respuesta)
+            self._cache.guardar(str(estado.pregunta), alcance, estado.respuesta)
         return {}
 
     def _audit(self, estado: EstadoOrquestador) -> dict[str, Any]:
@@ -604,7 +692,10 @@ class Orquestador:
             estado.usuario or Usuario(id="sin_identidad", groups=[]),
             str(estado.pregunta or ""), respuesta, estado.hallazgos,
             traza_id=estado.trace_id, conversacion_id=estado.conversacion_id,
-            documentos_consultados=_documentos(estado), desde_cache=estado.desde_cache,
+            documentos_consultados=_documentos(
+                estado.resultados, estado.respuesta, estado.desde_cache
+            ),
+            desde_cache=estado.desde_cache, guardrails=self._versiones_guardrails,
         )  # fmt: skip
         # Modo chat: la respuesta vuelve como mensaje del asistente.
         return {"messages": [AIMessage(content=respuesta.respuesta)]}
@@ -652,11 +743,12 @@ class Orquestador:
             respaldo=respaldo,
         )  # fmt: skip
 
-    def _clave_cache(self, estado: EstadoOrquestador) -> str | None:
-        if self._alcance is None or estado.user is None:
+    def _alcance_cache(self, estado: EstadoOrquestador) -> str | None:
+        """Sin historial: una pregunta de seguimiento («¿y cuántos puedo trasladar?») depende
+        de la conversación y no se puede servir ni guardar como si fuera independiente."""
+        if self._alcance is None or estado.user is None or estado.historial:
             return None
-        consulta = normalizar_consulta(str(estado.pregunta))
-        return hashlib.sha256(f"{consulta}|{self._alcance(estado.user)}".encode()).hexdigest()
+        return self._alcance(estado.user)
 
     def _registrar_escalado(
         self, estado: EstadoOrquestador, user: UserContext, config: RunnableConfig, expira: str
@@ -684,9 +776,9 @@ class Orquestador:
             respuesta=respuesta or _sin_contexto(SIN_CONTEXTO), aprobaciones=pendientes,
             thread_id=thread_id, traza_id=str(salida.get("trace_id") or ""),
             pregunta_procesada=str(salida.get("pregunta") or ""),
-            documentos_consultados=sorted({
-                f["doc_id"] for r in salida.get("resultados", []) for f in r.fuentes
-            }),
+            documentos_consultados=_documentos(
+                salida.get("resultados") or [], respuesta, bool(salida.get("desde_cache"))
+            ),
             hallazgos=salida.get("hallazgos") or [], desde_cache=bool(salida.get("desde_cache")),
             agentes=sorted(salida.get("tareas") or {}),
         )  # fmt: skip
@@ -713,8 +805,43 @@ def _sin_contexto(texto: str) -> RespuestaConsulta:
     return RespuestaConsulta(respuesta=texto, citas=[], sin_contexto=True)
 
 
-def _documentos(estado: EstadoOrquestador) -> list[str]:
-    return sorted({f["doc_id"] for r in estado.resultados for f in r.fuentes})
+def _bloqueo_por_filtro(estado: EstadoOrquestador) -> dict[str, Any]:
+    """Otra capa de defensa (el filtro de contenido del proveedor): se trata como una consulta
+    bloqueada y se audita, en lugar de acabar en un error."""
+    hallazgo = Hallazgo(tipo="inyeccion", detalle="filtro_contenido_azure", accion="bloquear")
+    return {"respuesta": _sin_contexto(MENSAJE_BLOQUEO), "hallazgos": [*estado.hallazgos, hallazgo]}
+
+
+def _auditar_error_modelo(
+    usuario: Usuario, pregunta: str, exc: ModeloError, traza_id: str, conversacion_id: str | None
+) -> None:
+    """Regla 4 (toda consulta se audita), también si el proveedor de modelos falla a mitad del
+    grafo. La pregunta se registra con la PII enmascarada."""
+    registrar_consulta(
+        usuario, enmascarar_pii(pregunta, TIPOS_PII)[0],
+        RespuestaConsulta(respuesta=exc.mensaje_usuario, citas=[], sin_contexto=True),
+        [Hallazgo(tipo="servicio_no_disponible", accion="registrar",
+                  detalle=f"modelo:{exc.tipo} ({exc.proveedor}/{exc.modelo})")],
+        traza_id=traza_id, conversacion_id=conversacion_id,
+    )  # fmt: skip
+
+
+def _citables(resultado: ResultadoSub) -> str:
+    """Identificadores que la síntesis puede citar (para reescribir citas sin identificador)."""
+    ids = list(dict.fromkeys(f"[{f['doc_id']}]" for f in resultado.fuentes))
+    return ", ".join(ids) or "ninguna"
+
+
+def _documentos(
+    resultados: list[ResultadoSub], respuesta: RespuestaConsulta | None, desde_cache: bool
+) -> list[str]:
+    """Documentos consultados, en el orden en que se recuperaron (más relevante primero),
+    sin el catálogo sintético. Desde la caché: los que cita la respuesta guardada."""
+    if desde_cache and respuesta:
+        ids = [c.doc_id for c in respuesta.citas]
+    else:
+        ids = [f["doc_id"] for r in resultados for f in r.fuentes]
+    return list(dict.fromkeys(d for d in ids if d != DOC_CATALOGO))
 
 
 def _requerido[T](valor: T | None) -> T:

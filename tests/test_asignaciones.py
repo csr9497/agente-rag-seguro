@@ -4,16 +4,19 @@ import logging
 
 import pytest
 from fastapi.testclient import TestClient
+from langgraph.checkpoint.memory import InMemorySaver
 
 from app.api.dependencias import get_servicios
 from app.config import Settings, get_settings
-from app.deps import build_servicios
-from app.main import app, get_agente
+from app.deps import build_orquestador, build_servicios
+from app.main import app, get_orquestador
 from app.models.schemas import Usuario
 from app.security.identity import get_usuario
 from app.servicios.errores import DatosInvalidosError, PermisoDenegadoError
 from app.servicios.roles import AsignarRoles
-from tests.fakes import FakeEmbedder, FakeLLM, FakeSupervisor
+from ingestor.sources import LocalFolderSource
+from tests.conftest import SAMPLE_DOCS
+from tests.fakes import FakeEmbedder, FakeLLM, FakeSupervisor, RagEco
 
 ANA = Usuario(id="github:ana", groups=[])
 ADMIN = Usuario(id="github:jefa", groups=[])
@@ -83,10 +86,13 @@ def test_rol_desactivado_deja_de_contar(servicios) -> None:
 
 # ------------------------------------------------------------------ API
 @pytest.fixture
-def client(servicios, agente):
+def client(servicios):
     yo = {"usuario": ADMIN}
+    servicios.gestor.sincronizar(LocalFolderSource(SAMPLE_DOCS))
+    modelos = (FakeEmbedder(), FakeLLM(), RagEco())
+    orquestador = build_orquestador(servicios, InMemorySaver(), modelos)
+    app.dependency_overrides[get_orquestador] = lambda: orquestador
     app.dependency_overrides[get_servicios] = lambda: servicios
-    app.dependency_overrides[get_agente] = lambda: agente
     app.dependency_overrides[get_settings] = lambda: _settings()
     app.dependency_overrides[get_usuario] = lambda: yo["usuario"]
     yield TestClient(app), yo

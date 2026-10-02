@@ -16,7 +16,6 @@ from typing import Any
 
 from app.config import Settings
 from app.prompts import PROMPTS, local
-from app.rag.prompts import SIN_CONTEXTO
 
 logger = logging.getLogger(__name__)
 
@@ -54,9 +53,6 @@ class RegistroPrompts:
         try:
             plantilla = self._cliente.pull_prompt(f"{PROMPTS[nombre][0]}:{version}")
             texto = plantilla.messages[0].prompt.template
-            if nombre == "generacion" and SIN_CONTEXTO not in texto:
-                # Regla 6: sin la salida de escape literal no se usa esa versión.
-                raise ValueError(f"sin la salida de escape «{SIN_CONTEXTO}»")
         except Exception as exc:  # noqa: BLE001 — sin LangSmith la app sigue con el local
             logger.warning("No se pudo cargar %s:%s de LangSmith (%s: %s): se usa el local",
                            nombre, version, type(exc).__name__, exc)  # fmt: skip

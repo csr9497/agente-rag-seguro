@@ -14,7 +14,7 @@ from openai import AzureOpenAI, OpenAI
 
 from app.config import Settings
 from app.deps import build_modelos
-from app.main import app, get_agente
+from app.main import app, get_orquestador
 from app.modelos.diagnostico import diagnosticar, requisitos_azure, requisitos_openai
 from app.modelos.errores import ModeloError, clasificar, es_filtro_de_contenido
 from app.modelos.openai_compat import (
@@ -180,7 +180,9 @@ def test_embeddings_con_otra_dimension_que_el_indice() -> None:
     assert EmbedderOpenAI(_cliente(vector_dims=1536), "m", "openai", 1536).embed(["x"])
 
 
-def test_filtro_de_contenido_tipificado_sigue_siendo_bloqueo(crear_agente) -> None:
+def test_filtro_de_contenido_tipificado_sigue_siendo_bloqueo() -> None:
+    from tests.test_orquestador import Mundo, _orquestador
+
     filtro = clasificar(_error(400, {"code": "content_filter"}), "azure", "gpt-4o")
     assert es_filtro_de_contenido(filtro)
 
@@ -188,7 +190,7 @@ def test_filtro_de_contenido_tipificado_sigue_siendo_bloqueo(crear_agente) -> No
         def decidir(self, *a, **k):
             raise filtro
 
-    r = crear_agente(supervisor=Supervisor()).consultar_detallado("hola", PUBLIC)
+    r = _orquestador(Mundo(), Supervisor(), {}).consultar("hola", PUBLIC)
     assert r.respuesta.sin_contexto and any(h.accion == "bloquear" for h in r.hallazgos)
 
 
@@ -198,9 +200,11 @@ class _SupervisorSinSaldo:
         raise clasificar(_error(429, {"error": {"code": "insufficient_quota"}}), "openai", "gpt-4o")
 
 
-def test_api_responde_con_el_tipo_de_error_y_audita(crear_agente, caplog) -> None:
-    agente = crear_agente(supervisor=_SupervisorSinSaldo())
-    app.dependency_overrides[get_agente] = lambda: agente
+def test_api_responde_con_el_tipo_de_error_y_audita(caplog) -> None:
+    from tests.test_orquestador import Mundo, _orquestador
+
+    orquestador = _orquestador(Mundo(), _SupervisorSinSaldo(), {})
+    app.dependency_overrides[get_orquestador] = lambda: orquestador
     from app.api.dependencias import get_servicios
 
     app.dependency_overrides[get_servicios] = lambda: SimpleNamespace(

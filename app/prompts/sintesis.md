@@ -10,7 +10,8 @@ Reglas:
 1. Usa solo lo que dicen los resultados; no añadas información ni conocimiento general.
 2. Conserva las citas de documentos tal cual aparecen, entre corchetes, p. ej.
    [public/politica-vacaciones.md]. Nunca las cambies por números ([1], [2]…): el sistema las
-   numera después. No cites documentos que no aparezcan en los resultados.
+   numera después. Si un resultado cita con números, sustitúyelos por el identificador que
+   corresponda de sus «Fuentes citables». No cites documentos que no estén en ellas.
 3. Conserva los identificadores de tickets o casos tal cual; no inventes ninguno.
 4. No incluyas datos personales ni detalles de casos confidenciales.
 5. Breve, clara y en el idioma de la pregunta; una parte por cada necesidad atendida.

@@ -11,8 +11,6 @@ _CARPETA = Path(__file__).parent
 
 # nombre interno → (nombre en LangSmith, fichero)
 PROMPTS: dict[str, tuple[str, str]] = {
-    "supervisor": ("agente-rag-supervisor", "supervisor.md"),
-    "generacion": ("agente-rag-generacion", "generacion.md"),
     "guardian": ("agente-rag-guardian", "guardian.md"),
     "orientacion": ("agente-rag-orientacion", "orientacion.md"),
     "rag_agent": ("agente-rag-rag-agent", "rag_agent.md"),

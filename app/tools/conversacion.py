@@ -1,15 +1,11 @@
-"""Conversación básica: saludos, agradecimientos, despedidas y «¿qué puedes hacer?».
+"""Conversación básica: saludos, agradecimientos, despedidas y «¿qué puedes hacer?» (el
+supervisor del orquestador elige el tipo con su tool `conversacion`).
 
 Responde con plantillas fijas, nunca con texto libre del modelo: así un saludo no dispara una
 búsqueda ni el asistente contesta con conocimiento propio fuera de los documentos (regla 1).
 """
 
 from typing import Literal
-
-from pydantic import BaseModel, ConfigDict
-
-from app.models.schemas import Usuario
-from app.tools.base import ResultadoHerramienta
 
 TipoConversacion = Literal["saludo", "agradecimiento", "despedida", "ayuda", "fuera_de_ambito"]
 
@@ -37,25 +33,3 @@ PLANTILLAS: dict[str, str] = {
 # Con estos tipos el LLM orienta con el catálogo del rol (app/rag/orientacion.py); la plantilla
 # queda de respaldo si el modelo falla.
 ORIENTADAS = ("ayuda", "fuera_de_ambito")
-
-
-class ConversacionArgs(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    tipo: TipoConversacion
-
-
-class ResponderConversacion:
-    nombre = "conversacion"
-    descripcion = (
-        "Saludos, agradecimientos, despedidas, «¿qué puedes hacer?» (ayuda) o mensajes sin "
-        "relación con la empresa (fuera_de_ambito: se orienta al usuario sobre lo que sí puede "
-        "consultar). NUNCA para preguntas sobre contenido de documentos o datos."
-    )
-    args_model = ConversacionArgs
-
-    def ejecutar(
-        self, args: ConversacionArgs, usuario: Usuario, top_k: int
-    ) -> ResultadoHerramienta:
-        return ResultadoHerramienta(
-            conversacion=args.tipo, nota="Respuesta de cortesía preparada. Contesta LISTO."
-        )

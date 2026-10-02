@@ -98,7 +98,8 @@ def test_el_re_chequeo_descarta_lo_revocado_aunque_el_indice_lo_devuelva(rag, se
 
 def test_cada_fragmento_trae_lo_necesario_para_citar(rag) -> None:
     (primero, *_) = _buscar(rag, PUBLIC, "vacaciones días laborables")
-    assert {"n", "doc_id", "titulo", "contenido", "score"} <= set(primero)
+    assert {"doc_id", "cita", "titulo", "contenido", "score"} <= set(primero)
+    assert primero["cita"] == f"[{primero['doc_id']}]" and "n" not in primero  # nunca «[1]»
 
 
 # --------------------------------------------------------------------------------- metadatos

@@ -1,7 +1,7 @@
 """Composición de dependencias según configuración."""
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -10,18 +10,16 @@ from langsmith import Client as LangSmithClient
 from qdrant_client import QdrantClient
 from sqlalchemy import Engine
 
-from app.acciones.servicio import ServicioAcciones
 from app.agents.aprobaciones import SqlRepositorioAprobaciones
 from app.agents.hr import HerramientasHR, SqlRepositorioCasosRRHH, crear_hr_agent
-from app.agents.orquestador import Orquestador
+from app.agents.orquestador import CacheSemanticaRespuestas, Orquestador
 from app.agents.rag import HerramientasRag, adaptar_lectura, crear_rag_agent
-from app.agents.registry import RegistroAgentes
+from app.agents.registry import AgentSpec, RegistroAgentes
 from app.agents.subgraph import AuditoriaSql
 from app.agents.support import HerramientasSoporte, SqlRepositorioTickets, crear_support_agent
 from app.cache.semantica import CacheMemoria, CacheRedis, CacheSemantica, alcance_de_permisos
 from app.config import Settings
 from app.datos.catalogo import CONSULTAS, permisos_por_consulta
-from app.graph.agente import Agente
 from app.modelos.openai_compat import EmbedderOpenAI, LLMOpenAI, SupervisorOpenAI, build_client
 from app.observabilidad import configurar_trazas
 from app.persistencia.almacen import AlmacenBlob, AlmacenDocumentos, AlmacenLocal
@@ -51,12 +49,8 @@ from app.security.versiones import catalogo_entrada, catalogo_salida, version_po
 from app.servicios.conversaciones import ServicioConversaciones
 from app.servicios.integridad import InformeIntegridad, verificar_integridad
 from app.servicios.roles import ServicioRoles
-from app.tools.acciones import ProponerAccion
-from app.tools.aclaracion import PedirAclaracion
-from app.tools.conversacion import ResponderConversacion
 from app.tools.datos import DataQuery
 from app.tools.documentos import BuscarEnDocumento, LeerDocumento, ListarDocumentos
-from app.tools.rag_retrieve import RagRetrieve
 from ingestor.gestor import GestorDocumentos
 
 
@@ -144,14 +138,12 @@ def build_embedder(settings: Settings) -> Embedder:
 
 @dataclass(frozen=True)
 class Servicios:
-    agente: Agente
     gestor: GestorDocumentos
     roles: ServicioRoles
     conversaciones: ServicioConversaciones
     registro: RepositorioDocumentos
     repo_roles: RepositorioRoles
     retriever: Retriever
-    acciones: ServicioAcciones
     departamentos: SqlRepositorioDepartamentosUsuario
     solicitudes: SqlRepositorioSolicitudesAcceso
     embedder: Embedder
@@ -169,9 +161,10 @@ def build_servicios(
     retriever: Retriever | None = None,
     shields: ClienteShields | None = None,
 ) -> Servicios:
-    """Composición completa. Agente y gestor comparten embedder, retriever (Qdrant embebido
-    solo admite un cliente por proceso) y registro. `modelos`/`retriever` permiten tests."""
-    embedder, llm, supervisor = modelos or build_modelos(settings)
+    """Composición completa. Agentes y gestor comparten embedder, retriever (Qdrant embebido
+    solo admite un cliente por proceso) y registro. `modelos`/`retriever` permiten tests. El
+    orquestador se compone aparte (build_orquestador), con el checkpointer del arranque."""
+    embedder = (modelos or build_modelos(settings))[0]
     retriever = retriever or build_retriever(settings)
     shields = shields or build_shields(settings)
     motor = crear_motor(settings.database_url)
@@ -180,24 +173,9 @@ def build_servicios(
     registro = SqlRepositorioDocumentos(motor)
     departamentos = SqlRepositorioDepartamentosUsuario(motor)
     departamentos.iniciales(settings.departamentos_iniciales)
-    cache, alcance = None, None
-    if settings.cache_semantica:
-        version = f"{settings.modelos_proveedor}:{settings.modelo_chat}:{settings.app_version}"
-        cache = build_cache(settings)
-
-        def alcance(roles: list[str]) -> str:
-            return alcance_de_permisos(registro, roles, version)
-
-    catalogo = catalogo_de(registro, repo_roles)
-
-    agente = _agente(
-        settings, embedder, llm, supervisor, retriever, registro,
-        cache=cache, alcance_cache=alcance, motor=motor, shields=shields, catalogo=catalogo,
-    )  # fmt: skip
     roles = ServicioRoles(repo_roles, settings.seleccion_libre_de_rol)
     roles.asignaciones_iniciales(settings.asignaciones_iniciales)
     return Servicios(
-        agente=agente,
         gestor=GestorDocumentos(
             embedder,
             retriever,
@@ -212,14 +190,12 @@ def build_servicios(
         conversaciones=ServicioConversaciones(
             SqlRepositorioConversaciones(motor),
             roles,
-            agente,
             settings.max_turnos_historial,
             departamentos_de=departamentos.de,
         ),
         registro=registro,
         repo_roles=repo_roles,
         retriever=retriever,
-        acciones=ServicioAcciones(motor),
         departamentos=departamentos,
         solicitudes=SqlRepositorioSolicitudesAcceso(motor),
         embedder=embedder,
@@ -251,28 +227,54 @@ def build_orquestador(
     """Orquestador multiagente con la composición real (fase 5). `checkpointer=None` en
     LangGraph Studio (lo pone el servidor de desarrollo)."""
     settings = servicios.settings
-    _, llm, supervisor = modelos or build_modelos(settings)
+    embedder, llm, supervisor = modelos or build_modelos(settings)
     shields = build_shields(settings)
-    entrada = catalogo_entrada(settings, shields)[version_por_defecto(settings, shields)]
+    version_entrada = version_por_defecto(settings, shields)
+    entrada = catalogo_entrada(settings, shields)[version_entrada]
     salida = catalogo_salida(settings)[settings.guardrail_salida]
+    prompts = build_prompts(settings)
+    if isinstance(salida, GuardrailSalida):  # también vigila las versiones de LangSmith
+        prompts.al_cargar(salida.proteger)
+
+    def prompt(nombre: str) -> str:
+        return prompts.texto(nombre)[0]
+
     version = f"{settings.modelos_proveedor}:{settings.modelo_chat}:{settings.app_version}"
     registro = servicios.registro
+    # Caché con permisos (regla 2): semántica (memoria o Redis) por alcance de permisos.
+    cache = (
+        CacheSemanticaRespuestas(build_cache(settings), embedder)
+        if settings.cache_semantica else None
+    )  # fmt: skip
     return Orquestador(
-        registro=build_registro_agentes(servicios), supervisor=supervisor,
+        registro=build_registro_agentes(servicios, prompt), supervisor=supervisor,
         llm_de_agente=lambda _nombre: supervisor, llm_sintesis=llm,
         guardrail_entrada=entrada, guardrail_salida=salida,
         roles_de=lambda uid: set(servicios.repo_roles.roles_de_usuario(uid)),
         checkpointer=checkpointer, auditoria=AuditoriaSql(servicios.motor),
         aprobaciones=SqlRepositorioAprobaciones(servicios.motor),
-        alcance=lambda user: alcance_de_permisos(registro, list(user.acl), version),
-        catalogo=catalogo_de(registro, servicios.repo_roles),
+        alcance=(
+            (lambda user: alcance_de_permisos(registro, list(user.acl), version))
+            if cache is not None else None
+        ),
+        cache=cache, catalogo=catalogo_de(registro, servicios.repo_roles),
+        trazas=configurar_trazas(settings), settings=settings,
+        prompts={n: prompt(n) for n in ("orquestador", "sintesis")},
+        versiones_guardrails={"entrada": version_entrada, "salida": settings.guardrail_salida},
     )  # fmt: skip
 
 
-def build_registro_agentes(servicios: Servicios) -> RegistroAgentes:
+def build_registro_agentes(
+    servicios: Servicios, prompt: Callable[[str], str] | None = None
+) -> RegistroAgentes:
     """Agentes de la orquestación multiagente (ver app/agents/). Agregar uno es registrarlo
-    aquí: el grafo principal no cambia."""
+    aquí: el grafo principal no cambia. `prompt(nombre)`: versión de cada prompt de sistema
+    (PROMPTS_ORIGEN); sin él, la copia del repositorio."""
     registro = RegistroAgentes()
+
+    def registrar(spec: AgentSpec) -> None:
+        registro.register(replace(spec, system_prompt=prompt(spec.name)) if prompt else spec)
+
     rag = HerramientasRag(
         servicios.embedder, servicios.retriever, servicios.registro,
         VerificadorRegistro(servicios.registro, permisos_por_consulta()),
@@ -290,13 +292,13 @@ def build_registro_agentes(servicios: Servicios) -> RegistroAgentes:
             BuscarEnDocumento(servicios.embedder, servicios.retriever),
         )
     }
-    registro.register(crear_rag_agent(rag, lectura))
+    registrar(crear_rag_agent(rag, lectura))
     # Casos de RR.HH. solo con RLS (PostgreSQL): sin ella, el agente no existe (fallo cerrado).
     if servicios.motor.dialect.name == "postgresql":
         casos = SqlRepositorioCasosRRHH(servicios.motor)
-        registro.register(crear_hr_agent(HerramientasHR(casos, rag, servicios.registro)))
+        registrar(crear_hr_agent(HerramientasHR(casos, rag, servicios.registro)))
         tickets = SqlRepositorioTickets(servicios.motor)
-        registro.register(crear_support_agent(HerramientasSoporte(tickets, rag)))
+        registrar(crear_support_agent(HerramientasSoporte(tickets, rag)))
     return registro
 
 
@@ -305,75 +307,3 @@ def build_prompts(settings: Settings) -> RegistroPrompts:
     clave = settings.langsmith_api_key.get_secret_value() if settings.langsmith_api_key else ""
     cliente = LangSmithClient(api_key=clave) if clave else None
     return RegistroPrompts(settings, cliente)
-
-
-def build_agente(settings: Settings) -> Agente:
-    """Agente sin registro (LangGraph Studio y /consultar): verificación solo por ACL."""
-    embedder, llm, supervisor = build_modelos(settings)
-    retriever = build_retriever(settings)
-
-    def catalogo(grupos: list[str]) -> CatalogoRol:
-        """Sin registro: los documentos del índice visibles para esos grupos."""
-        documentos = [(d.doc_id, d.doc_id, d.acl_groups) for d in retriever.list_documents(grupos)]
-        return construir_catalogo(grupos, documentos, {}, [])
-
-    return _agente(
-        settings, embedder, llm, supervisor, retriever,
-        shields=build_shields(settings), catalogo=catalogo,
-    )  # fmt: skip
-
-
-def _agente(
-    settings: Settings,
-    embedder: Embedder,
-    llm: LLM,
-    supervisor: Supervisor,
-    retriever: Retriever,
-    registro: RepositorioDocumentos | None = None,
-    cache: CacheSemantica | None = None,
-    alcance_cache: Callable[[list[str]], str] | None = None,
-    motor: Engine | None = None,
-    shields: ClienteShields | None = None,
-    catalogo: Callable[[list[str]], CatalogoRol] | None = None,
-) -> Agente:
-    versiones_entrada = catalogo_entrada(settings, shields)
-    versiones_salida = catalogo_salida(settings)
-    version_entrada = version_por_defecto(settings, shields)
-    prompts = build_prompts(settings)
-    for guardrail in versiones_salida.values():
-        if isinstance(guardrail, GuardrailSalida):  # también vigila versiones de LangSmith
-            prompts.al_cargar(guardrail.proteger)
-    return Agente(
-        trazas=configurar_trazas(settings),
-        settings=settings,
-        supervisor=supervisor,
-        llm=llm,
-        herramientas=[
-            RagRetrieve(embedder, retriever, settings.min_score),
-            ResponderConversacion(),
-            PedirAclaracion(),
-            ListarDocumentos(retriever, registro),
-            BuscarEnDocumento(embedder, retriever),
-            LeerDocumento(retriever),
-            *(
-                [DataQuery(motor), ProponerAccion(ServicioAcciones(motor))]
-                if motor is not None
-                else []
-            ),
-        ],
-        guardrail_entrada=versiones_entrada[version_entrada],
-        guardrail_salida=versiones_salida[settings.guardrail_salida],
-        versiones_entrada=versiones_entrada,
-        versiones_salida=versiones_salida,
-        version_entrada=version_entrada,
-        version_salida=settings.guardrail_salida,
-        top_k=settings.retrieval_top_k,
-        max_iteraciones=settings.max_iteraciones,
-        max_contexto=settings.max_fragmentos_contexto,
-        verificador=VerificadorRegistro(registro, permisos_por_consulta()) if registro else None,
-        cache=cache,
-        embedder_cache=embedder if cache is not None else None,
-        alcance_cache=alcance_cache,
-        prompts=prompts,
-        catalogo=catalogo,
-    )

@@ -61,7 +61,7 @@ capacidades:
     descripcion: Preguntas de seguimiento resueltas con el historial de la misma conversación
     fase: 3
     tests_unitarios:
-      - tests/test_agente.py::test_historial_llega_al_supervisor_y_a_la_generacion
+      - tests/test_orquestador_paridad.py::test_el_historial_no_puede_romper_la_estructura_del_prompt
       - tests/test_api_roles.py::test_el_historial_de_la_conversacion_llega_al_agente
   herramientas_documentos:
     descripcion: listar_documentos, leer_documento y buscar_en_documento con permisos
@@ -70,9 +70,9 @@ capacidades:
     descripcion: Toda consulta queda registrada (verificable en Log Analytics / Postgres)
     fase: 1
     tests_unitarios:
-      - tests/test_agente.py::test_toda_consulta_se_audita_una_vez
-      - tests/test_agente.py::test_consulta_bloqueada_tambien_se_audita
-      - tests/test_guardrails.py::test_grafo_pasa_la_pregunta_enmascarada_al_supervisor_y_a_la_auditoria
+      - tests/test_orquestador_paridad.py::test_toda_consulta_se_audita_una_vez
+      - tests/test_orquestador_paridad.py::test_una_consulta_bloqueada_tambien_se_audita
+      - tests/test_guardrails.py::test_la_pregunta_llega_enmascarada_al_supervisor_y_a_la_auditoria
   indexacion_vectorial:
     descripcion: Colección con configuración base, embeddings e indexación en el vector store
     fase: 1

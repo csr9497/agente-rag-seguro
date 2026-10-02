@@ -14,10 +14,7 @@ from app.config import Settings
 # Tests herméticos: nunca leen .env (tras un ciclo en Azure contiene endpoints y claves reales).
 Settings.model_config["env_file"] = None
 
-from app.graph.agente import Agente  # noqa: E402
 from app.retrieval.qdrant_retriever import QdrantRetriever  # noqa: E402
-from app.security.guardrails import GuardrailPermisivo  # noqa: E402
-from app.tools.rag_retrieve import RagRetrieve  # noqa: E402
 from ingestor.ingest import ingestar  # noqa: E402
 from ingestor.sources import LocalFolderSource  # noqa: E402
 from tests.fakes import DIM, FakeEmbedder, FakeLLM, FakeSupervisor  # noqa: E402
@@ -55,23 +52,22 @@ def retriever_con_docs(retriever: QdrantRetriever, embedder: FakeEmbedder) -> Qd
     return retriever
 
 
-@pytest.fixture
-def crear_agente(retriever_con_docs, embedder, llm, supervisor):
-    """Fábrica de agentes con fakes; los kwargs sustituyen cualquier pieza."""
+def conectar_orquestador(servicios, modelos=None):  # noqa: ANN001, ANN201
+    """Como el arranque de la app (app/main.py): orquestador con checkpointer en memoria,
+    conectado a las conversaciones y visible para /consultar. Modelos falsos por defecto
+    (RagEco: delega en rag_agent y cita lo que encuentra)."""
+    from langgraph.checkpoint.memory import InMemorySaver
 
-    def _crear(**kw) -> Agente:
-        base = {
-            "supervisor": supervisor,
-            "llm": llm,
-            "herramientas": [RagRetrieve(embedder, retriever_con_docs, kw.pop("min_score", None))],
-            "guardrail_entrada": GuardrailPermisivo(),
-            "guardrail_salida": GuardrailPermisivo(),
-        }
-        return Agente(**{**base, **kw})
+    from app.agents.aprobaciones import SqlRepositorioAprobaciones
+    from app.deps import build_orquestador
+    from app.main import app
+    from tests.fakes import RagEco
 
-    return _crear
-
-
-@pytest.fixture
-def agente(crear_agente) -> Agente:
-    return crear_agente()
+    orquestador = build_orquestador(
+        servicios, InMemorySaver(), modelos or (FakeEmbedder(), FakeLLM(), RagEco())
+    )
+    servicios.conversaciones.usar_orquestador(
+        orquestador, SqlRepositorioAprobaciones(servicios.motor)
+    )
+    app.state.orquestador = orquestador
+    return orquestador

@@ -6,6 +6,8 @@ revocado, expira_en, ACL y hash) dentro de la propia tool, antes de que el LLM l
 este agente no necesita el nodo access_guardrail del grafo anterior.
 """
 
+import json
+import logging
 from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -20,6 +22,8 @@ from app.retrieval.base import Embedder, Retriever
 from app.security.acceso import VerificadorAcceso
 from app.security.acl import clasificacion
 from app.tools.base import SIN_ACCESO, DocId, ResultadoHerramienta
+
+logger_seguridad = logging.getLogger("seguridad")
 
 RAG_PROMPT = local("rag_agent")
 
@@ -67,11 +71,13 @@ class HerramientasRag:
         for r in recuperados:
             if self._min_score is not None and r.score < self._min_score:
                 continue
-            if self._verificador.motivo_rechazo(r.chunk, grupos) is not None:
-                continue  # re-chequeo: revocado, caducado, ACL desincronizada, hash…
+            if motivo := self._verificador.motivo_rechazo(r.chunk, grupos):
+                _descartado(r.chunk, motivo, ctx.user.id)  # revocado, caducado, ACL, hash…
+                continue
             doc = self._registro.obtener(r.chunk.doc_id)
             fragmentos.append({
-                "n": len(fragmentos) + 1, "doc_id": r.chunk.doc_id,
+                # Sin números de fragmento: el LLM citaría «[1]», que no identifica nada.
+                "doc_id": r.chunk.doc_id, "cita": f"[{r.chunk.doc_id}]",
                 "titulo": doc.titulo if doc else r.chunk.doc_id,
                 "contenido": r.chunk.contenido, "score": round(r.score, 3),
             })  # fmt: skip
@@ -86,7 +92,7 @@ class HerramientasRag:
         for f in self.search_documents(args, ctx)["fragmentos"]:
             doc = self._registro.obtener(f["doc_id"])
             if doc and clasificacion(doc.roles) in ("publico", "interno"):
-                fragmentos.append({**f, "n": len(fragmentos) + 1})
+                fragmentos.append(f)
         return {"fragmentos": fragmentos}
 
     def get_document_metadata(self, args: MetadatosArgs, ctx: ContextoTool) -> dict[str, Any]:
@@ -148,11 +154,12 @@ def adaptar_lectura(
         resultado = herramienta.ejecutar(args, usuario, top_k)
         fragmentos = []
         for r in resultado.chunks:
-            if verificador.motivo_rechazo(r.chunk, usuario.groups) is not None:
+            if motivo := verificador.motivo_rechazo(r.chunk, usuario.groups):
+                _descartado(r.chunk, motivo, ctx.user.id)
                 continue
             doc = _titulo_registrado(registro, r.chunk.doc_id)
             fragmentos.append({
-                "n": len(fragmentos) + 1, "doc_id": r.chunk.doc_id, "fuente": r.chunk.fuente,
+                "doc_id": r.chunk.doc_id, "cita": f"[{r.chunk.doc_id}]", "fuente": r.chunk.fuente,
                 "titulo": doc or r.chunk.fuente, "contenido": r.chunk.contenido,
                 "score": round(r.score, 3),
             })  # fmt: skip
@@ -165,6 +172,15 @@ def adaptar_lectura(
         ejecutar, herramienta.args_model, scope="docs:read", mode="auto",
         description=herramienta.descripcion,
     )  # fmt: skip
+
+
+def _descartado(chunk: Chunk, motivo: str, usuario_id: str) -> None:
+    """Señal de seguridad: el índice devolvió algo que el registro no autoriza (manipulación,
+    desincronización, revocación…). Se registra sin el contenido del fragmento."""
+    logger_seguridad.warning(json.dumps({
+        "accion": "fragmento_descartado", "usuario": usuario_id, "doc_id": chunk.doc_id,
+        "chunk_id": chunk.chunk_id, "motivo": motivo,
+    }, ensure_ascii=False))  # fmt: skip
 
 
 def _titulo_registrado(registro: RepositorioDocumentos, doc_id: str) -> str | None:

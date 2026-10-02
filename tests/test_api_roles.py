@@ -12,7 +12,7 @@ from app.config import Settings, get_settings
 from app.deps import build_servicios
 from app.main import app
 from ingestor.validacion import MAX_BYTES
-from tests.conftest import ROLES_SEMILLA
+from tests.conftest import ROLES_SEMILLA, conectar_orquestador
 from tests.fakes import FakeEmbedder, FakeLLM, FakeSupervisor
 
 ADMIN = {"X-Rol": "administrador"}
@@ -42,9 +42,13 @@ def servicios(retriever):
 
 
 @pytest.fixture
-def client(servicios):
+def orquestador(servicios):
+    return conectar_orquestador(servicios)
+
+
+@pytest.fixture
+def client(servicios, orquestador):
     app.state.servicios = servicios
-    app.state.agente = servicios.agente
     app.dependency_overrides[get_settings] = lambda: _settings()
     yield TestClient(app)
     app.dependency_overrides.clear()
@@ -65,12 +69,12 @@ def test_roles_disponibles_con_seleccion_libre(client) -> None:
     assert ids == ROLES_SEMILLA
 
 
-def test_sin_seleccion_libre_solo_los_roles_de_la_identidad(client) -> None:
+def test_sin_seleccion_libre_solo_los_roles_de_la_identidad(client, retriever) -> None:
     app.dependency_overrides[get_settings] = lambda: _settings(seleccion_libre_de_rol=False)
     app.state.servicios = build_servicios(
         _settings(seleccion_libre_de_rol=False),
         modelos=(FakeEmbedder(), FakeLLM(), FakeSupervisor()),
-        retriever=app.state.servicios.agente._herramientas["rag_retrieve"]._retriever,  # noqa: SLF001
+        retriever=retriever,
     )
     # Usuario por defecto: grupos ["public"] → solo ese rol.
     assert [r["id"] for r in client.get("/roles").json()] == ["public"]
@@ -317,14 +321,14 @@ def test_valorar_mensaje_de_otra_conversacion_o_inexistente(client) -> None:
     )
 
 
-def test_feedback_se_envia_a_langsmith_si_hay_trazas(client, servicios) -> None:
+def test_feedback_se_envia_a_langsmith_si_hay_trazas(client, orquestador) -> None:
     enviados = []
 
     class ClienteFalso:
         def create_feedback(self, **kw):
             enviados.append(kw)
 
-    servicios.agente._trazas = ClienteFalso()  # noqa: SLF001
+    orquestador._trazas = ClienteFalso()  # noqa: SLF001
     cid, msg = _mensaje(client)
     client.post(
         f"/conversaciones/{cid}/mensajes/{msg['id']}/feedback", json={"valoracion": "positiva"}
@@ -334,12 +338,12 @@ def test_feedback_se_envia_a_langsmith_si_hay_trazas(client, servicios) -> None:
     ]
 
 
-def test_si_langsmith_falla_la_valoracion_se_guarda(client, servicios) -> None:
+def test_si_langsmith_falla_la_valoracion_se_guarda(client, orquestador) -> None:
     class ClienteRoto:
         def create_feedback(self, **kw):
             raise RuntimeError("caído")
 
-    servicios.agente._trazas = ClienteRoto()  # noqa: SLF001
+    orquestador._trazas = ClienteRoto()  # noqa: SLF001
     cid, msg = _mensaje(client)
     r = client.post(
         f"/conversaciones/{cid}/mensajes/{msg['id']}/feedback", json={"valoracion": "positiva"}
@@ -348,15 +352,15 @@ def test_si_langsmith_falla_la_valoracion_se_guarda(client, servicios) -> None:
 
 
 # ------------------------------------------------------------------ memoria de conversación
-def test_el_historial_de_la_conversacion_llega_al_agente(client, servicios) -> None:
+def test_el_historial_de_la_conversacion_llega_al_agente(client, orquestador) -> None:
     capturado = {}
-    original = servicios.agente.consultar_detallado
+    original = orquestador.consultar
 
     def espia(pregunta, usuario, **kw):
         capturado["historial"] = kw.get("historial")
         return original(pregunta, usuario, **kw)
 
-    servicios.agente.consultar_detallado = espia
+    orquestador.consultar = espia
     conv = client.post("/conversaciones", json={"rol_id": "public"}).json()["id"]
     url = f"/conversaciones/{conv}/mensajes"
     client.post(url, json={"pregunta": "Primera pregunta"})
@@ -368,15 +372,15 @@ def test_el_historial_de_la_conversacion_llega_al_agente(client, servicios) -> N
     assert preguntas == ["Pregunta 0", "Pregunta 1", "Pregunta 2"]  # 3 últimos, sin bloqueadas
 
 
-def test_conversacion_nueva_sin_historial(client, servicios) -> None:
+def test_conversacion_nueva_sin_historial(client, orquestador) -> None:
     capturado = {}
-    original = servicios.agente.consultar_detallado
+    original = orquestador.consultar
 
     def espia(pregunta, usuario, **kw):
         capturado.update(kw)
         return original(pregunta, usuario, **kw)
 
-    servicios.agente.consultar_detallado = espia
+    orquestador.consultar = espia
     conv = client.post("/conversaciones", json={"rol_id": "public"}).json()["id"]
     client.post(f"/conversaciones/{conv}/mensajes", json={"pregunta": "Hola"})
     assert capturado["historial"] == []

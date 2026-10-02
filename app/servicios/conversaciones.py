@@ -1,5 +1,6 @@
-"""Conversaciones con un rol fijo. El historial guarda, por mensaje, los documentos
-consultados, los citados y cuántos fragmentos se descartaron por permisos."""
+"""Conversaciones con un rol fijo. Cada pregunta pasa por el orquestador multiagente; el
+historial guarda, por mensaje, los documentos consultados y citados, los agentes que actuaron
+y las aprobaciones pendientes."""
 
 import logging
 import uuid
@@ -8,7 +9,6 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from app.graph.agente import Agente
 from app.models.schemas import Turno, Usuario
 from app.persistencia.modelos import (
     Conversacion,
@@ -30,16 +30,15 @@ class ServicioConversaciones:
         self,
         repo: RepositorioConversaciones,
         roles: ServicioRoles,
-        agente: Agente,
         max_turnos: int = 3,
         departamentos_de: Callable[[str], list[str]] = lambda _: [],
     ) -> None:
         self._repo = repo
         self._roles = roles
-        self._agente = agente
         self._max_turnos = max_turnos
         self._departamentos_de = departamentos_de
-        self._orquestador: Any = None  # multiagente (fase 5); sin él, el grafo anterior
+        # Se conectan al arrancar (necesitan el checkpointer): app/main.py → usar_orquestador.
+        self._orquestador: Any = None
         self._aprobaciones: Any = None
 
     def usar_orquestador(self, orquestador: Any, aprobaciones: Any) -> None:
@@ -73,35 +72,8 @@ class ServicioConversaciones:
         # El agente recibe el rol de la conversación (nunca otro) más los grupos que dan acceso
         # a documentos internos («dept:») y restringidos («user:») de esta persona.
         grupos = grupos_efectivos(usuario.id, [conv.rol_id], self._departamentos_de(usuario.id))
-        if self._orquestador is not None:
-            return self._preguntar_multiagente(usuario, conv, grupos, pregunta)
-        resultado = self._agente.consultar_detallado(
-            pregunta,
-            Usuario(id=usuario.id, groups=grupos),
-            conversacion_id=conv.id,
-            historial=self._historial(conv),
-        )
-        mensaje = MensajeGuardado(
-            pregunta=resultado.pregunta_procesada,
-            respuesta=resultado.respuesta.respuesta,
-            sin_contexto=resultado.respuesta.sin_contexto,
-            citas=resultado.respuesta.citas,
-            documentos_consultados=resultado.documentos_consultados,
-            fragmentos_descartados=resultado.fragmentos_descartados,
-            hallazgos=resultado.hallazgos,
-            traza_id=resultado.traza_id,
-            desde_cache=resultado.desde_cache,
-            conversacional=resultado.respuesta.conversacional,
-            aclaracion=resultado.respuesta.aclaracion,
-            consultas=resultado.consultas,
-            acciones=resultado.acciones,
-        )
-        return self._repo.agregar_mensaje(conv.id, mensaje)
-
-    # ------------------------------------------------------------------ multiagente
-    def _preguntar_multiagente(
-        self, usuario: Usuario, conv: Conversacion, grupos: list[str], pregunta: str
-    ) -> MensajeGuardado:
+        if self._orquestador is None:
+            raise RuntimeError("El orquestador no está conectado (usar_orquestador al arrancar)")
         # Un hilo por mensaje (checkpointer): conversación + uuid, para enlazar las aprobaciones.
         thread_id = f"{conv.id}:{uuid.uuid4()}"
         r = self._orquestador.consultar(
@@ -201,7 +173,7 @@ class ServicioConversaciones:
         return mensaje
 
     def _enviar_a_langsmith(self, mensaje: MensajeGuardado, feedback: Feedback) -> None:
-        cliente = self._agente.cliente_trazas
+        cliente = getattr(self._orquestador, "cliente_trazas", None)
         if cliente is None or mensaje.traza_id is None:
             return
         try:

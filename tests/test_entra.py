@@ -90,7 +90,7 @@ def client(retriever, tmp_path, monkeypatch):
     s = build_servicios(
         ajustes, modelos=(FakeEmbedder(), FakeLLM(), FakeSupervisor()), retriever=retriever
     )
-    app.state.servicios, app.state.agente = s, s.agente
+    app.state.servicios = s
     app.dependency_overrides[get_settings] = lambda: ajustes
     yield TestClient(app)
     app.dependency_overrides.clear()
