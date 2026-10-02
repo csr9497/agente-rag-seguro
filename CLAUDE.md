@@ -16,7 +16,7 @@ Agente LangGraph + RAG con permisos + guardrails, en Azure, con Terraform y CI/C
   y diagnóstico con `make check-models` (ver docs/modelos.md)
 - Retrieval / vector store: **Azure AI Search** (híbrido + security trimming)
 - API: **FastAPI**
-- Estado + auditoría: **PostgreSQL** (sin checkpointer de LangGraph: ver docs/diseno-fase-3.md §4)
+- Estado + auditoría: **PostgreSQL** (checkpointer de LangGraph cifrado, `CHECKPOINT_CLAVE`)
 - Caché semántica: **Azure Cache for Redis** (permission-aware)
 - Identidad: login con **Easy Auth** de Container Apps: **GitHub** por defecto (roles
   asignados a cada persona desde la app, tabla `usuario_roles`) o **Entra ID** (app roles en
@@ -31,14 +31,18 @@ Agente LangGraph + RAG con permisos + guardrails, en Azure, con Terraform y CI/C
 - Gestión de dependencias: **uv**
 
 ## Arquitectura (resumen)
-El agente es un grafo LangGraph:
+El asistente es un orquestador multiagente en LangGraph (`app/agents/orquestador.py`):
 
-`authorize → input_guardrail → supervisor ⇄ tools → generate → output_guardrail → audit`
+`authorize → input_guardrail → cache_lookup → supervisor → [agentes en paralelo] → sintetizar ⇄ verifier → output_guardrail → cache_store → audit`
+(con `escalate_human` si el verifier falla 3 veces)
 
-- **supervisor**: decide y delega en la herramienta correcta (tool-calling, estilo
-  ReAct); itera hasta poder responder.
-- **tools**: `rag_retrieve` (AI Search filtrado por grupos), `data_query` (API/BD
-  interna), `action_tool` (acciones con efecto, con aprobación humana).
+- **supervisor**: delega cada parte del mensaje en el agente que toca (tool-calling, `Send`),
+  responde con plantilla/orientación o pide aclaración.
+- **agentes** (`app/agents/`): `rag_agent` (documentos filtrados por grupos + re-chequeo
+  contra el registro, `data_query`), `hr_agent` (casos de RR.HH. con RLS) y `support_agent`
+  (tickets con RLS). Cada uno corre su subgrafo con `policy_gate`: las escrituras requieren
+  confirmación de la persona o aprobación del rol que toca (human-in-the-loop, tabla `approvals`).
+- Estado de los hilos en PostgreSQL con checkpointer cifrado (`CHECKPOINT_CLAVE`).
 
 ## Reglas NO negociables (seguridad)
 1. **Permisos en el dato, no en el prompt.** Todo retrieval de AI Search DEBE
@@ -57,9 +61,10 @@ El agente es un grafo LangGraph:
 ## Estructura del repo
 ```
 .
-├── app/                # FastAPI + grafo LangGraph
-│   ├── graph/          # nodos y edges del agente
-│   ├── tools/          # rag_retrieve, data_query, action_tool
+├── app/                # FastAPI + orquestador multiagente (LangGraph)
+│   ├── agents/         # orquestador, subgrafo, policy_gate, rag/hr/support, aprobaciones
+│   ├── graph/          # topología (/grafo) y grafo de Studio
+│   ├── tools/          # documentos (listar/leer/buscar), data_query
 │   ├── security/       # permisos, guardrails, PII, auditoría
 │   ├── cache/          # caché semántica (permission-aware)
 │   └── models/         # esquemas Pydantic
@@ -85,8 +90,9 @@ El agente es un grafo LangGraph:
 - Lint / formato: `ruff check` · `ruff format`
 
 ## Fase actual
-**Local completo; pendiente despliegue en Azure.** Hecho: agente LangGraph con roles y
-permisos gestionados desde la UI, access_guardrail contra el registro, integridad
+**Local completo; pendiente despliegue en Azure.** Hecho: orquestador multiagente
+(rag_agent, hr_agent, support_agent) con aprobaciones humanas, roles y
+permisos gestionados desde la UI, re-chequeo contra el registro, integridad
 índice↔registro, guardrails, caché semántica con permisos (memoria/Redis), memoria de
 conversación, feedback, Prompt Shields (Content Safety), data_query, acciones con aprobación humana, Entra ID (JWT), trazas
 LangSmith, evaluaciones por capas y CI (GitHub Actions). Terraform listo (`alcance`,

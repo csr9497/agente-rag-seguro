@@ -1,8 +1,9 @@
 # Escenarios del asistente multiagente
 
 Qué probar del orquestador (supervisor + `rag_agent`, `hr_agent`, `support_agent`) y qué debe
-pasar. Mientras la web siga con el grafo anterior, se prueban en **LangGraph Studio**, grafo
-`multiagente` (https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024):
+pasar. Se prueban en la web (http://localhost:8080, las aprobaciones aparecen como tarjetas en
+el chat y en el panel de quien aprueba) o en **LangGraph Studio**, grafo `multiagente`
+(https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024; guía en [studio.md](studio.md)):
 
 - **Chat**: escribe el mensaje. Usuario de prueba `studio` con el rol `public`.
 - **Grafo**: para otro rol, en la entrada pon
@@ -22,10 +23,11 @@ necesitan `make test-postgres`).
 | E-01 | public | ¿Cuántos días de vacaciones tengo? | Un agente (rag o RR.HH.) responde con la cita `[1]` de *Política de vacaciones* | `test_orquestador.py::test_una_pregunta_de_documentos_va_solo_a_rag_y_cita` |
 | E-02 | public | (mismo hilo) ¿Y cuántos puedo pasar al año siguiente? | Usa el turno anterior: «hasta 5 días… 31 de marzo» con cita | `test_modo_chat_con_messages_y_varios_turnos_en_el_mismo_hilo` |
 | E-03 | public | Hola | Saludo por plantilla, sin despachar agentes | `test_un_saludo_no_despacha_agentes` |
-| E-04 | public | ¿Qué puedes hacer? | Orientación con lo que su rol puede consultar | `test_conversacion.py` (orientación) |
-| E-05 | public | Dame una receta de pasta | Fuera de ámbito: no responde la receta, orienta sobre lo que sí puede | `test_conversacion.py` |
+| E-04 | public | ¿Qué puedes hacer? | Orientación con lo que su rol puede consultar | `test_orquestador_paridad.py::test_ayuda_y_fuera_de_ambito_orientan_con_el_catalogo_del_rol` |
+| E-05 | public | Dame una receta de pasta | Fuera de ámbito: no responde la receta, orienta sobre lo que sí puede | ídem E-04 |
 | E-06 | public | ¿Y eso cuánto es? (sin contexto) | Pregunta de aclaración con opciones | `test_aclaracion_pregunta_al_usuario` |
-| E-07 | public | ¿Cuántos festivos hay este año? | Pendiente: `data_query` aún no está en `rag_agent` (fase 5b) | — |
+| E-07 | public | ¿Cuántos festivos hay este año? | `rag_agent` usa `data_query` y cita *datos internos: festivos*; no se cachea | `test_datos.py::test_rag_agent_usa_data_query_y_no_se_cachea` |
+| E-08 | public | ¿Qué documentos puedo consultar? | `rag_agent` lista el catálogo del rol, citado como *catálogo de documentos* | `test_orquestador.py::test_un_listado_puede_nombrar_los_documentos_del_catalogo` |
 
 ## Varios agentes en paralelo y aislamiento
 
@@ -82,6 +84,7 @@ necesitan `make test-postgres`).
 | V-01 | Respuesta que cita un documento no recuperado | El supervisor la reescribe con el motivo | `test_el_verifier_rechaza_citas_inventadas_y_escala_tras_3_intentos` |
 | V-02 | Respuesta con un identificador de ticket inventado | Se reescribe sin él | `test_el_verifier_rechaza_identificadores_inventados` |
 | V-03 | Enlace Markdown a un documento | Se normaliza a cita, se verifica y se numera | `test_los_enlaces_markdown_a_documentos_se_verifican_y_numeran` |
+| V-06 | El filtro de contenido del proveedor rechaza el supervisor o la síntesis | Respuesta bloqueada y auditada (no un error ni un escalado) | `test_versiones_guardrails.py::test_filtro_de_azure_en_la_sintesis` |
 | V-04 | El verifier falla 4 veces | 1 intento + 3 reescrituras y después `escalate_human` (administrador) | ídem V-01 |
 | V-05 | El solicitante intenta resolver su escalado 3 veces | Termina con «tu consulta está escalada»; queda pendiente para el administrador | `test_el_escalado_no_se_re_pregunta_sin_fin` |
 | L-01 | Un agente que siempre pide herramientas | Termina por presupuesto (6 iteraciones o 120 s), no por error | `test_un_agente_insistente_termina_por_presupuesto_y_no_por_error`, `test_corte_por_tiempo` |

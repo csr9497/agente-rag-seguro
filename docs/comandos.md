@@ -87,9 +87,10 @@ Piezas sueltas, con los valores de `.env`:
 | `make studio` | Publica los prompts y arranca solo LangGraph Studio (:2024). Guía: [studio.md](studio.md) |
 
 ### `make prompts`
-Publica `app/prompts/*.md` en LangSmith (*Prompts*: `agente-rag-supervisor`,
-`agente-rag-generacion`, `agente-rag-guardian`). Si el texto no cambió no crea un commit,
-solo mueve la etiqueta. En Studio eliges la versión en cada ejecución (`version_prompts`).
+Publica `app/prompts/*.md` en LangSmith (*Prompts*: `agente-rag-orquestador`,
+`agente-rag-rag-agent`, `agente-rag-hr-agent`, `agente-rag-support-agent`,
+`agente-rag-sintesis`…). Si el texto no cambió no crea un commit, solo mueve la etiqueta. La
+app usa la versión de `PROMPTS_ORIGEN`/`PROMPTS_ETIQUETA` (al arrancar).
 
 | Valor | Dónde | Efecto |
 |---|---|---|

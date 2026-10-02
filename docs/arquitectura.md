@@ -13,49 +13,62 @@ el [README](../README.md).
             └────────────────────────────────────────┴─▶ Managed Redis (caché) ──┴─▶ Key Vault · Log Analytics · LangSmith
 ```
 
-El agente es un grafo LangGraph ([app/graph/agente.py](../app/graph/agente.py)); la topología
-se ve en http://localhost:8000/grafo (local) o en LangGraph Studio:
+El asistente es un **orquestador multiagente** en LangGraph
+([app/agents/orquestador.py](../app/agents/orquestador.py)); la topología se ve en
+http://localhost:8000/grafo (local, con `EXPONER_TOPOLOGIA=true`) o en LangGraph Studio
+(grafo `multiagente`):
 
 ```
-authorize → input_guardrail → cache_lookup ─(acierto)──────────────────────────┐
-                                  │                                             ▼
-                                  └─(fallo)→ supervisor ⇄ tools → access_guardrail   output_guardrail → cache_store → audit
-                                                 └────────→ generate ─────────────────────▲
-authorize / input_guardrail ──(sin rol / bloqueada)───────────────────────────────────────────────────────────→ audit
+inicio → authorize → input_guardrail → cache_lookup ─(acierto)──────────────────────┐
+                                           └─(fallo)→ supervisor ─→ [agentes en paralelo]
+                                                          │         rag_agent · hr_agent · support_agent
+                                                          │                  ↓
+                                                          │         sintetizar ⇄ verifier ─(3 fallos)→ escalate_human
+                                                          ↓                  ↓                                ↓
+                                    (conversación / aclaración) → output_guardrail → cache_store → audit
+authorize / input_guardrail ──(sin rol / bloqueada)──────────→ output_guardrail → … → audit
 ```
 
 | Nodo | Qué hace |
 |---|---|
-| `authorize` | Deny by default: sin rol no hay contexto |
-| `input_guardrail` | Bloquea inyección de prompt y texto oculto; enmascara PII (email, teléfono, IBAN, tarjeta con Luhn, DNI/NIE). Con `CONTENT_SAFETY_ENDPOINT`, además **Prompt Shields** sobre el texto ya enmascarado |
-| `cache_lookup` / `cache_store` | Caché semántica; clave = rol + huella de sus documentos visibles + modelo/versión |
-| `supervisor` | Modelo de chat con tool-calling; decide qué tools usar (hasta 3 iteraciones). Recibe el **catálogo del rol** (sus documentos con identificador y sus datos internos) para distinguir lo de la empresa de lo ajeno |
-| `tools` | Ejecuta las tools (abajo); los roles salen del estado, nunca de los argumentos del LLM |
-| `access_guardrail` | Contrasta **cada** fragmento con el registro de documentos (roles, hash, estado) antes de que el LLM lo vea |
-| `generate` | Respuesta con citas `[n]` y salida estructurada Pydantic. **Sin información** (nada visible, fragmentos sin la respuesta, «¿qué puedes hacer?» o tema ajeno), el LLM **orienta** con el catálogo del rol: qué sí puede consultar y preguntas de ejemplo, sin conocimiento general ni fragmentos ([app/rag/orientacion.py](../app/rag/orientacion.py)) |
-| `output_guardrail` | Bloquea fugas del prompt de sistema y enmascara PII sensible |
-| `audit` | Registra toda consulta, también las bloqueadas, con sus hallazgos |
+| `inicio` / `authorize` | Estado limpio por mensaje. Deny by default: sin rol no hay contexto ni llamadas a modelos; solo `authorize` escribe el usuario (roles, scopes y grupos ACL) |
+| `input_guardrail` | Bloquea inyección de prompt, texto oculto y políticas de uso; enmascara PII (email, teléfono, IBAN, tarjeta con Luhn, DNI/NIE). Con `CONTENT_SAFETY_ENDPOINT`, además **Prompt Shields** |
+| `cache_lookup` / `cache_store` | Caché semántica (memoria o Redis); clave = consulta + alcance de permisos (documentos visibles + modelo/versión). Solo respuestas verificadas, con fuentes y solo de `rag_agent`; nunca escrituras, datos internos, «no lo encuentro» ni preguntas con historial |
+| `supervisor` | Tool-calling: delega en uno o varios agentes (`delegar_<agente>`, cada uno solo con su parte del mensaje), responde con plantilla u orientación (`conversacion`) o pide aclaración. Recibe el **catálogo del rol** |
+| Agentes | Cada uno en su subgrafo `agent → policy_gate → execute_tool / human_approval → sanitize_output` ([app/agents/subgraph.py](../app/agents/subgraph.py)) |
+| `sintetizar` | Con un agente usa su respuesta; con varios (o tras una corrección) un LLM las integra |
+| `verifier` | Determinista: citas solo a lo recuperado, ningún identificador inventado, sin PII, sin números de cita; hasta 3 reescrituras y después `escalate_human` (rol `administrador`) |
+| `output_guardrail` | Bloquea fugas de **cualquier** prompt de sistema registrado y enmascara PII sensible |
+| `audit` | Registra toda consulta (también bloqueadas o con error del proveedor), con hallazgos y versiones de guardrails |
 
-### Tools
+### Agentes y tools
 
-| Tool | Para qué | Control de acceso |
+El modo de cada tool lo decide `policy_gate` en código (scope del rol + argumentos), nunca el
+prompt: `auto` se ejecuta, `confirm_user` lo confirma la persona, `approve_staff` lo aprueba
+otra persona con el rol indicado, y lo que no tiene scope se deniega. Ninguna escritura es
+`auto`; las aprobaciones caducan a las 24 h.
+
+| Agente | Tools | Control de acceso |
 |---|---|---|
-| `rag_retrieve` | Búsqueda semántica en los documentos del rol | Filtro por rol en el índice + `access_guardrail` |
-| `listar_documentos` | Catálogo de documentos visibles | Construido desde el registro (fuente de verdad) |
-| `buscar_en_documento` / `leer_documento` | Buscar dentro de un documento / leer fragmentos consecutivos | Ajeno e inexistente responden igual (no se revela qué existe) |
-| `data_query` | Datos internos estructurados (festivos, plantilla, presupuestos) | **Catálogo de consultas parametrizadas**: el LLM nunca escribe SQL; cada consulta declara sus roles |
-| `proponer_accion` | Abrir ticket, solicitar vacaciones | Solo **propone**: nada se ejecuta sin que la persona pulse *Aprobar* |
+| `rag_agent` | `search_documents`, `get_document_metadata`, `listar_documentos`, `leer_documento`, `buscar_en_documento`, `data_query` (auto) · `request_document_access` (confirm_user) | Filtro ACL en el índice + **re-chequeo de cada fragmento contra el registro** (revocado, caducado, ACL o hash distintos se descartan y se registran como evento de seguridad); `data_query` es un catálogo de consultas parametrizadas con sus roles |
+| `hr_agent` | `search_hr_policies`, `get_my_hr_cases` (auto) · `create_hr_case`, `add_hr_case_note` (confirm_user) | Casos en PostgreSQL con **RLS**; acoso, salud, discriminación y disciplina son confidenciales |
+| `support_agent` | `search_it_kb`, `search_my_tickets` (auto) · `create_ticket` (confirm_user; **P1 → approve_staff de `it_support`**), `add_ticket_comment` (confirm_user) | Tickets en PostgreSQL con **RLS** |
+
+`hr_agent` y `support_agent` solo se registran con PostgreSQL (sin RLS no existen). Roles y
+scopes: [app/agents/scopes.py](../app/agents/scopes.py).
 
 ## Seguridad
 
-Permisos en el dato, no en el prompt (regla 1 del CLAUDE.md), en cuatro barreras:
+Permisos en el dato, no en el prompt (regla 1 del CLAUDE.md), en cinco barreras:
 
 1. **Al indexar**: un documento necesita ≥ 1 rol existente y activo.
 2. **Al empezar**: la conversación queda fijada a un rol que el usuario puede usar (app roles
    de Entra ID o asignados desde la app en Azure; selección libre solo en local).
 3. **En el índice**: filtro por rol en Qdrant / AI Search (filtro OData validado contra inyección).
-4. **`access_guardrail`**: cada fragmento se contrasta con el registro. Una prueba de mutación
-   confirma que, sin esta barrera, un índice manipulado filtraría datos de RRHH.
+4. **Re-chequeo contra el registro** en las tools de `rag_agent`: cada fragmento se contrasta
+   con el registro (roles, hash, estado, revocación, caducidad) antes de que lo vea un LLM; lo
+   descartado queda como evento de seguridad (logger `seguridad`, sin el contenido).
+5. **RLS en PostgreSQL** para casos de RR.HH. y tickets (`SET LOCAL ROLE agente_rls`).
 
 Además:
 
@@ -71,19 +84,22 @@ Además:
 - **Versiones de guardrails** ([app/security/versiones.py](../app/security/versiones.py)): entrada
   `v1-heuristico` | `v2-prompt-shields` | `sin-guardrail`, salida `v1-fuga-prompt` |
   `sin-guardrail` (desactivar solo fuera de producción). La app usa `GUARDRAIL_ENTRADA`
-  (`auto`: Prompt Shields si está configurado) y `GUARDRAIL_SALIDA`; la API nunca acepta
-  elegirlas. En LangGraph Studio se eligen por ejecución en el contexto del asistente, y la
-  versión aplicada queda en el estado, la traza y la auditoría. Para una versión nueva:
+  (`auto`: Prompt Shields si está configurado) y `GUARDRAIL_SALIDA`; ninguna petición puede
+  elegirlas, y la versión aplicada queda en la auditoría. Para una versión nueva:
   implementa `Guardrail`, regístrala en el catálogo y añade su nombre al `Literal`.
 - **Filtro de contenido del proveedor**: si el modelo rechaza una petición (p. ej. jailbreak
   que pasó los guardrails), se responde como bloqueada y se audita (`filtro_contenido_azure`).
 - **Prompt Shields** ([app/security/content_safety.py](../app/security/content_safety.py)): se suma
   a las heurísticas locales, no las sustituye. Sin claves (Managed Identity). Si el servicio
   falla, `CONTENT_SAFETY_FALLO=cerrado` (defecto) bloquea; `abierto` deja pasar y lo audita.
-- **Prompts delimitados**: `<historial>`, `<contexto>` con `<fragmento>` y `<pregunta>`;
-  cualquier intento de cerrar esas etiquetas desde un documento se neutraliza.
-- **Caché con permisos** (regla 2): nunca se sirve a otro rol; subir, borrar o poner en
-  cuarentena un documento la invalida; no se usa con historial, datos internos ni acciones.
+- **Prompts delimitados**: `<historial>`, `<pregunta>`, `<catalogo>` y los resultados de las
+  tools dentro de `<dato_herramienta>` (son datos, nunca instrucciones); cualquier intento de
+  cerrar esas etiquetas desde un documento o la pregunta se neutraliza.
+- **Caché con permisos** (regla 2): nunca se sirve a otro alcance de permisos; subir, borrar,
+  revocar o poner en cuarentena un documento la invalida; no se usa con historial, datos
+  internos ni escrituras.
+- **Estado de los hilos cifrado**: el checkpointer de LangGraph guarda en PostgreSQL con
+  AES (`CHECKPOINT_CLAVE`, en Key Vault en Azure); sin la clave la app no arranca.
 - **Login** ([app/security/identity.py](../app/security/identity.py)): en Azure, Easy Auth de
   Container Apps en la web (GitHub por defecto, o Entra ID) y `AUTH_MODO=easyauth` en el
   backend, que solo acepta el principal si llega de nginx con `PROXY_SECRETO` (ingress
@@ -107,10 +123,12 @@ Además:
 | GET | `/yo` | Usuario de la sesión y sus roles |
 | POST | `/conversaciones` | `{"rol_id"}` |
 | GET | `/conversaciones/{id}` | Historial |
-| POST | `/conversaciones/{id}/mensajes` | `{"pregunta"}` → respuesta, citas, documentos consultados, acciones |
+| POST | `/conversaciones/{id}/mensajes` | `{"pregunta"}` → respuesta, citas, documentos consultados, agentes, aprobaciones pendientes |
 | POST | `/conversaciones/{id}/mensajes/{m}/feedback` | `{"valoracion": "positiva"\|"negativa", "comentario"?}` |
 | GET/POST/DELETE | `/documentos` | Por rol (`X-Rol`); subir y borrar requieren `gestionar_documentos` |
-| GET / POST | `/acciones`, `/acciones/{id}/decision` | `{"aprobar": bool}`; solo quien la propuso |
+| GET | `/aprobaciones` | Lo que puedo resolver: mis confirmaciones y la cola de mis roles |
+| POST | `/aprobaciones/{id}/decision` | `{"aprobar", "motivo"?, "edited_args"?, "respuesta"?}`; quien decide sale del token |
+| POST | `/consultar` | Consulta sin conversación (`{"pregunta"}`), por el mismo orquestador |
 | GET | `/admin/integridad` | Solo `administrar_roles` |
 
 `X-Rol` indica el rol con el que se actúa; el servidor valida que el usuario puede usarlo.
@@ -189,15 +207,16 @@ Modelos: `gpt-4o` 2024-11-20 (Legacy, retirada 2027-04-14; reemplazo gpt-5.1) y
 ## Estructura
 
 ```
-app/            FastAPI + grafo LangGraph
-  graph/        agente, estado, prompts, topología, entrada de Studio
-  tools/        rag_retrieve, documentos, data_query, proponer_accion
+app/            FastAPI + orquestador multiagente (LangGraph)
+  agents/       orquestador, subgrafo genérico, policy_gate, registro, rag/hr/support, aprobaciones, checkpointer
+  graph/        topología (/grafo) y grafo de Studio
+  tools/        documentos (listar/leer/buscar), data_query, plantillas de conversación
+  prompts/      prompts de sistema versionados (también en LangSmith)
   security/     guardrails, detección (PII/inyección), acceso, Entra ID / Easy Auth, auditoría
   modelos/      proveedor de modelos (Azure OpenAI / OpenAI), errores tipificados, diagnóstico
   cache/        caché semántica (memoria / Redis)
   persistencia/ repositorios SQLAlchemy (SQLite / PostgreSQL), almacén de originales
   servicios/    roles, conversaciones, integridad
-  acciones/     acciones con aprobación humana
   datos/        catálogo de consultas de data_query
   api/          routers HTTP
 ingestor/       validación, chunking, orígenes (carpeta / Blob), gestor de documentos
