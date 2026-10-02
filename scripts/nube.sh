@@ -130,6 +130,20 @@ requisitos_login() {
 # la primera región que lo admita (versión 16, sin restricción). Si no es la de la VNet,
 # Terraform lo crea con acceso público limitado a servicios de Azure (TLS).
 # Regiones donde la suscripción puede crear PostgreSQL 16, en orden de preferencia.
+# Azure deja creado (en estado fallido y fuera del estado de Terraform) el servidor que no tuvo
+# capacidad; con el mismo nombre, el siguiente intento chocaría («already exists»).
+borrar_postgres_fallido() { # borrar_postgres_fallido <log de terraform>
+  local servidor grupo
+  servidor=$(sed -nE 's/.*Flexible Server Name: "([^"]+)".*/\1/p' "$1" | head -1)
+  grupo=$(sed -nE 's/.*Resource Group Name: "([^"]+)".*/\1/p' "$1" | head -1)
+  [[ -n $servidor && -n $grupo ]] || return 0
+  refrescar_az
+  if az postgres flexible-server show -g "$grupo" -n "$servidor" -o none 2> /dev/null; then
+    echo "   se elimina el servidor fallido $servidor"
+    az postgres flexible-server delete -g "$grupo" -n "$servidor" --yes -o none || true
+  fi
+}
+
 regiones_postgres() {
   local base r vistas=" "
   base=$(sed -nE 's/^location *= *"(.*)"/\1/p' infra/envs/dev/nube.tfvars)
@@ -144,7 +158,8 @@ regiones_postgres() {
 }
 region_postgres() { # la primera
   local r
-  r=$(regiones_postgres | head -1)
+  r=$(regiones_postgres) # sin `| head`: cortar la tubería daba «write error: Broken pipe»
+  r=${r%%$'\n'*}
   [[ -n $r ]] && echo "$r"
 }
 
@@ -182,6 +197,7 @@ desplegar() {
     fi
     grep -q "CapacityNotAvailable" "$LOG_DIR/platform.log" || break
     echo "   $pg sin capacidad para PostgreSQL ahora mismo: se prueba la siguiente región"
+    borrar_postgres_fallido "$LOG_DIR/platform.log"
   done
   $aplicado || falla "Falló platform (log: $LOG_DIR/platform.log)."
 
