@@ -334,3 +334,20 @@ def test_los_enlaces_markdown_a_documentos_se_verifican_y_numeran() -> None:
                      sintesis=sintesis).consultar("v", ANA)  # fmt: skip
     assert "rrhh/bandas.md" in sintesis.llamadas[0][1]  # el verifier lo detectó y se corrigió
     assert "Secreto" not in r.respuesta.respuesta
+
+
+def test_el_grafo_dibujado_conecta_todos_los_nodos() -> None:
+    """Studio dibuja con get_graph(): ningún nodo puede quedar suelto."""
+    o = _orquestador(Mundo(), GuionLLM([]), {})
+    dibujo = o.grafo.get_graph()
+    aristas = {(e.source, e.target) for e in dibujo.edges}
+    for esperado in [
+        ("supervisor", "rag_agent"), ("supervisor", "hr_agent"), ("supervisor", "support_agent"),
+        ("rag_agent", "sintetizar"), ("hr_agent", "sintetizar"), ("support_agent", "sintetizar"),
+        ("sintetizar", "verifier"), ("verifier", "escalate_human"), ("verifier", "sintetizar"),
+        ("verifier", "output_guardrail"), ("authorize", "input_guardrail"),
+        ("input_guardrail", "cache_lookup"), ("cache_lookup", "supervisor"),
+    ]:  # fmt: skip
+        assert esperado in aristas, esperado
+    conectados = {n for arista in aristas for n in arista}
+    assert set(dibujo.nodes) <= conectados, set(dibujo.nodes) - conectados

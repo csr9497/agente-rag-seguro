@@ -326,16 +326,27 @@ class Orquestador:
         else:
             g.add_edge(START, "inicio")
         g.add_edge("inicio", "authorize")
-        g.add_conditional_edges("authorize", _si_respondida("input_guardrail"))
-        g.add_conditional_edges("input_guardrail", _si_respondida("cache_lookup"))
-        g.add_conditional_edges("cache_lookup", _si_respondida("supervisor", "output_guardrail"))
+        # Destinos declarados en cada enlace condicional: sin ellos, Studio no puede dibujar
+        # el grafo (los nodos aparecían sueltos aunque la ejecución sí los recorría).
+        g.add_conditional_edges(
+            "authorize", _si_respondida("input_guardrail"), ["input_guardrail", "audit"]
+        )
+        g.add_conditional_edges(
+            "input_guardrail", _si_respondida("cache_lookup"), ["cache_lookup", "audit"]
+        )
+        g.add_conditional_edges(
+            "cache_lookup", _si_respondida("supervisor", "output_guardrail"),
+            ["supervisor", "output_guardrail"],
+        )  # fmt: skip
         g.add_conditional_edges(
             "supervisor", self._despachar, [*self._registro, "output_guardrail"]
         )
         for nombre in self._registro:
             g.add_edge(nombre, "sintetizar")
         g.add_edge("sintetizar", "verifier")
-        g.add_conditional_edges("verifier", self._tras_verifier)
+        g.add_conditional_edges(
+            "verifier", self._tras_verifier, ["output_guardrail", "sintetizar", "escalate_human"]
+        )
         g.add_edge("escalate_human", "output_guardrail")
         g.add_edge("output_guardrail", "cache_store")
         g.add_edge("cache_store", "audit")
