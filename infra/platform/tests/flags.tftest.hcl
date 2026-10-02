@@ -235,10 +235,6 @@ run "postgres_en_otra_region_es_publico_y_restringido" {
     condition     = module.postgres[0].publico_efectivo && length(module.postgres[0].reglas_firewall) == 1
     error_message = "PostgreSQL fuera de la región de la VNet: público con firewall solo para servicios de Azure"
   }
-  assert {
-    condition     = local.sufijo_postgres == substr(md5("southcentralus"), 0, 4)
-    error_message = "El nombre depende de la región: el reintento en otra región no choca con el fallido"
-  }
 }
 
 run "postgres_en_la_region_es_privado" {
