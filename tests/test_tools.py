@@ -112,3 +112,12 @@ def test_ningun_esquema_expone_grupos_ni_usuario(tool) -> None:
     params = tool.args_model.model_json_schema()
     assert params["additionalProperties"] is False
     assert not {"groups", "grupos", "usuario", "user", "acl_groups"} & set(params["properties"])
+
+
+def test_el_catalogo_recuerda_que_solo_son_titulos(retriever_con_docs) -> None:
+    """Si preguntan por lo que dicen los documentos, el agente debe leerlos (no basta la
+    lista de títulos)."""
+    from app.tools.documentos import NOTA_CATALOGO
+
+    r = ListarDocumentos(retriever_con_docs).ejecutar(ListarDocumentosArgs(), PUBLIC, 4)
+    assert r.chunks[0].chunk.contenido.endswith(NOTA_CATALOGO)

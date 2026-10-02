@@ -52,6 +52,9 @@ class Expectativa(BaseModel):
     aprobacion_pendiente: str | None = Field(
         default=None, description="Tool que debe quedar pendiente de confirmar o aprobar"
     )
+    sin_aprobaciones: bool = Field(
+        default=False, description="True: no debe proponer nada que el usuario no pidió"
+    )
 
 
 class Escenario(BaseModel):
@@ -182,6 +185,8 @@ def _expectativas(r: MensajeGuardado, e: Expectativa) -> list[str]:
     pendientes = [a.tool for a in r.aprobaciones]
     if e.aprobacion_pendiente and e.aprobacion_pendiente not in pendientes:
         fallos.append(f"sin aprobación pendiente de {e.aprobacion_pendiente} (hay: {pendientes})")
+    if e.sin_aprobaciones and pendientes:
+        fallos.append(f"propone acciones que no se pidieron: {pendientes}")
     if len(r.citas) < e.min_citas:
         fallos.append(f"{len(r.citas)} citas < mínimo {e.min_citas}")
     if e.alguna_fuente_de and not fuentes & set(e.alguna_fuente_de):
