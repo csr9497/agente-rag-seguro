@@ -66,8 +66,8 @@ run "completo_con_ai_search_y_langsmith" {
   }
   assert {
     condition = toset(output.secretos_en_key_vault) == toset([
-      "azure-openai-api-key", "azure-search-api-key", "database-url", "langsmith-api-key",
-      "redis-url",
+      "azure-openai-api-key", "azure-search-api-key", "checkpoint-clave", "database-url",
+      "langsmith-api-key", "redis-url",
     ])
     error_message = "Secretos esperados en Key Vault"
   }
