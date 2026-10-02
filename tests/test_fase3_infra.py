@@ -108,6 +108,14 @@ def test_las_aprobaciones_vencen_a_las_24h_y_se_notifica(motor) -> None:
     assert repo.vencer(AHORA) == []  # idempotente
 
 
+def test_un_escalado_al_administrador_se_registra(motor) -> None:
+    repo = SqlRepositorioAprobaciones(motor)
+    a = _pendiente(repo, agent="supervisor", tool="escalate_human", tipo="escalate_human",
+                   approver_role="administrador")  # fmt: skip
+    assert [p.id for p in repo.pendientes(roles=["administrador"])] == [a.id]
+    assert repo.obtener(a.id).tipo == "escalate_human"
+
+
 def test_una_aprobacion_ya_resuelta_no_se_vuelve_a_decidir(motor) -> None:
     repo = SqlRepositorioAprobaciones(motor)
     a = _pendiente(repo)

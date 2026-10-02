@@ -150,6 +150,7 @@ def test_rag_agent_responde_con_lo_visible_y_nada_ajeno(rag) -> None:
     assert dato.startswith('<dato_herramienta tool="search_documents">')
     assert "rrhh/" not in dato and "B3" not in dato
     assert resumen(salida).startswith("Son 23 días")
+    assert llm.obligaciones == [True, False]  # busca antes de responder, nunca de memoria
 
 
 def test_un_documento_con_inyeccion_no_produce_escrituras_sin_aprobacion(rag, servicios) -> None:

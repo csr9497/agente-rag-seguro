@@ -43,6 +43,9 @@ class AgentSpec:
     tools: Mapping[str, ToolPolicy] = field(default_factory=dict)
     max_iterations: int = 6
     returns: Literal["summary", "id_only"] = "summary"
+    # En su primer turno debe usar una herramienta (p. ej. rag_agent: buscar antes de decir
+    # que algo no está; si no, el LLM puede suponer que no tiene acceso sin mirar).
+    consultar_antes: bool = False
     # Con id_only, lo que ve el usuario (plantilla, sin LLM: no puede colarse nada del caso).
     mensaje_id_only: str = "He registrado tu solicitud con la referencia {ids}."
 

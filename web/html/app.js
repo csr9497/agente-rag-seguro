@@ -380,9 +380,10 @@ function tarjetasAprobacion(m) {
   }));
 }
 
-async function decidirAprobacion(m, aprobacionId, aprobar, botones = []) {
+async function decidirAprobacion(m, aprobacionId, aprobar, botones = [], respuesta = null) {
   botones.forEach((b) => { b.disabled = true; });
-  const r = await api(`aprobaciones/${encodeURIComponent(aprobacionId)}/decision`, { metodo: "POST", json: { aprobar } });
+  const json = respuesta ? { aprobar, respuesta } : { aprobar };
+  const r = await api(`aprobaciones/${encodeURIComponent(aprobacionId)}/decision`, { metodo: "POST", json });
   botones.forEach((b) => { b.disabled = false; });
   if (!r.ok) { alert(mensajeError(r)); return; }
   if (m && r.cuerpo.mensaje) {
@@ -405,15 +406,22 @@ function pintarAprobaciones() {
   const ajenas = estado.aprobaciones.filter((a) => !a.propia);
   $("aprob-panel").hidden = !estado.rol || !ajenas.length;
   $("aprob-list").replaceChildren(...ajenas.map((a) => {
-    const aprobar = el("button", { class: "btn btn-primary", type: "button" }, icono("i-check"), "Aprobar");
-    const rechazar = el("button", { class: "btn btn-secondary", type: "button" }, "Rechazar");
-    aprobar.addEventListener("click", () => decidirAprobacion(null, a.id, true, [aprobar, rechazar]));
+    // Un escalado se resuelve respondiendo a la persona (el texto le llega en su chat).
+    const escalado = a.accion === "escalate_human";
+    const texto = escalado ? el("textarea", { rows: "3", "aria-label": "Respuesta para quien preguntó", placeholder: "Escribe la respuesta para quien preguntó" }) : null;
+    const aprobar = el("button", { class: "btn btn-primary", type: "button" }, icono("i-check"), escalado ? "Responder" : "Aprobar");
+    const rechazar = el("button", { class: "btn btn-secondary", type: "button" }, escalado ? "Descartar" : "Rechazar");
+    aprobar.addEventListener("click", () => {
+      if (escalado && !texto.value.trim()) { texto.focus(); return; }
+      decidirAprobacion(null, a.id, true, [aprobar, rechazar], escalado ? texto.value.trim() : null);
+    });
     rechazar.addEventListener("click", () => decidirAprobacion(null, a.id, false, [aprobar, rechazar]));
     return el("li", { class: "accion info" },
       el("div", { class: "accion-head" }, el("strong", {}, ETIQUETA_TOOL[a.accion] || a.accion),
         el("span", { class: "badge info" }, a.riesgo === "alto" ? "Prioridad alta" : "Pendiente")),
       el("p", { class: "hint" }, `Lo pide ${a.solicitante} · vence ${hora(a.vence)}`),
-      detalleAprobacion(a.detalle), el("div", { class: "row" }, rechazar, aprobar));
+      escalado ? el("p", { class: "hint" }, `Motivo: ${a.detalle}`) : detalleAprobacion(a.detalle),
+      texto, el("div", { class: "row" }, rechazar, aprobar));
   }));
 }
 

@@ -25,7 +25,7 @@ class Aprobacion(BaseModel):
     agent: str
     tool: str
     user_id: str
-    tipo: Literal["confirm_user", "approve_staff"]
+    tipo: Literal["confirm_user", "approve_staff", "escalate_human"]
     approver_role: str | None = None
     args_preview: str
     risk: str
@@ -66,11 +66,15 @@ class SqlRepositorioAprobaciones:
     def pendientes(
         self, roles: list[str] | None = None, user_id: str | None = None
     ) -> list[Aprobacion]:
-        """Las que puede resolver alguien: approve_staff de sus roles y confirm_user propias."""
+        """Las que puede resolver alguien: approve_staff y escalados de sus roles, y
+        confirm_user propias."""
         condiciones = []
         if roles:
             condiciones.append(
-                and_(t.approvals.c.tipo == "approve_staff", t.approvals.c.approver_role.in_(roles))
+                and_(
+                    t.approvals.c.tipo.in_(["approve_staff", "escalate_human"]),
+                    t.approvals.c.approver_role.in_(roles),
+                )
             )
         if user_id:
             condiciones.append(

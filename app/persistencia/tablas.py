@@ -133,7 +133,7 @@ approvals = Table(
     Column("agent", String(64), nullable=False),
     Column("tool", String(64), nullable=False),
     Column("user_id", String(160), nullable=False, index=True),  # solicitante
-    Column("tipo", String(16), nullable=False),  # confirm_user | approve_staff
+    Column("tipo", String(16), nullable=False),  # confirm_user | approve_staff | escalate_human
     Column("approver_role", String(64)),
     Column("args_preview", Text, nullable=False),
     Column("risk", String(16), nullable=False),

@@ -63,6 +63,7 @@ from app.rag.catalogo import CatalogoRol, construir_catalogo
 from app.rag.orientacion import responder_sin_informacion
 from app.rag.prompts import SIN_CONTEXTO, build_historial, neutralizar
 from app.retrieval.base import LLM, Supervisor
+from app.security.acceso import DOC_CATALOGO
 from app.security.acl import es_rol
 from app.security.audit import registrar_consulta
 from app.security.deteccion import TIPOS_PII, enmascarar_pii
@@ -80,12 +81,15 @@ MENSAJE_ESCALADO = (
     "No he podido darte una respuesta fiable. He pasado tu consulta a una persona del equipo, "
     "que te responderá aquí."
 )
-# [public/x.md] o [datos:festivos] (resultado de data_query).
-_CITA = re.compile(r"\[([a-z0-9][\w\-./]*(?:/|:)[\w\-./]+)\]")
+# [public/x.md], [datos:festivos] (data_query) o [catalogo] (listar_documentos).
+_CITA = re.compile(r"\[([a-z0-9][\w\-./]*(?:/|:)[\w\-./]+|catalogo)\]")
 # Enlace Markdown a un documento («[Título](public/x.md)»): se normaliza a «Título [public/x.md]»
 # para que el verifier lo compruebe y se numere como cualquier otra cita.
 _ENLACE_DOC = re.compile(r"\[([^\]]+)\]\(([a-z0-9][\w\-./]*/[\w\-./]+)\)")
 _CITA_NUMERICA = re.compile(r"\[\d+\]")
+_CITA_CON_PREVIO = re.compile(r"(:[ \t]*)?" + _CITA.pattern)
+# Documentos que lista un catálogo recuperado («- Título: public/x.md (fragmentos: 2)»).
+_DOC_DEL_CATALOGO = re.compile(r": ([a-z0-9][\w\-./]*/[\w\-./]+) \(fragmentos")
 _UUID = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b")
 
 
@@ -435,7 +439,10 @@ class Orquestador:
             nombre = llamada.nombre.removeprefix("delegar_")
             if llamada.nombre.startswith("delegar_") and nombre in self._registro:
                 if isinstance(args.get("tarea"), str) and args["tarea"].strip():
-                    tareas[nombre] = TextoPrivado(valor=args["tarea"][:2000])
+                    # Varias tareas al mismo agente van juntas (un Send por agente): ninguna
+                    # se pierde.
+                    previa = f"{tareas[nombre].valor}\n" if nombre in tareas else ""
+                    tareas[nombre] = TextoPrivado(valor=(previa + args["tarea"].strip())[:2000])
             elif llamada.nombre == "pedir_aclaracion" and not tareas:
                 try:
                     aclaracion = Aclaracion.model_validate(args)
@@ -580,10 +587,12 @@ class Orquestador:
                 "hallazgos": hallazgos}  # fmt: skip
 
     def _cache_store(self, estado: EstadoOrquestador) -> dict[str, Any]:
-        """Solo respuestas verificadas que salen únicamente de rag_agent (regla 10)."""
+        """Solo respuestas verificadas, con fuentes, que salen únicamente de rag_agent (regla 10).
+        Un «no lo encuentro» no se cachea: fijaría un fallo puntual y ocultaría lo nuevo."""
         solo_rag = set(estado.tareas) == {"rag_agent"} and not any(r.ids for r in estado.resultados)
         if (
             solo_rag and estado.verificado and not estado.desde_cache and estado.respuesta
+            and not estado.respuesta.sin_contexto
             and (clave := self._clave_cache(estado)) and self._cache is not None
         ):  # fmt: skip
             self._cache.guardar(clave, estado.respuesta)
@@ -751,7 +760,7 @@ def problemas_de(texto: str, resultados: list[ResultadoSub]) -> list[str]:
         problemas.append(
             "Usa números de cita ([1]); cita con el identificador del documento entre corchetes."
         )
-    fuentes = {f["doc_id"] for r in resultados for f in r.fuentes}
+    fuentes = {f["doc_id"] for r in resultados for f in r.fuentes} | set(_del_catalogo(resultados))
     if inventadas := sorted({d for d in _CITA.findall(texto) if d not in fuentes}):
         problemas.append(f"Cita documentos que ningún agente recuperó: {', '.join(inventadas)}.")
     ids = {i for r in resultados for i in r.ids}
@@ -770,18 +779,41 @@ def respuesta_con_citas(texto: str, resultados: list[ResultadoSub]) -> Respuesta
     for r in resultados:
         for f in r.fuentes:
             fuentes.setdefault(f["doc_id"], f)
+    # Un documento que solo aparece en el catálogo se cita como el catálogo.
+    alias = {d: c for d, c in _del_catalogo(resultados).items() if d not in fuentes}
     citas: list[Cita] = []
     numeros: dict[str, int] = {}
-    for doc_id in _CITA.findall(texto):
+    for cita in _CITA.findall(texto):
+        doc_id = alias.get(cita, cita)
         if doc_id in fuentes and doc_id not in numeros:
             numeros[doc_id] = len(numeros) + 1
             f = fuentes[doc_id]
             citas.append(Cita(
-                numero=numeros[doc_id], doc_id=doc_id, chunk_id=f"{doc_id}#0", fuente=doc_id,
+                numero=numeros[doc_id], doc_id=doc_id, chunk_id=f"{doc_id}#0",
+                fuente=f.get("fuente") or doc_id,
                 fragmento=f.get("contenido") or "", score=float(f.get("score") or 0),
             ))  # fmt: skip
-    final = _CITA.sub(lambda m: f"[{numeros[m.group(1)]}]" if m.group(1) in numeros else "", texto)
+    vistos: set[int] = set()
+
+    def numerar(m: re.Match[str]) -> str:
+        previo, cita = m.group(1) or "", m.group(2)
+        n = numeros.get(alias.get(cita, cita))
+        if n is None or (cita in alias and n in vistos):
+            return ""  # un listado de documentos cita el catálogo una sola vez (sin «Título:»)
+        vistos.add(n)
+        return f"{previo}[{n}]"
+
+    final = re.sub(r"[ \t]+([.,;:)])", r"\1", _CITA_CON_PREVIO.sub(numerar, texto))
     return RespuestaConsulta(respuesta=final.strip(), citas=citas, sin_contexto=not citas)
+
+
+def _del_catalogo(resultados: list[ResultadoSub]) -> dict[str, str]:
+    """doc_id → id del catálogo que lo lista (ya filtrado por los permisos del usuario)."""
+    return {
+        d: f["doc_id"]
+        for r in resultados for f in r.fuentes if f["doc_id"] == DOC_CATALOGO
+        for d in _DOC_DEL_CATALOGO.findall(f.get("contenido") or "")
+    }  # fmt: skip
 
 
 def _respuesta_provisional(

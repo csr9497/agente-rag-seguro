@@ -152,7 +152,7 @@ def adaptar_lectura(
                 continue
             doc = _titulo_registrado(registro, r.chunk.doc_id)
             fragmentos.append({
-                "n": len(fragmentos) + 1, "doc_id": r.chunk.doc_id,
+                "n": len(fragmentos) + 1, "doc_id": r.chunk.doc_id, "fuente": r.chunk.fuente,
                 "titulo": doc or r.chunk.fuente, "contenido": r.chunk.contenido,
                 "score": round(r.score, 3),
             })  # fmt: skip
@@ -180,6 +180,7 @@ def crear_rag_agent(h: HerramientasRag, lectura: dict[str, ToolPolicy] | None = 
             "leer (políticas, procedimientos, guías). Responde siempre con citas."
         ),
         system_prompt=RAG_PROMPT,
+        consultar_antes=True,
         tools={
             "search_documents": ToolPolicy(
                 h.search_documents, BuscarDocumentosArgs, scope="docs:read", mode="auto",

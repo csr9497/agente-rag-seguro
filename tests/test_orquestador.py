@@ -225,6 +225,16 @@ def test_cache_solo_para_rag_y_por_alcance() -> None:
     assert not o.consultar("¿Vacaciones?", luis).desde_cache  # otro scope_hash
 
 
+def test_un_no_lo_encuentro_no_se_cachea() -> None:
+    m = Mundo()
+    rag = GuionLLM([[("search_documents", {"consulta": "nómina"})]] * 2,
+                   final="No encuentro esa información.")  # fmt: skip
+    sup = GuionLLM([[("delegar_rag_agent", {"tarea": "nómina"})]] * 2)
+    o = _orquestador(m, sup, {"rag_agent": rag}, alcance=lambda user: "A")
+    assert o.consultar("¿Nómina?", ANA).respuesta.sin_contexto
+    assert not o.consultar("¿Nómina?", ANA).desde_cache  # se vuelve a buscar
+
+
 def test_lo_que_escribe_no_se_cachea() -> None:
     m = Mundo()
     soporte = GuionLLM([[("create_ticket", {"resumen": "VPN"})]] * 2, final="Ticket.")
@@ -439,3 +449,46 @@ def test_el_verifier_rechaza_citas_numericas_escritas_por_el_modelo() -> None:
     o.consultar("vacaciones y router", ANA)
     assert len(sintesis.llamadas) > 1  # se pidió reescribir
     assert "números de cita" in sintesis.llamadas[1][1]
+
+
+def test_el_catalogo_y_los_datos_internos_son_citables() -> None:
+    from app.agents.orquestador import ResultadoSub, respuesta_con_citas
+    from app.agents.subgraph import TextoPrivado
+
+    res = [ResultadoSub(agente="rag_agent", resumen=TextoPrivado(valor="x"), fuentes=[
+        {"doc_id": "catalogo", "fuente": "catálogo de documentos", "contenido": "Docs"},
+        {"doc_id": "datos:festivos", "fuente": "datos: festivos", "contenido": "Navidad"},
+    ])]  # fmt: skip
+    r = respuesta_con_citas("Puedes ver estos [catalogo]; festivos [datos:festivos].", res)
+    assert r.respuesta == "Puedes ver estos [1]; festivos [2]."
+    assert [c.fuente for c in r.citas] == ["catálogo de documentos", "datos: festivos"]
+
+
+def test_un_listado_puede_nombrar_los_documentos_del_catalogo() -> None:
+    from app.agents.orquestador import ResultadoSub, problemas_de, respuesta_con_citas
+    from app.agents.subgraph import TextoPrivado
+
+    catalogo = (
+        "Documentos disponibles:\n- Política de vacaciones: public/vacaciones.md "
+        "(fragmentos: 1)\n- Teletrabajo: public/teletrabajo.md (fragmentos: 2)"
+    )
+    fuente = {"doc_id": "catalogo", "fuente": "catálogo de documentos", "contenido": catalogo}
+    res = [ResultadoSub(agente="rag_agent", resumen=TextoPrivado(valor="x"), fuentes=[fuente])]
+    texto = "Vacaciones [public/vacaciones.md] y teletrabajo [public/teletrabajo.md]."
+    assert problemas_de(texto, res) == []
+    assert problemas_de("Nóminas [finanzas/nomina.md].", res)  # lo que no lista sigue inventado
+    r = respuesta_con_citas(texto, res)
+    assert r.respuesta == "Vacaciones [1] y teletrabajo."  # el catálogo se cita una vez
+    assert [c.fuente for c in r.citas] == ["catálogo de documentos"] and not r.sin_contexto
+    lista = "- Vacaciones: [public/vacaciones.md]\n- Teletrabajo: [public/teletrabajo.md]"
+    assert respuesta_con_citas(lista, res).respuesta == "- Vacaciones: [1]\n- Teletrabajo"
+
+
+def test_dos_tareas_para_el_mismo_agente_no_se_pisan() -> None:
+    m = Mundo()
+    rag = GuionLLM([[("search_documents", {"consulta": "v"})]], final="23 [public/vacaciones.md].")
+    sup = _delegar(("rag_agent", "Días de vacaciones"), ("rag_agent", "Días de teletrabajo"))
+    o = _orquestador(m, sup, {"rag_agent": rag})
+    o.consultar("¿Vacaciones y teletrabajo?", ANA)
+    tarea = next(x["content"] for x in rag.llamadas[0] if x["role"] == "user")
+    assert "vacaciones" in tarea and "teletrabajo" in tarea

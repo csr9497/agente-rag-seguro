@@ -113,9 +113,11 @@ class GuionLLM:
     def __init__(self, turnos: list[list[tuple[str, dict | str]]], final: str = "Hecho.") -> None:
         self.turnos, self.final = turnos, final
         self.llamadas: list[list[dict[str, Any]]] = []
+        self.obligaciones: list[bool] = []
 
     def decidir(self, mensajes, herramientas, obligar_herramienta=False) -> DecisionSupervisor:  # noqa: ANN001
         self.llamadas.append([dict(m) for m in mensajes])
+        self.obligaciones.append(obligar_herramienta)
         self.herramientas = herramientas
         i = len(self.llamadas) - 1
         if i >= len(self.turnos):

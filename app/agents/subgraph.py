@@ -302,7 +302,9 @@ class _Subgrafo:
             {"role": "system", "content": self._spec.system_prompt},
             {"role": "user", "content": f"<tarea>\n{neutralizar(str(estado.task))}\n</tarea>"},
         ]
-        decision = self._llm.decidir(mensajes, self._schemas)
+        # Un agente que responde con datos busca antes de contestar: nunca de memoria.
+        primera = self._spec.consultar_antes and estado.iteraciones == 0
+        decision = self._llm.decidir(mensajes, self._schemas, obligar_herramienta=primera)
         cambios: dict[str, Any] = {
             "inicio": inicio,
             "mensajes": [*mensajes, decision.mensaje_asistente],
@@ -445,7 +447,7 @@ class _Subgrafo:
             ids.append(str(resultado["id"]))
         if isinstance(resultado, dict):
             fuentes += [
-                {k: f.get(k) for k in ("doc_id", "titulo", "contenido", "score")}
+                {k: f.get(k) for k in ("doc_id", "fuente", "titulo", "contenido", "score")}
                 for f in resultado.get("fragmentos", [])
                 if isinstance(f, dict) and f.get("doc_id")
             ]
