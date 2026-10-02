@@ -1,7 +1,7 @@
 CONDA_ENV ?= agente-rag
 BASE_URL  ?= http://localhost:8000
 
-.PHONY: help install check-models up down status docker-up docker-down ingest studio prompts \
+.PHONY: help install bootstrap check-models up down status docker-up docker-down ingest studio prompts \
 	deploy cloud-status cloud-destroy cloud-local cloud-local-stop env-from-azure check-infra cycle \
 	setup sync lint fmt test test-postgres evals-mock evals evals-langsmith integration matrix tf-validate
 
@@ -42,6 +42,9 @@ prompts: ## Publica app/prompts/ en LangSmith (TAG=dev por defecto; TAG=prod par
 	uv run python -m app.prompts.publicar --etiqueta $(or $(TAG),dev)
 
 # --- Azure ---------------------------------------------------------------------------------
+
+bootstrap: ## Paso 0 (una vez por suscripción): estado remoto de Terraform; GITHUB_REPO=owner/repo añade CI/CD
+	$(if $(GITHUB_REPO),GITHUB_REPO=$(GITHUB_REPO)) ./infra/bootstrap/bootstrap.sh
 
 # ENV=dev|staging|main (defecto dev): entorno de Azure, con sus propios recursos y estado.
 deploy: ## Despliega en Azure y deja todo listo: web, prompts, app y Studio locales contra la nube

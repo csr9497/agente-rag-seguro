@@ -79,7 +79,12 @@ requisitos() {
   echo "✅ az login: $(az account show --query user.name -o tsv)"
   [[ $estado == Enabled ]] || falla "La suscripción está en estado $estado (crédito agotado o deshabilitada)."
   echo "✅ suscripción: $(az account show --query name -o tsv) (activa)"
-  [[ -f infra/envs/dev/backend.hcl ]] || falla "Falta el estado remoto: ejecuta infra/bootstrap/bootstrap.sh una vez."
+  [[ -f infra/envs/dev/backend.hcl ]] || falla "Falta el estado remoto: ejecuta make bootstrap una vez (paso 0)."
+  # backend.hcl del repo apunta al estado de quien lo creó: en otra suscripción hay que crear
+  # el propio (si no, Terraform falla con un error de permisos poco claro).
+  az storage account show -n "$(leer_backend storage_account_name)" \
+    -g "$(leer_backend resource_group_name)" -o none 2> /dev/null \
+    || falla "El estado remoto de infra/envs/dev/backend.hcl no existe en tu suscripción o no tienes acceso: ejecuta make bootstrap una vez (paso 0)."
   export ARM_SUBSCRIPTION_ID
   ARM_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
 }

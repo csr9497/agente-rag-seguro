@@ -1,19 +1,24 @@
 #!/usr/bin/env bash
-# Bootstrap de una sola vez (lo ejecuta una persona con Owner en la suscripción):
-#   1. Storage para el estado remoto de Terraform (solo Entra ID, sin claves).
-#   2. Identidad de despliegue para GitHub Actions: Managed Identity (user-assigned) con
-#      federated credential (OIDC, sin secretos). No necesita permisos de directorio para
-#      registrar aplicaciones (en tenants como Azure for Students no se tienen).
-#   3. Roles del deployer y variables del environment en GitHub.
+# Paso 0, una sola vez por suscripción (lo ejecuta una persona con Owner):
+#   1. Storage para el estado remoto de Terraform (solo Entra ID, sin claves) y
+#      infra/envs/dev/backend.hcl apuntando a él (make deploy lo usa).
+#   2. Solo con GITHUB_REPO (CI/CD con GitHub Actions): identidad de despliegue (Managed
+#      Identity con federated credential OIDC, sin secretos; no necesita registrar
+#      aplicaciones), sus roles y las variables del environment en GitHub.
+#      Sin GITHUB_REPO se despliega desde tu equipo con make deploy.
 #
 # Idempotente: si ya existe una cuenta de estado en TFSTATE_RG, la reutiliza.
 #
-# Uso:
-#   SUBSCRIPTION_ID=... GITHUB_REPO=owner/repo ./infra/bootstrap/bootstrap.sh
+# Uso (make bootstrap hace lo mismo):
+#   ./infra/bootstrap/bootstrap.sh                          # solo despliegue desde tu equipo
+#   GITHUB_REPO=owner/repo ./infra/bootstrap/bootstrap.sh   # además, CI/CD con GitHub Actions
+#   SUBSCRIPTION_ID=...                                     # por defecto, la de `az account show`
 set -euo pipefail
+cd "$(dirname "$0")/../.."
 
-: "${SUBSCRIPTION_ID:?define SUBSCRIPTION_ID}"
-: "${GITHUB_REPO:?define GITHUB_REPO (owner/repo)}"
+SUBSCRIPTION_ID="${SUBSCRIPTION_ID:-$(az account show --query id -o tsv 2> /dev/null || true)}"
+: "${SUBSCRIPTION_ID:?sin sesión en Azure: ejecuta az login (o define SUBSCRIPTION_ID)}"
+GITHUB_REPO="${GITHUB_REPO:-}"
 LOCATION="${LOCATION:-eastus2}"
 ENVIRONMENT="${ENVIRONMENT:-dev}"
 TFSTATE_RG="${TFSTATE_RG:-rg-ragseg-tfstate}"
@@ -44,6 +49,27 @@ for i in $(seq 1 12); do
     --auth-mode login -o none 2>/dev/null && break
   echo "   esperando a que se propague el rol de datos ($i/12)..."; sleep 15
 done
+
+echo "==> infra/envs/dev/backend.hcl"
+cat > infra/envs/dev/backend.hcl << EOF
+# Estado remoto de Terraform (creado por infra/bootstrap/bootstrap.sh). No contiene secretos:
+# el acceso es con Entra ID (az login / OIDC) y el rol Storage Blob Data Contributor.
+resource_group_name  = "${TFSTATE_RG}"
+storage_account_name = "${TFSTATE_ACCOUNT}"
+container_name       = "${TFSTATE_CONTAINER}"
+key                  = "dev/platform.tfstate"
+use_azuread_auth     = true
+EOF
+
+if [[ -z $GITHUB_REPO ]]; then
+  cat << EOF
+
+Paso 0 completado: estado remoto en ${TFSTATE_RG}/${TFSTATE_ACCOUNT} e
+infra/envs/dev/backend.hcl actualizado. Siguiente paso: make deploy
+(Para CI/CD con GitHub Actions, repite con GITHUB_REPO=owner/repo.)
+EOF
+  exit 0
+fi
 
 echo "==> Identidad de despliegue (OIDC): $IDENTITY_NAME"
 az identity create -n "$IDENTITY_NAME" -g "$TFSTATE_RG" -l "$LOCATION" -o none
