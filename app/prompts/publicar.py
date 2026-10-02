@@ -72,12 +72,13 @@ def publicar(cliente: Any, etiquetas: list[str]) -> list[PromptPublicado]:
             url = cliente._get_prompt_url(nombre)
             estado: Literal["nuevo", "actualizado", "sin cambios"] = "sin cambios"
         else:
+            # Sin commit_tags: si la etiqueta ya existe en otro commit, LangSmith responde 409.
             url = cliente.push_prompt(
                 nombre,
                 object=plantilla(texto),
-                description=f"Prompt de sistema del agente RAG (app/prompts/{fichero})",
-                commit_tags=etiquetas,
+                description=f"Prompt de sistema del asistente (app/prompts/{fichero})",
             )
+            _etiquetar(cliente, nombre, etiquetas)
             estado = "nuevo" if previo is None else "actualizado"
         publicados.append(PromptPublicado(nombre=nombre, estado=estado, url=url))
     return publicados

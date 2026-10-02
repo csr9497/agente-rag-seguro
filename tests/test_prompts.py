@@ -4,7 +4,7 @@
 from types import SimpleNamespace
 
 import pytest
-from langsmith.utils import LangSmithNotFoundError
+from langsmith.utils import LangSmithConflictError, LangSmithNotFoundError
 
 from app.config import Settings
 from app.models.schemas import Usuario
@@ -29,7 +29,9 @@ class FakeLangSmith:
     def _get_prompt_url(self, nombre: str) -> str:
         return f"https://smith.langchain.com/prompts/{nombre}"
 
-    def push_prompt(self, nombre, *, object, description, commit_tags):
+    def push_prompt(self, nombre, *, object, description, commit_tags=()):
+        if any((nombre, e) in self.etiquetas for e in commit_tags):  # como LangSmith: 409
+            raise LangSmithConflictError(f"Tag {commit_tags} already exists")
         self.commits.setdefault(nombre, []).append(object.messages[0].prompt.template)
         for e in commit_tags:
             self.etiquetas[(nombre, e)] = len(self.commits[nombre]) - 1
@@ -77,6 +79,19 @@ def test_publicar_sube_un_commit_si_el_texto_cambio() -> None:
     estados = {p.nombre: p.estado for p in publicar(hub, ["dev"])}
     assert estados["agente-rag-guardian"] == "actualizado"
     assert hub.commits["agente-rag-guardian"][-1] == local("guardian")
+
+
+def test_publicar_un_cambio_mueve_la_etiqueta_existente() -> None:
+    """La etiqueta ya apunta a un commit anterior: el commit nuevo se sube y la etiqueta se
+    mueve a él (antes LangSmith respondía 409 y no se publicaba nada)."""
+    hub = FakeLangSmith()
+    publicar(hub, ["dev"])
+    hub.commits["agente-rag-hr-agent"].append("versión antigua")
+    hub.etiquetas[("agente-rag-hr-agent", "dev")] = 1
+    estados = {p.nombre: p.estado for p in publicar(hub, ["dev"])}
+    assert estados["agente-rag-hr-agent"] == "actualizado"
+    assert hub.commits["agente-rag-hr-agent"][-1] == local("hr_agent")
+    assert hub.etiquetas[("agente-rag-hr-agent", "dev")] == 2
 
 
 def test_publicar_rechaza_etiquetas_no_validas() -> None:
