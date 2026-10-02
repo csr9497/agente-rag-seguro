@@ -63,8 +63,6 @@ class Settings(BaseSettings):
 
     retrieval_top_k: int = 4
     min_score: float | None = None
-    max_iteraciones: int = 3
-    max_fragmentos_contexto: int = 12
     max_turnos_historial: int = 3
     # Caché semántica con permisos (clave = roles + huella de documentos visibles + versión).
     cache_semantica: bool = True

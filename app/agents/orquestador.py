@@ -97,6 +97,8 @@ _CITA_NUMERICA = re.compile(r"\[\d+\]")
 _CITA_CON_PREVIO = re.compile(r"(:[ \t]*)?" + _CITA.pattern)
 # Documentos que lista un catálogo recuperado («- Título: public/x.md (fragmentos: 2)»).
 _DOC_DEL_CATALOGO = re.compile(r": ([a-z0-9][\w\-./]*/[\w\-./]+) \(fragmentos")
+# Preguntas por los documentos disponibles (van a rag_agent, no a la ayuda genérica).
+_PIDE_DOCUMENTOS = re.compile(r"\bdocumentos?\b", re.IGNORECASE)
 _UUID = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b")
 
 
@@ -518,8 +520,11 @@ class Orquestador:
                 if isinstance(args.get("tarea"), str) and args["tarea"].strip():
                     # Varias tareas al mismo agente van juntas (un Send por agente): ninguna
                     # se pierde.
-                    previa = f"{tareas[nombre].valor}\n" if nombre in tareas else ""
-                    tareas[nombre] = TextoPrivado(valor=(previa + args["tarea"].strip())[:2000])
+                    tareas[nombre] = TextoPrivado(
+                        valor=_sumar_tarea(
+                            tareas[nombre].valor if nombre in tareas else None, args["tarea"]
+                        )
+                    )
             elif llamada.nombre == "pedir_aclaracion" and not tareas:
                 try:
                     aclaracion = Aclaracion.model_validate(args)
@@ -530,7 +535,17 @@ class Orquestador:
                     aclaracion=aclaracion.model_copy(update={"opciones": aclaracion.opciones[:4]}),
                 )}  # fmt: skip
             elif llamada.nombre == "conversacion" and not tareas:
-                return {"respuesta": self._conversacion(estado, user, str(args.get("tipo", "")))}
+                tipo = str(args.get("tipo", ""))
+                if (
+                    tipo == "ayuda"
+                    and "rag_agent" in self._registro
+                    and _PIDE_DOCUMENTOS.search(str(estado.pregunta))
+                ):
+                    # «¿Qué documentos puedo consultar?» se lista desde el registro (con cita),
+                    # aunque el modelo lo tome por ayuda.
+                    tareas["rag_agent"] = TextoPrivado(valor=str(estado.pregunta)[:2000])
+                    continue
+                return {"respuesta": self._conversacion(estado, user, tipo)}
         if not tareas:  # nada que delegar (o solo agentes inexistentes): orientación
             return {"respuesta": self._orientar(estado, user, "sin_resultados")}
         # Estado limpio para esta orquestación (aunque el hilo se reutilizara).
@@ -711,7 +726,11 @@ class Orquestador:
                  "required": ["tarea"]}  # fmt: skip
         return [
             *(tool(f"delegar_{n}", s.description, tarea) for n, s in self._registro.items()),
-            tool("conversacion", "Solo cortesía, ayuda o temas ajenos a la empresa", {
+            tool("conversacion", (
+                "Solo cortesía (saludo, gracias, despedida), «¿qué puedes hacer?» o temas ajenos "
+                "a la empresa. NUNCA para preguntar qué documentos puede consultar o leer: eso "
+                "es delegar_rag_agent."
+            ), {
                 "type": "object", "required": ["tipo"],
                 "properties": {"tipo": {"type": "string", "enum": sorted(PLANTILLAS)}},
             }),
@@ -824,6 +843,16 @@ def _auditar_error_modelo(
                   detalle=f"modelo:{exc.tipo} ({exc.proveedor}/{exc.modelo})")],
         traza_id=traza_id, conversacion_id=conversacion_id,
     )  # fmt: skip
+
+
+def _sumar_tarea(previa: str | None, nueva: str) -> str:
+    """Varias tareas al mismo agente van juntas (un Send por agente), numeradas para que
+    responda a todas."""
+    if previa is None:
+        return nueva.strip()[:2000]
+    items = re.findall(r"^\d+\. (.*)$", previa, re.MULTILINE) or [previa]
+    lista = "\n".join(f"{n}. {t}" for n, t in enumerate([*items, nueva.strip()], start=1))
+    return f"Responde a todas estas preguntas:\n{lista}"[:2000]
 
 
 def _citables(resultado: ResultadoSub) -> str:

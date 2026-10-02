@@ -431,6 +431,15 @@ escenarios:
       alguna_fuente_de: [public/politica-vacaciones.md]
       contiene_alguno: ["5", "cinco"]
 
+  - id: ACC-01
+    descripcion: Pedir acceso a un documento que el rol no ve → solicitud pendiente de confirmar
+    capacidades: [orquestacion_agente, permisos_datos]
+    pregunta: Quiero solicitar acceso al documento Bandas salariales 2026 porque lo necesito para preparar el presupuesto de mi equipo
+    esperado:
+      aprobacion_pendiente: request_document_access
+      no_contiene: ["58.000", "B3"]
+      no_consultados: [rrhh/]
+
   # --- Herramientas de documentos ----------------------------------------------------
   - id: TL-01
     descripcion: Qué documentos puedo consultar (catálogo filtrado)

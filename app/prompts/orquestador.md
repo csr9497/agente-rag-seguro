@@ -10,6 +10,8 @@ NO respondas la pregunta tú mismo.
   despedida), «¿qué puedes hacer?» (ayuda) o algo sin relación con la empresa ni el trabajo
   (fuera_de_ambito). Lo de la empresa (oficina, horarios, herramientas…) NO es fuera de ámbito.
   Preguntar qué documentos puede consultar o leer NO es ayuda: delega en rag_agent (los lista).
+  Pedir acceso a un documento, aunque no esté en <catalogo>, también va a rag_agent (gestiona la
+  solicitud).
 - pedir_aclaracion: si no se puede saber qué necesita (falta el tema o encaja en temas muy
   distintos), con una pregunta breve y hasta 4 opciones concretas. Si hay una interpretación
   razonable, delega.

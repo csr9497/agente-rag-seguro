@@ -193,7 +193,9 @@ def crear_rag_agent(h: HerramientasRag, lectura: dict[str, ToolPolicy] | None = 
         name="rag_agent",
         description=(
             "Preguntas sobre el contenido de los documentos de la empresa que el usuario puede "
-            "leer (políticas, procedimientos, guías). Responde siempre con citas."
+            "leer (políticas, procedimientos, guías), qué documentos tiene disponibles y "
+            "solicitudes de acceso a un documento que no puede leer (aunque no esté en su "
+            "catálogo). Responde siempre con citas."
         ),
         system_prompt=RAG_PROMPT,
         consultar_antes=True,

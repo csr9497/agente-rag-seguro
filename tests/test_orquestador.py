@@ -494,6 +494,27 @@ def test_dos_tareas_para_el_mismo_agente_no_se_pisan() -> None:
     assert "vacaciones" in tarea and "teletrabajo" in tarea
 
 
+def test_varias_tareas_al_mismo_agente_llegan_numeradas() -> None:
+    from app.agents.orquestador import _sumar_tarea
+
+    tarea = _sumar_tarea(_sumar_tarea(_sumar_tarea(None, "A"), "B"), "C")
+    assert tarea == "Responde a todas estas preguntas:\n1. A\n2. B\n3. C"
+
+
+def test_preguntar_por_los_documentos_va_a_rag_aunque_el_modelo_elija_ayuda() -> None:
+    m = Mundo()
+    rag = GuionLLM(
+        [[("search_documents", {"consulta": "v"})]], final="Puedes ver [public/vacaciones.md]."
+    )
+    ayuda = [[("conversacion", {"tipo": "ayuda"})]]
+    r = _orquestador(m, GuionLLM(ayuda), {"rag_agent": rag}).consultar(
+        "¿Qué documentos puedo consultar?", ANA
+    )
+    assert r.agentes == ["rag_agent"] and not r.respuesta.sin_contexto
+    r = _orquestador(m, GuionLLM(ayuda), {"rag_agent": rag}).consultar("¿Qué puedes hacer?", ANA)
+    assert r.agentes == [] and r.respuesta.conversacional
+
+
 def test_documentos_consultados_en_orden_y_tambien_desde_la_cache() -> None:
     m = Mundo()
     rag = BuscarYResponder("Son 23 días [public/vacaciones.md].")

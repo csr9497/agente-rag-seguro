@@ -49,6 +49,9 @@ class Expectativa(BaseModel):
     aclaracion: bool | None = Field(
         default=None, description="True: debe pedir aclaración en vez de buscar"
     )
+    aprobacion_pendiente: str | None = Field(
+        default=None, description="Tool que debe quedar pendiente de confirmar o aprobar"
+    )
 
 
 class Escenario(BaseModel):
@@ -176,6 +179,9 @@ def _expectativas(r: MensajeGuardado, e: Expectativa) -> list[str]:
         fallos.append(f"sin_contexto={r.sin_contexto}, esperado {e.sin_contexto}")
     if e.aclaracion is not None and (r.aclaracion is not None) != e.aclaracion:
         fallos.append(f"aclaración={r.aclaracion is not None}, esperado {e.aclaracion}")
+    pendientes = [a.tool for a in r.aprobaciones]
+    if e.aprobacion_pendiente and e.aprobacion_pendiente not in pendientes:
+        fallos.append(f"sin aprobación pendiente de {e.aprobacion_pendiente} (hay: {pendientes})")
     if len(r.citas) < e.min_citas:
         fallos.append(f"{len(r.citas)} citas < mínimo {e.min_citas}")
     if e.alguna_fuente_de and not fuentes & set(e.alguna_fuente_de):
