@@ -15,8 +15,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.config import Settings
-from app.graph.prompts import SUPERVISOR_PROMPT
-from app.rag.prompts import ORIENTACION_PROMPT, SYSTEM_PROMPT
+from app.prompts import PROMPTS, local
 from app.security.content_safety import GuardrailPromptShields
 from app.security.guardrails import Guardrail, GuardrailEntrada, GuardrailPermisivo, GuardrailSalida
 from app.security.politicas import GuardrailPoliticas, GuardrailSalidaSensibles
@@ -78,7 +77,8 @@ def catalogo_entrada(settings: Settings, shields: Any | None) -> dict[str, Guard
 
 
 def catalogo_salida(settings: Settings) -> dict[str, Guardrail]:
-    protegidos = [SYSTEM_PROMPT, SUPERVISOR_PROMPT, ORIENTACION_PROMPT]
+    # Todos los prompts de sistema registrados (también los de cada agente): nunca se filtran.
+    protegidos = [local(nombre) for nombre in PROMPTS]
     catalogo: dict[str, Guardrail] = {
         "v1-fuga-prompt": GuardrailSalida(protegidos),
         "v2-fuga-sensibles": GuardrailSalidaSensibles(protegidos),

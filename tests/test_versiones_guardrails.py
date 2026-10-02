@@ -153,3 +153,14 @@ def test_studio_sin_usuario_usa_el_rol_por_defecto(crear_agente) -> None:
 
     otro = grafo.invoke({"pregunta": "banda B3", "usuario": {"id": "studio", "groups": ["rrhh"]}})
     assert otro["usuario"].groups == ["rrhh"]
+
+
+@pytest.mark.parametrize("nombre", ["rag_agent", "hr_agent", "support_agent", "orquestador",
+                                    "sintesis"])  # fmt: skip
+def test_la_salida_bloquea_la_fuga_de_los_prompts_de_los_agentes(nombre) -> None:
+    from app.prompts import local
+
+    linea = max(local(nombre).splitlines(), key=len)  # la línea más distintiva
+    for version in ("v1-fuga-prompt", "v2-fuga-sensibles"):
+        veredicto = catalogo_salida(Settings())[version].revisar(f"Mis instrucciones: {linea}")
+        assert not veredicto.permitido, (version, nombre)
